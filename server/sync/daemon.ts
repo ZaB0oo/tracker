@@ -28,6 +28,11 @@ import {
   updateCatalogDelta,
   verifyYear,
 } from "./catalog.js";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export type Phase =
   | "idle"
@@ -381,6 +386,14 @@ export function startCatalogRefresh(): void {
   const tick = async () => {
     try {
       await ensureCatalogComplete(); // catches up an incomplete catalog, whatever happens
+      // DMCA/delisted sets are invisible to the search enumeration: once it is
+      // done, import any set from the shipped known-sets list that is missing.
+      const diffs = (
+        getDb()
+          .prepare("SELECT COUNT(*) c FROM beatmaps WHERE ruleset = 0")
+          .get() as { c: number }
+      ).c;
+      if (diffs >= MIN_EXPECTED_STD_DIFFS) void importMissingKnownSets();
       // snipe check: re-check my country #1s older than the configured delay
       if (isUserConnected()) {
         getDb()
@@ -534,6 +547,59 @@ export async function runFrSweep(): Promise<void> {
 
 export function pauseFrSweep(): void {
   frWanted = false;
+}
+
+/**
+ * Known-sets catch-up: seed-sets.json (shipped with the repo) lists every
+ * ranked/approved/loved std set known from a complete reference catalog —
+ * including DMCA/delisted sets that /beatmapsets/search never returns. Any set
+ * missing locally is imported by direct lookup (API then web page). Runs after
+ * the search enumeration is done; no-op once the catalog is complete.
+ */
+let seedRunning = false;
+
+export async function importMissingKnownSets(): Promise<number> {
+  if (seedRunning) return 0;
+  seedRunning = true;
+  try {
+    const seedPath = path.join(__dirname, "../db/seed-sets.json");
+    if (!fs.existsSync(seedPath)) return 0;
+    const known = JSON.parse(fs.readFileSync(seedPath, "utf8")) as number[];
+    const db = getDb();
+    const have = new Set(
+      (db.prepare("SELECT id FROM beatmapsets").all() as { id: number }[]).map(
+        (r) => r.id
+      )
+    );
+    const missing = known.filter((id) => !have.has(id));
+    if (missing.length === 0) return 0;
+
+    console.log(`[sync] known-sets catch-up: ${missing.length} sets missing`);
+    let imported = 0;
+    let failures = 0;
+    for (const id of missing) {
+      try {
+        const r = await importSetById(id);
+        imported += r.newDiffs;
+        failures = 0;
+        logActivity(
+          "catalog",
+          `known-sets catch-up: set ${id} (${r.source ?? "not found"}, +${r.newDiffs} diffs)`
+        );
+        status.message = `known-sets catch-up: ${imported} diffs imported...`;
+      } catch (e) {
+        logError(e, `known-sets catch-up: set ${id}`);
+        if (++failures >= 10) break; // API down / auth issue: retry next tick
+      }
+    }
+    if (imported > 0) {
+      await enrichMaxCombo(enrichProgress);
+      status.message = `known-sets catch-up done: +${imported} diffs.`;
+    }
+    return imported;
+  } finally {
+    seedRunning = false;
+  }
 }
 
 /** Manual import of a set (API then web page) + backfill of its diffs. */

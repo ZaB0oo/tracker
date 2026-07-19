@@ -10,8 +10,9 @@
     "dev": "concurrently -k -n server,web -c blue,magenta \"npm run dev:server\" \"npm run dev:web\"",
     "dev:server": "tsx watch server/index.ts",
     "dev:web": "npm --workspace web run dev",
-    "build": "tsc -p tsconfig.json && node -e \"require('fs').copyFileSync('server/db/schema.sql','dist/server/db/schema.sql')\" && npm --workspace web run build",
+    "build": "tsc -p tsconfig.json && node -e \"const f=require('fs');f.copyFileSync('server/db/schema.sql','dist/server/db/schema.sql');f.copyFileSync('server/db/seed-sets.json','dist/server/db/seed-sets.json')\" && npm --workspace web run build",
     "start": "node dist/server/index.js",
+    "export-seed": "node scripts/export-seed-sets.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
