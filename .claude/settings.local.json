@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(timeout 25 npm run dev)",
+      "Bash(npm ls *)",
+      "Bash(rm -rf node_modules web/node_modules)",
+      "Bash(npm install *)"
+    ]
+  }
+}

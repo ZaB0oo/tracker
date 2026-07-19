@@ -1,0 +1,16 @@
+node_modules/
+dist/
+web/dist/
+data/
+downloads/
+.env
+*.local
+CLAUDE.md
+
+# JetBrains project files
+.idea/
+
+# Local database dumps / backups
+*.db
+*.db-wal
+*.db-shm

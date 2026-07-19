@@ -1,0 +1,355 @@
+import type {
+  Filters,
+  MapDetail,
+  SkillCurveBucket,
+  Stats,
+  SyncStatus,
+  TableResponse,
+} from "./types";
+
+export interface OverlayStats {
+  totalMaps: number;
+  clears: number;
+  s: number;
+  fc: number;
+  fr: number;
+  rankedClassic: number;
+  rankedWither: number;
+}
+
+export async function fetchOverlayStats(): Promise<OverlayStats> {
+  const res = await fetch("/api/overlay");
+  if (!res.ok) throw new Error(`overlay: HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function fetchMapDetail(id: number): Promise<MapDetail> {
+  const res = await fetch(`/api/map/${id}`);
+  if (!res.ok) throw new Error(`map: HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function fetchSkillCurve(): Promise<{ buckets: SkillCurveBucket[] }> {
+  const res = await fetch("/api/skill-curve");
+  if (!res.ok) throw new Error(`skill-curve: HTTP ${res.status}`);
+  return res.json();
+}
+
+export function buildTableQuery(
+  filters: Filters,
+  sort: { id: string; desc: boolean }[],
+  offset: number,
+  limit: number
+): string {
+  const p = new URLSearchParams();
+  p.set("mode", filters.mode);
+  p.set("offset", String(offset));
+  p.set("limit", String(limit));
+  if (sort.length)
+    p.set("sort", sort.map((s) => `${s.id}:${s.desc ? "desc" : "asc"}`).join(","));
+  if (filters.played) p.set("played", filters.played);
+  if (filters.q) p.set("q", filters.q);
+  if (filters.grades.length) p.set("grades", filters.grades.join(","));
+  if (filters.fcState.length) p.set("fcState", filters.fcState.join(","));
+  if (filters.statuses.length) p.set("statuses", filters.statuses.join(","));
+  if (filters.mods) p.set("mods", filters.mods);
+  if (filters.frFirst) p.set("frFirst", "1");
+  if (filters.platform) p.set("platform", filters.platform);
+  for (const k of [
+    "srMin", "srMax", "arMin", "arMax", "odMin", "odMax",
+    "csMin", "csMax", "lenMin", "lenMax", "yearMin", "yearMax",
+  ] as const) {
+    if (filters[k] !== "") p.set(k, filters[k]);
+  }
+  return p.toString();
+}
+
+export async function fetchTable(
+  filters: Filters,
+  sort: { id: string; desc: boolean }[],
+  offset: number,
+  limit: number
+): Promise<TableResponse> {
+  const res = await fetch(`/api/table?${buildTableQuery(filters, sort, offset, limit)}`);
+  if (!res.ok) throw new Error(`table: HTTP ${res.status}`);
+  return res.json();
+}
+
+export interface ClearRow {
+  id: number;
+  ended_at: string;
+  rank: string;
+  accuracy: number;
+  total_score: number;
+  classic_total_score: number | null;
+  mods: string;
+  fc_state: number;
+  pp: number | null;
+  beatmap_id: number;
+  version: string;
+  star_rating: number | null;
+  artist: string;
+  title: string;
+}
+
+export async function fetchClears(
+  offset: number,
+  limit: number
+): Promise<{ rows: ClearRow[]; total: number }> {
+  const res = await fetch(`/api/clears?offset=${offset}&limit=${limit}`);
+  if (!res.ok) throw new Error(`clears: HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function fetchStats(): Promise<Stats> {
+  const res = await fetch("/api/stats");
+  if (!res.ok) throw new Error(`stats: HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function fetchSyncStatus(): Promise<SyncStatus> {
+  const res = await fetch("/api/sync/status");
+  if (!res.ok) throw new Error(`sync: HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function postSync(
+  action:
+    | "start"
+    | "pause"
+    | "resume"
+    | "poll-now"
+    | "delta-now"
+    | "fr-sweep"
+    | "fr-pause"
+    | "recompute"
+    | "rebackfill"
+    | "catalog-full?force=1"
+): Promise<Record<string, unknown>> {
+  const res = await fetch(`/api/sync/${action}`, { method: "POST" });
+  return res.json().catch(() => ({}));
+}
+
+export interface AuthStatus {
+  connected: boolean;
+  profile: {
+    username: string;
+    avatar_url: string;
+    country_code?: string;
+  } | null;
+}
+
+export async function fetchAuthStatus(): Promise<AuthStatus> {
+  const res = await fetch("/api/auth/status");
+  if (!res.ok) throw new Error(`auth: HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function postLogout(): Promise<void> {
+  await fetch("/api/auth/logout", { method: "POST" });
+}
+
+export async function postClearErrors(): Promise<void> {
+  await fetch("/api/sync/clear-errors", { method: "POST" });
+}
+
+export interface FrEvent {
+  id: number;
+  event: "gained" | "lost";
+  at: string;
+  score_at: string | null;
+  by_user_id: number | null;
+  by_username: string | null;
+  beatmap_id: number;
+  version: string;
+  star_rating: number | null;
+  artist: string;
+  title: string;
+}
+
+export async function fetchFrHistory(
+  offset: number,
+  limit: number,
+  event?: "gained" | "lost"
+): Promise<{ rows: FrEvent[]; total: number }> {
+  const p = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+  if (event) p.set("event", event);
+  const res = await fetch(`/api/fr-history?${p.toString()}`);
+  if (!res.ok) throw new Error(`fr-history: HTTP ${res.status}`);
+  return res.json();
+}
+
+// ---------- Custom metrics ----------
+
+export interface Range {
+  min: number | null;
+  max: number | null;
+}
+export interface MetricScoreConds {
+  fc: "none" | "any" | "pfc";
+  minGrade: string | null;
+  minScore: number | null;
+  minClassic: number | null;
+  allowedMods: string[] | null;
+  requiredMods: string[] | null;
+  counts: {
+    n100: Range;
+    n50: Range;
+    nMiss: Range;
+    nSliderEnd: Range;
+    imperfections: Range;
+  };
+}
+export interface MetricMapConds {
+  srMin: number | null; srMax: number | null;
+  yearMin: number | null; yearMax: number | null;
+  lenMin: number | null; lenMax: number | null;
+  arMin: number | null; arMax: number | null;
+  odMin: number | null; odMax: number | null;
+  csMin: number | null; csMax: number | null;
+  hpMin: number | null; hpMax: number | null;
+  comboMin: number | null; comboMax: number | null;
+  bpmMin: number | null; bpmMax: number | null;
+  statuses: number[];
+  country1: boolean;
+}
+export interface MetricParams {
+  kind: "count" | "ranked_score";
+  score: MetricScoreConds;
+  map: MetricMapConds;
+  progressMode: "milestone" | "total";
+  step: number;
+  showEvolution: boolean;
+}
+export interface Metric {
+  id: number;
+  name: string;
+  params: MetricParams;
+  count: number;
+  total: number;
+  step: number;
+  milestones: { threshold: number; at: string }[];
+  evolution: { period: string; value: number }[] | null;
+  bySr: { sr: number; value: number; total: number }[];
+}
+
+export async function fetchMetrics(
+  granularity: "month" | "day"
+): Promise<{ metrics: Metric[] }> {
+  const res = await fetch(`/api/metrics?granularity=${granularity}`);
+  if (!res.ok) throw new Error(`metrics: HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function previewMetric(
+  params: MetricParams
+): Promise<{ count: number; bySr: { sr: number; value: number; total: number }[] }> {
+  const res = await fetch("/api/metrics/preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw new Error(`preview: HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function postMetric(payload: {
+  name: string;
+  params: MetricParams;
+}): Promise<void> {
+  const res = await fetch("/api/metrics", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const j = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(j?.error ?? `metrics: HTTP ${res.status}`);
+  }
+}
+
+export async function putMetric(payload: {
+  id: number;
+  name: string;
+  params: MetricParams;
+}): Promise<void> {
+  const res = await fetch(`/api/metrics/${payload.id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: payload.name, params: payload.params }),
+  });
+  if (!res.ok) {
+    const j = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(j?.error ?? `metrics: HTTP ${res.status}`);
+  }
+}
+
+export async function deleteMetric(id: number): Promise<void> {
+  const res = await fetch(`/api/metrics/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`metrics: HTTP ${res.status}`);
+}
+
+export const DEFAULT_METRIC_PARAMS: MetricParams = {
+  kind: "count",
+  score: {
+    fc: "none",
+    minGrade: null,
+    minScore: null,
+    minClassic: null,
+    allowedMods: null,
+    requiredMods: null,
+    counts: {
+      n100: { min: null, max: null },
+      n50: { min: null, max: null },
+      nMiss: { min: null, max: null },
+      nSliderEnd: { min: null, max: null },
+      imperfections: { min: null, max: null },
+    },
+  },
+  map: {
+    srMin: null, srMax: null, yearMin: null, yearMax: null,
+    lenMin: null, lenMax: null, arMin: null, arMax: null,
+    odMin: null, odMax: null, csMin: null, csMax: null,
+    hpMin: null, hpMax: null, comboMin: null, comboMax: null,
+    bpmMin: null, bpmMax: null, statuses: [], country1: false,
+  },
+  progressMode: "milestone",
+  step: 1000,
+  showEvolution: true,
+};
+
+export interface DisplayPrefs {
+  wither: boolean;
+}
+
+export interface Settings {
+  apiRpm: number;
+  pollIntervalSeconds: number;
+  frRecheckHours: number;
+  display: DisplayPrefs;
+  oauth: { clientId: string; userId: number; secretSet: boolean };
+  info: { port: number };
+}
+
+export async function fetchSettings(): Promise<Settings> {
+  const res = await fetch("/api/settings");
+  if (!res.ok) throw new Error(`settings: HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function postSettings(payload: {
+  apiRpm?: number;
+  pollIntervalSeconds?: number;
+  frRecheckHours?: number;
+  display?: Partial<DisplayPrefs>;
+  clientId?: string | number;
+  clientSecret?: string | number;
+  userId?: string | number;
+}): Promise<void> {
+  const res = await fetch("/api/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`settings: HTTP ${res.status}`);
+}
