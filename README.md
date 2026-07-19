@@ -2,6 +2,19 @@
 
 Local, single-user web app that tracks your best score on **every ranked/approved/loved difficulty** of osu! standard — with advanced sorting/filters, a completion dashboard, custom metrics with milestones and evolution charts, country #1 tracking, a stream overlay for OBS, and near real-time pickup of new scores.
 
+![Dashboard](docs/dashboard.png)
+
+<details>
+<summary>More screenshots — maps table, custom metrics, history</summary>
+
+![Maps table](docs/maps.png)
+
+![Custom metrics](docs/metrics.png)
+
+![History](docs/history.png)
+
+</details>
+
 ## Features
 
 - **Maps table**: your best on all ~150k std ranked/approved/loved diffs, SQL-side sort/filters (grade, FC state, star rating, AR/OD/CS/HP, length, rank year, mods, free text…), presets, virtualized rendering.
@@ -133,3 +146,7 @@ npm test    # rate limiter + FC/best logic
 - Country leaderboards require **osu!supporter**; without a connected account, country #1 features stay dormant.
 - `node:sqlite` prints an `ExperimentalWarning` at startup: harmless.
 - One ruleset (osu! standard) for now; the schema is ready for the others (`ruleset` everywhere).
+
+## Credits
+
+This project was **entirely coded by AI** — [Claude](https://claude.com) (Anthropic), directed and tested by [ZaB0oo](https://github.com/ZaB0oo): every feature, fix and design decision was specified, reviewed and validated against a real completionist database (~90k played maps, ~150k tracked).
