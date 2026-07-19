@@ -6,6 +6,7 @@ downloads/
 .env
 *.local
 CLAUDE.md
+.claude
 
 # JetBrains project files
 .idea/
