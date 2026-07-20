@@ -190,6 +190,7 @@ export interface MetricScoreConds {
   minGrade: string | null;
   minScore: number | null;
   minClassic: number | null;
+  acc?: Range;
   allowedMods: string[] | null;
   requiredMods: string[] | null;
   counts: {
@@ -212,6 +213,7 @@ export interface MetricMapConds {
   bpmMin: number | null; bpmMax: number | null;
   statuses: number[];
   country1: boolean;
+  ids?: number[] | null;
 }
 export interface MetricParams {
   kind: "count" | "ranked_score";
@@ -296,6 +298,7 @@ export const DEFAULT_METRIC_PARAMS: MetricParams = {
     minGrade: null,
     minScore: null,
     minClassic: null,
+    acc: { min: null, max: null },
     allowedMods: null,
     requiredMods: null,
     counts: {
@@ -311,7 +314,7 @@ export const DEFAULT_METRIC_PARAMS: MetricParams = {
     lenMin: null, lenMax: null, arMin: null, arMax: null,
     odMin: null, odMax: null, csMin: null, csMax: null,
     hpMin: null, hpMax: null, comboMin: null, comboMax: null,
-    bpmMin: null, bpmMax: null, statuses: [], country1: false,
+    bpmMin: null, bpmMax: null, statuses: [], country1: false, ids: null,
   },
   progressMode: "milestone",
   step: 1000,

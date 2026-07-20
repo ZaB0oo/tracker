@@ -14,6 +14,7 @@ export interface MetricScoreConds {
   minGrade: string | null; // "A" | "S"
   minScore: number | null;
   minClassic: number | null;
+  acc?: Range; // accuracy in percent (0-100)
   allowedMods: string[] | null; // no mod outside this set (null = no limit)
   requiredMods: string[] | null; // must include all of these
   counts: {
@@ -37,6 +38,7 @@ export interface MetricMapConds {
   bpmMin: number | null; bpmMax: number | null;
   statuses: number[]; // subset of [1,2,4]; empty = all
   country1: boolean; // only maps where I hold the country #1
+  ids?: number[] | null; // explicit beatmap ids (custom map pool); null = all
 }
 
 export interface MetricParams {
@@ -82,6 +84,7 @@ export function scoreWhere(c: MetricScoreConds): string {
   if (num(c.minScore) != null) w.push(`s.total_score >= ${num(c.minScore)}`);
   if (num(c.minClassic) != null)
     w.push(`COALESCE(s.classic_total_score, s.total_score) >= ${num(c.minClassic)}`);
+  range("(s.accuracy * 100)", c.acc, w);
   if (Array.isArray(c.allowedMods)) {
     const list = c.allowedMods.filter((m) => MOD_RE.test(m));
     const inList = list.length ? list.map((m) => `'${m}'`).join(",") : "''";
@@ -131,6 +134,12 @@ export function mapWhere(
   r("b.bpm", c.bpmMin, c.bpmMax);
   if (c.country1 && !opts.ignoreCountry1)
     w.push("COALESCE(u.fr_first, 0) = 1");
+  if (Array.isArray(c.ids) && c.ids.length) {
+    const ids = c.ids
+      .filter((v) => Number.isInteger(v) && v > 0)
+      .slice(0, 20_000);
+    if (ids.length) w.push(`b.id IN (${ids.join(",")})`);
+  }
   return w.join(" AND ");
 }
 
@@ -139,6 +148,7 @@ export const DEFAULT_SCORE_CONDS: MetricScoreConds = {
   minGrade: null,
   minScore: null,
   minClassic: null,
+  acc: { min: null, max: null },
   allowedMods: null,
   requiredMods: null,
   counts: {
@@ -155,5 +165,5 @@ export const DEFAULT_MAP_CONDS: MetricMapConds = {
   lenMin: null, lenMax: null, arMin: null, arMax: null,
   odMin: null, odMax: null, csMin: null, csMax: null,
   hpMin: null, hpMax: null, comboMin: null, comboMax: null,
-  bpmMin: null, bpmMax: null, statuses: [], country1: false,
+  bpmMin: null, bpmMax: null, statuses: [], country1: false, ids: null,
 };

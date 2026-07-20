@@ -1,6 +1,7 @@
 /**
  * Beatmap catalog. Enumerated from the osu! API `/beatmapsets/search`,
- * sliced by year/month (the search caps at ~10k results per query). A
+ * sliced by rank year (the search caps at ~10k SETS per query; no year has
+ * ever exceeded ~5.5k sets, so yearly slices are always complete). A
  * follow-up enrichment pass via `/beatmaps?ids[]=` (50/req) fills in
  * max_combo and up-to-date star ratings.
  */
@@ -286,22 +287,15 @@ export async function verifyYear(
     return announced;
   };
 
-  const pad = (n: number) => String(n).padStart(2, "0");
   for (const mode of [0, 1, 2, 3]) {
     for (const category of ["ranked", "loved"] as const) {
-      const total = await collect(
+      // No year has ever exceeded ~5.5k SETS (the ~10k search cap applies to
+      // sets, not diffs), so a single yearly query is always complete.
+      await collect(
         category,
         `ranked>=${year}-01-01 ranked<${year + 1}-01-01`,
         mode
       );
-      if (total > 9_500) {
-        // dense slice: the search caps at ~10k, we fill in month by month
-        for (let m = 1; m <= 12; m++) {
-          const from = `${year}-${pad(m)}-01`;
-          const to = m === 12 ? `${year + 1}-01-01` : `${year}-${pad(m + 1)}-01`;
-          await collect(category, `ranked>=${from} ranked<${to}`, mode);
-        }
-      }
     }
   }
 
@@ -401,40 +395,26 @@ export async function importCatalogFromApi(
   };
 
   // IMPORTANT: the osu!web search caps at ~10,000 results per query, cursor
-  // included. Strategy to enumerate the WHOLE catalog (~150k diffs):
-  //  1) "base" pass with no date filter — notably catches old sets with no
-  //     ranked_date (within the cap, ranked_asc sort);
-  //  2) slices by rank year (`ranked>=Y ranked<Y+1`);
-  //  3) if a year approaches the cap (> CAP_SAFETY sets), re-pass month by month.
+  // included. The cap applies to SETS and no year has ever exceeded ~5.5k
+  // sets, so one slice per rank year is always complete. Strategy:
+  //  1) "base" pass with no date filter — catches sets with no ranked_date
+  //     (within the cap, ranked_asc sort);
+  //  2) slices by rank year (`ranked>=Y ranked<Y+1`).
   const START_YEAR = 2007;
   const endYear = new Date().getUTCFullYear();
-  const CAP_SAFETY = 9_500;
-  const pad = (n: number) => String(n).padStart(2, "0");
 
   for (const category of ["ranked", "loved"] as const) {
     await enumerateSlice(category, `catalog_api_cursor_${category}_base`, null);
 
     for (let year = START_YEAR; year <= endYear; year++) {
       const yearKey = `catalog_api_cursor_${category}_${year}`;
-      const isCurrentYear = year === endYear;
-      const total = await enumerateSlice(
+      await enumerateSlice(
         category,
         yearKey,
         `ranked>=${year}-01-01 ranked<${year + 1}-01-01`
       );
-      if (total > CAP_SAFETY) setState(`${yearKey}_dense`, "1");
-      const dense = total > CAP_SAFETY || getState(`${yearKey}_dense`) === "1";
-      if (dense) {
-        for (let m = 1; m <= 12; m++) {
-          const from = `${year}-${pad(m)}-01`;
-          const to = m === 12 ? `${year + 1}-01-01` : `${year}-${pad(m + 1)}-01`;
-          const monthKey = `${yearKey}_${pad(m)}`;
-          await enumerateSlice(category, monthKey, `ranked>=${from} ranked<${to}`);
-          if (isCurrentYear) setState(monthKey, "");
-        }
-      }
       // the current year (and the base pass) are re-scanned on the next pass
-      if (isCurrentYear) setState(yearKey, "");
+      if (year === endYear) setState(yearKey, "");
     }
     setState(`catalog_api_cursor_${category}_base`, "");
   }

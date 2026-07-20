@@ -396,6 +396,9 @@ export function startCatalogRefresh(): void {
       if (diffs >= MIN_EXPECTED_STD_DIFFS) void importMissingKnownSets();
       // snipe check: re-check my country #1s older than the configured delay
       if (isUserConnected()) {
+        // maps with a fresh score still awaiting their country check: high
+        // priority, ahead of the low-priority sweep
+        await confirmRecentFrChecks();
         getDb()
           .prepare(
             `UPDATE beatmap_user SET fr_checked_at = NULL
@@ -424,11 +427,11 @@ let frRunning = false;
 /**
  * Deferred confirmation after a new score: osu!'s leaderboard can take a
  * moment to include a fresh submit, so an immediate "not #1" result may be
- * stale. One re-check ~10 min later catches the propagation lag (without it,
+ * stale. One re-check ~2 min later catches the propagation lag (without it,
  * the map would be stamped as checked and never revisited, since the periodic
  * snipe re-check only targets maps where fr_first = 1).
  */
-const FR_CONFIRM_DELAY_MS = 10 * 60_000;
+const FR_CONFIRM_DELAY_MS = 2 * 60_000;
 
 function scheduleFrConfirm(beatmapId: number): void {
   const t = setTimeout(() => {
@@ -438,6 +441,45 @@ function scheduleFrConfirm(beatmapId: number): void {
       .catch((e) => logError(e, `deferred country check map ${beatmapId}`));
   }, FR_CONFIRM_DELAY_MS);
   t.unref(); // never keeps the process alive
+}
+
+/**
+ * HIGH-priority pass over pending country checks on maps with a recent score:
+ * the deferred-confirm timer is lost on a restart, and the background sweep
+ * would only reach these maps at low priority behind the whole queue. Runs at
+ * each periodic tick (1 min after startup, then every 6 h); cheap when empty.
+ */
+export async function confirmRecentFrChecks(): Promise<void> {
+  if (!isUserConnected()) return;
+  const rows = getDb()
+    .prepare(
+      `SELECT u.beatmap_id AS id FROM beatmap_user u
+       JOIN beatmaps b ON b.id = u.beatmap_id
+       WHERE u.played = 1 AND u.fr_checked_at IS NULL AND b.ruleset = 0
+         AND EXISTS (
+           SELECT 1 FROM scores s
+           WHERE s.beatmap_id = u.beatmap_id
+             AND datetime(s.ended_at) >= datetime('now', '-2 days'))
+       LIMIT 100`
+    )
+    .all() as { id: number }[];
+  for (const { id } of rows) {
+    try {
+      const top = await getCountryTop(id, "high");
+      applyFrCheck(id, top, true);
+      logActivity(
+        "country #1",
+        () =>
+          `${mapLabel(id)} — fresh-score recheck: ${
+            top && top.user_id === config.osuUserId ? "#1 ✓" : "not #1"
+          }`
+      );
+    } catch (e) {
+      logError(e, `fresh-score country check map ${id}`);
+      const msg = String(e);
+      if (msg.includes("not connected") || msg.includes("supporter")) break;
+    }
+  }
 }
 
 /**

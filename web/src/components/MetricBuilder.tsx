@@ -51,6 +51,22 @@ function toNum(v: string): number | null {
   return v.trim() !== "" && Number.isFinite(Number(v)) ? Number(v) : null;
 }
 
+/**
+ * Extracts beatmap ids from free text: plain numbers, or osu.ppy.sh links
+ * (`...#osu/123`, `/b/123`, `/beatmaps/123`). One per line or comma/space
+ * separated.
+ */
+function parseMapIds(text: string): number[] {
+  const ids = new Set<number>();
+  for (const token of text.split(/[\s,;]+/)) {
+    if (!token) continue;
+    const link = token.match(/#osu\/(\d+)|\/b\/(\d+)|\/beatmaps\/(\d+)/);
+    const raw = link ? link[1] ?? link[2] ?? link[3] : /^\d+$/.test(token) ? token : null;
+    if (raw) ids.add(Number(raw));
+  }
+  return [...ids];
+}
+
 function Section({
   title,
   children,
@@ -110,16 +126,31 @@ export function MetricBuilder({
   edit?: { id: number; name: string; params: MetricParams };
 }) {
   const [name, setName] = useState(edit?.name ?? "");
-  // merge with defaults so older metrics (missing new fields) still work
+  // deep-merge with defaults so older metrics (missing new fields) still work
   const [p, setP] = useState<MetricParams>(
     edit
       ? {
           ...DEFAULT_METRIC_PARAMS,
           ...edit.params,
+          score: {
+            ...DEFAULT_METRIC_PARAMS.score,
+            ...edit.params.score,
+            counts: {
+              ...DEFAULT_METRIC_PARAMS.score.counts,
+              ...edit.params.score?.counts,
+            },
+          },
+          map: { ...DEFAULT_METRIC_PARAMS.map, ...edit.params.map },
           progressMode: edit.params.progressMode ?? "milestone",
           step: edit.params.step || 1000,
         }
       : DEFAULT_METRIC_PARAMS
+  );
+  // the step input is kept as text so it can be emptied while typing
+  const [stepStr, setStepStr] = useState(String(edit?.params.step || 1000));
+  // map-pool text: ids or osu.ppy.sh links, one per line or comma-separated
+  const [idsText, setIdsText] = useState(
+    edit?.params.map.ids?.length ? edit.params.map.ids.join("\n") : ""
   );
   const [preview, setPreview] = useState<{
     count: number;
@@ -173,10 +204,12 @@ export function MetricBuilder({
             value={p.kind}
             onChange={(e) => {
               const kind = e.target.value as MetricParams["kind"];
+              const step = kind === "ranked_score" ? 10_000_000_000 : 1000;
+              setStepStr(String(step));
               setP((s) => ({
                 ...s,
                 kind,
-                step: kind === "ranked_score" ? 10_000_000_000 : 1000,
+                step,
                 progressMode: kind === "ranked_score" ? "milestone" : s.progressMode,
               }));
             }}
@@ -215,6 +248,11 @@ export function MetricBuilder({
                 />
               </label>
             </div>
+            <RangeRow
+              label="Accuracy (%)" step={0.1}
+              value={p.score.acc ?? { min: null, max: null }}
+              onChange={(r) => setScore({ acc: r })}
+            />
 
             <Section title="Mods">
               <div className="mb-mods-label">Allowed mods (empty = any mod allowed):</div>
@@ -295,6 +333,30 @@ export function MetricBuilder({
           </div>
         </Section>
 
+        <Section title="Specific maps (custom map pool)">
+          <div className="mb-mods-label">
+            Restrict to these maps only — beatmap ids or osu.ppy.sh links
+            (…#osu/id, /b/id), one per line or comma-separated. Empty = all maps.
+          </div>
+          <textarea
+            className="mb-ids"
+            rows={4}
+            placeholder={"1954874\nhttps://osu.ppy.sh/beatmapsets/14850#osu/54138"}
+            value={idsText}
+            onChange={(e) => {
+              const v = e.target.value;
+              setIdsText(v);
+              const ids = parseMapIds(v);
+              setP((s) => ({ ...s, map: { ...s.map, ids: ids.length ? ids : null } }));
+            }}
+          />
+          {idsText.trim() !== "" && (
+            <div className="mb-mods-label">
+              {p.map.ids?.length ?? 0} map id(s) recognized
+            </div>
+          )}
+        </Section>
+
         <div className="mb-title">Display</div>
         <div className="mb-inline">
           <label>
@@ -314,8 +376,13 @@ export function MetricBuilder({
               every
               <input
                 type="number" min={1}
-                value={p.step}
-                onChange={(e) => setP((s) => ({ ...s, step: Number(e.target.value) || 1 }))}
+                value={stepStr}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setStepStr(v); // can be emptied while typing
+                  const n = Number(v);
+                  if (n > 0) setP((s) => ({ ...s, step: n }));
+                }}
               />
             </label>
           )}

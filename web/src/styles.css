@@ -637,6 +637,11 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .metric-evo { margin-top: 8px; }
 
 /* Metric builder */
+.mb-ids {
+  width: 100%; box-sizing: border-box; resize: vertical; min-height: 70px;
+  background: var(--bg2); border: 1px solid var(--border); color: var(--fg);
+  border-radius: 6px; padding: 6px 10px; font-size: 12px; font-family: monospace;
+}
 .mb-modal { width: min(640px, 94vw); }
 .mb-row { display: flex; gap: 8px; margin-bottom: 8px; }
 .mb-name { flex: 1; }
