@@ -11,15 +11,15 @@ import {
 } from "../api";
 import { AdvancedSettings } from "./AdvancedSettings";
 import { OverlayConfig } from "./OverlayConfig";
+import { firstPlaceLabel, useCountryCode } from "../country";
 import { fmtTime } from "../format";
 
 const fmt = (n: number) => n.toLocaleString("en-US");
 
-/** Labels + toasts per action (start / result). */
-const ACTION_LABELS: Record<
-  string,
-  { start: string; done: (r: Record<string, unknown>) => string }
-> = {
+/** Labels + toasts per action (start / result). `lbl` = "#1 FR", "#1 US"… */
+const actionLabels = (
+  lbl: string
+): Record<string, { start: string; done: (r: Record<string, unknown>) => string }> => ({
   start: { start: "Initial sync started…", done: () => "Initial sync running (tracked in the bar)" },
   pause: { start: "Pausing backfill…", done: () => "Backfill paused" },
   resume: { start: "Resuming backfill…", done: () => "Backfill resumed" },
@@ -31,23 +31,23 @@ const ACTION_LABELS: Record<
     start: "Looking for new maps… (may take a few minutes)",
     done: (r) => `Delta done: +${Number(r.newMaps ?? 0)} map(s) added`,
   },
-  "fr-sweep": { start: "FR #1 sweep…", done: () => "FR #1 sweep started (tracked in the bar)" },
-  "fr-pause": { start: "Pausing sweep…", done: () => "FR #1 sweep paused" },
+  "country-sweep": { start: `${lbl} sweep…`, done: () => `${lbl} sweep started (tracked in the bar)` },
+  "country-pause": { start: "Pausing sweep…", done: () => `${lbl} sweep paused` },
   recompute: {
     start: "Recomputing…",
     done: (r) => `Recompute done: ${fmt(Number(r.recomputed ?? 0))} maps`,
   },
   rebackfill: {
     start: "Re-backfill…",
-    done: () => "Re-backfill + FR re-sweep started (tracked in the bar)",
+    done: () => `Re-backfill + ${lbl} re-sweep started (tracked in the bar)`,
   },
   "catalog-full?force=1": {
     start: "Re-scanning catalog…",
     done: () => "Catalog re-scan started (tracked in the bar)",
   },
-};
+});
 
-const PHASE_FR: Record<string, string> = {
+const PHASE_LABELS: Record<string, string> = {
   idle: "idle",
   done: "up to date",
   error: "error",
@@ -81,12 +81,14 @@ export function SyncBar() {
     queryFn: fetchSettings,
   });
   const [pollInput, setPollInput] = useState<string | null>(null);
-  const [frRecheckInput, setFrRecheckInput] = useState<string | null>(null);
+  const [countryRecheckInput, setCountryRecheckInput] = useState<string | null>(null);
   const [clientIdInput, setClientIdInput] = useState<string | null>(null);
   const [secretInput, setSecretInput] = useState<string | null>(null);
   const [userIdInput, setUserIdInput] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [overlayOpen, setOverlayOpen] = useState(false);
+  const country = useCountryCode();
+  const lbl = firstPlaceLabel(country); // "#1 FR", "#1 US"… or "Country #1"
 
   if (!s) return null;
 
@@ -94,6 +96,7 @@ export function SyncBar() {
     s.backfill.total > 0 ? (s.backfill.fetched / s.backfill.total) * 100 : 0;
   const needsInit = s.phase === "idle" && s.backfill.fetched === 0;
   const connected = auth?.connected ?? false;
+  const ACTION_LABELS = actionLabels(lbl);
 
   const act = async (a: Parameters<typeof postSync>[0]) => {
     setMenuOpen(false);
@@ -111,13 +114,13 @@ export function SyncBar() {
   const saveSettings = async () => {
     const payload: {
       pollIntervalSeconds?: number;
-      frRecheckHours?: number;
+      countryRecheckHours?: number;
       clientId?: string;
       clientSecret?: string;
       userId?: string;
     } = {};
     if (pollInput != null) payload.pollIntervalSeconds = Number(pollInput);
-    if (frRecheckInput != null) payload.frRecheckHours = Number(frRecheckInput);
+    if (countryRecheckInput != null) payload.countryRecheckHours = Number(countryRecheckInput);
     if (clientIdInput != null && clientIdInput !== "")
       payload.clientId = clientIdInput;
     if (secretInput != null && secretInput !== "")
@@ -131,7 +134,7 @@ export function SyncBar() {
     try {
       await postSettings(payload);
       setPollInput(null);
-      setFrRecheckInput(null);
+      setCountryRecheckInput(null);
       setClientIdInput(null);
       setSecretInput(null);
       setUserIdInput(null);
@@ -157,7 +160,7 @@ export function SyncBar() {
         <span className={`sync-phase ${s.busy?.length ? "sync-phase-busy" : ""}`}>
           {s.busy?.length
             ? `⏳ ${s.busy.join(" + ")}`
-            : PHASE_FR[s.phase] ?? s.phase}
+            : PHASE_LABELS[s.phase] ?? s.phase}
         </span>
         <div className="sync-feed">
           {s.activity?.length ? (
@@ -263,7 +266,7 @@ export function SyncBar() {
         {auth && !connected && (
           <button
             className="primary"
-            title="Connect your osu! account (required for FR leaderboards, supporter needed)"
+            title="Connect your osu! account (required for country leaderboards, supporter needed)"
             onClick={() => window.open("/api/auth/login", "_blank")}
           >
             Connect
@@ -333,14 +336,14 @@ export function SyncBar() {
                 Catch up on new maps
               </button>
               <button
-                onClick={() => act("fr-sweep")}
+                onClick={() => act("country-sweep")}
                 disabled={!connected}
-                title="Start/resume checking FR leaderboards (resumable)"
+                title="Start/resume checking country leaderboards (resumable)"
               >
-                Start/resume FR #1 sweep
+                Start/resume {lbl} sweep
               </button>
-              <button onClick={() => act("fr-pause")} disabled={!connected}>
-                Pause FR #1 sweep
+              <button onClick={() => act("country-pause")} disabled={!connected}>
+                Pause {lbl} sweep
               </button>
 
               </details>
@@ -362,16 +365,16 @@ export function SyncBar() {
               </div>
               <div
                 className="menu-setting"
-                title="Age at which a held FR #1 is re-checked (snipe check). It runs on the next background tick (every 6 h max)."
+                title="Age at which a held country #1 is re-checked (snipe check). It runs on the next background tick (every 6 h max)."
               >
-                <span>Re-check FR #1 (h)</span>
+                <span>Re-check {lbl} (h)</span>
                 <input
                   type="number"
                   min={1}
                   max={720}
                   step={1}
-                  value={frRecheckInput ?? String(settings?.frRecheckHours ?? "")}
-                  onChange={(e) => setFrRecheckInput(e.target.value)}
+                  value={countryRecheckInput ?? String(settings?.countryRecheckHours ?? "")}
+                  onChange={(e) => setCountryRecheckInput(e.target.value)}
                 />
               </div>
               <button
@@ -456,7 +459,7 @@ export function SyncBar() {
                 onClick={() => {
                   if (
                     window.confirm(
-                      "FULL re-backfill: all maps go back to « to check » (~40h, resumable, no score lost). Includes a re-sweep of all FR leaderboards. Start?"
+                      "FULL re-backfill: all maps go back to « to check » (~40h, resumable, no score lost). Includes a re-sweep of all country leaderboards. Start?"
                     )
                   )
                     void act("rebackfill");

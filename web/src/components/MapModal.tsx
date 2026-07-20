@@ -19,7 +19,7 @@ function modsText(raw: string): string {
   }
 }
 
-/** Detailed map view: stats, all my scores, #1 FR history. */
+/** Detailed map view: stats, all my scores, country #1 history. */
 export function MapModal({
   beatmapId,
   onClose,
@@ -89,7 +89,7 @@ export function MapModal({
                   <b>{k}</b> {v ?? "—"}
                 </span>
               ))}
-              {data.user?.fr_first ? (
+              {data.user?.country_first ? (
                 <span className="mm-stat mm-gold">🥇 {firstPlaceLabel(country)}</span>
               ) : null}
               {data.user?.any_fc ? (
@@ -125,10 +125,10 @@ export function MapModal({
               </div>
             ))}
 
-            {data.frEvents.length > 0 && (
+            {data.countryEvents.length > 0 && (
               <>
                 <h3>{firstPlaceLabel(country)} history</h3>
-                {data.frEvents.map((e, i) => (
+                {data.countryEvents.map((e, i) => (
                   <div key={i} className="mm-score-row">
                     <span className="mm-date">{fmtDT(e.score_at ?? e.at)}</span>
                     <span className={e.event === "gained" ? "mm-green" : "mm-red"}>

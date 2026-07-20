@@ -93,8 +93,8 @@ export function FilterBar({
     });
   if (local.mods)
     badges.push({ key: "mods", label: `Mods: ${local.mods}`, clear: () => set("mods", "") });
-  if (local.frFirst)
-    badges.push({ key: "fr", label: firstPlaceLabel(country), clear: () => set("frFirst", false) });
+  if (local.countryFirst)
+    badges.push({ key: "fr", label: firstPlaceLabel(country), clear: () => set("countryFirst", false) });
   if (local.platform)
     badges.push({
       key: "platform",
@@ -239,9 +239,9 @@ export function FilterBar({
           <span className="filter-group-label">Other</span>
           <div className="chips">
             <button
-              className={`chip ${local.frFirst ? "on" : ""}`}
+              className={`chip ${local.countryFirst ? "on" : ""}`}
               title="Only maps where I hold the country #1"
-              onClick={() => set("frFirst", !local.frFirst)}
+              onClick={() => set("countryFirst", !local.countryFirst)}
             >
               {firstPlaceLabel(country)}
             </button>

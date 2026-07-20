@@ -12,7 +12,7 @@ export interface OverlayStats {
   clears: number;
   s: number;
   fc: number;
-  fr: number;
+  country: number;
   rankedClassic: number;
   rankedWither: number;
 }
@@ -53,7 +53,7 @@ export function buildTableQuery(
   if (filters.fcState.length) p.set("fcState", filters.fcState.join(","));
   if (filters.statuses.length) p.set("statuses", filters.statuses.join(","));
   if (filters.mods) p.set("mods", filters.mods);
-  if (filters.frFirst) p.set("frFirst", "1");
+  if (filters.countryFirst) p.set("countryFirst", "1");
   if (filters.platform) p.set("platform", filters.platform);
   for (const k of [
     "srMin", "srMax", "arMin", "arMax", "odMin", "odMax",
@@ -120,8 +120,8 @@ export async function postSync(
     | "resume"
     | "poll-now"
     | "delta-now"
-    | "fr-sweep"
-    | "fr-pause"
+    | "country-sweep"
+    | "country-pause"
     | "recompute"
     | "rebackfill"
     | "catalog-full?force=1"
@@ -153,7 +153,7 @@ export async function postClearErrors(): Promise<void> {
   await fetch("/api/sync/clear-errors", { method: "POST" });
 }
 
-export interface FrEvent {
+export interface CountryEvent {
   id: number;
   event: "gained" | "lost";
   at: string;
@@ -167,15 +167,15 @@ export interface FrEvent {
   title: string;
 }
 
-export async function fetchFrHistory(
+export async function fetchCountryHistory(
   offset: number,
   limit: number,
   event?: "gained" | "lost"
-): Promise<{ rows: FrEvent[]; total: number }> {
+): Promise<{ rows: CountryEvent[]; total: number }> {
   const p = new URLSearchParams({ offset: String(offset), limit: String(limit) });
   if (event) p.set("event", event);
-  const res = await fetch(`/api/fr-history?${p.toString()}`);
-  if (!res.ok) throw new Error(`fr-history: HTTP ${res.status}`);
+  const res = await fetch(`/api/country-history?${p.toString()}`);
+  if (!res.ok) throw new Error(`country-history: HTTP ${res.status}`);
   return res.json();
 }
 
@@ -328,7 +328,7 @@ export interface DisplayPrefs {
 export interface Settings {
   apiRpm: number;
   pollIntervalSeconds: number;
-  frRecheckHours: number;
+  countryRecheckHours: number;
   display: DisplayPrefs;
   oauth: { clientId: string; userId: number; secretSet: boolean };
   info: { port: number };
@@ -343,7 +343,7 @@ export async function fetchSettings(): Promise<Settings> {
 export async function postSettings(payload: {
   apiRpm?: number;
   pollIntervalSeconds?: number;
-  frRecheckHours?: number;
+  countryRecheckHours?: number;
   display?: Partial<DisplayPrefs>;
   clientId?: string | number;
   clientSecret?: string | number;

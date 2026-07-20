@@ -217,23 +217,23 @@ function SkillCurvePanel() {
 }
 
 /**
- * Completion gauge. The yellow portion (fr) is overlaid on the played portion:
- * it shows the share of #1 FR out of the gauge total.
+ * Completion gauge. The yellow portion (country) is overlaid on the played
+ * portion: it shows the share of country #1s out of the gauge total.
  */
 function Bar({
   played,
   total,
-  fr = 0,
+  country = 0,
   fc = 0,
 }: {
   played: number;
   total: number;
-  fr?: number;
+  country?: number;
   fc?: number;
 }) {
   const pct = total > 0 ? (played / total) * 100 : 0;
   const fcPct = total > 0 ? (fc / total) * 100 : 0;
-  const frPct = total > 0 ? (fr / total) * 100 : 0;
+  const countryPct = total > 0 ? (country / total) * 100 : 0;
   const done = total > 0 && played >= total;
   return (
     <div className="bar">
@@ -241,13 +241,13 @@ function Bar({
       {fc > 0 && (
         <div className="bar-fill bar-fill-blue" style={{ width: `${fcPct}%` }} />
       )}
-      {fr > 0 && (
-        <div className="bar-fill bar-fill-gold" style={{ width: `${frPct}%` }} />
+      {country > 0 && (
+        <div className="bar-fill bar-fill-gold" style={{ width: `${countryPct}%` }} />
       )}
       <span className="bar-label">
         {fmt(played)} / {fmt(total)} ({pct.toFixed(1)}%)
         {fc > 0 ? ` · FC ${fmt(fc)}` : ""}
-        {fr > 0 ? ` · 🥇 ${fmt(fr)}` : ""}
+        {country > 0 ? ` · 🥇 ${fmt(country)}` : ""}
       </span>
       {done && <span className="bar-check">✓</span>}
     </div>
@@ -258,7 +258,7 @@ interface DistRow {
   label: string;
   total: number;
   played: number | null;
-  fr?: number | null;
+  country?: number | null;
   fc?: number | null;
 }
 
@@ -272,7 +272,7 @@ function DistPanel({ title, rows }: { title: string; rows: DistRow[] }) {
           <Bar
             played={r.played ?? 0}
             total={r.total}
-            fr={r.fr ?? 0}
+            country={r.country ?? 0}
             fc={r.fc ?? 0}
           />
         </div>
@@ -316,7 +316,7 @@ export function Dashboard() {
       label: label(b.bucket),
       total: b.total,
       played: b.played,
-      fr: b.fr,
+      country: b.country,
       fc: b.fc,
     }));
 
@@ -327,7 +327,7 @@ export function Dashboard() {
         label: b.sr >= 10 ? "10★+" : `${b.sr}★–${b.sr + 1}★`,
         total: b.total,
         played: b.played,
-        fr: b.fr,
+        country: b.country,
         fc: b.fc,
       })),
     },
@@ -337,7 +337,7 @@ export function Dashboard() {
         label: b.year,
         total: b.total,
         played: b.played,
-        fr: b.fr,
+        country: b.country,
         fc: b.fc,
       })),
     },
@@ -368,7 +368,7 @@ export function Dashboard() {
             <Bar
               played={data.totals.played ?? 0}
               total={data.totals.total}
-              fr={data.totals.fr_firsts ?? 0}
+              country={data.totals.country_firsts ?? 0}
               fc={data.totals.fc ?? 0}
             />
           </div>
@@ -377,7 +377,7 @@ export function Dashboard() {
             <Bar
               played={data.totals.ranked_played ?? 0}
               total={data.totals.ranked_total}
-              fr={data.totals.fr_ranked ?? 0}
+              country={data.totals.country_ranked ?? 0}
               fc={data.totals.fc_ranked ?? 0}
             />
           </div>
@@ -386,14 +386,14 @@ export function Dashboard() {
             <Bar
               played={data.totals.loved_played ?? 0}
               total={data.totals.loved_total}
-              fr={data.totals.fr_loved ?? 0}
+              country={data.totals.country_loved ?? 0}
               fc={data.totals.fc_loved ?? 0}
             />
           </div>
         </div>
         <div className="hero-stat">
           <h3>{firstPlaceLabel(country)}</h3>
-          <div className="big gold-text">{fmt(data.totals.fr_firsts ?? 0)}</div>
+          <div className="big gold-text">{fmt(data.totals.country_firsts ?? 0)}</div>
           <small>out of {fmt(data.totals.played ?? 0)} maps played</small>
         </div>
         <div className="hero-stat">

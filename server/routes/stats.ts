@@ -23,9 +23,9 @@ statsRouter.get("/stats", (_req, res) => {
     ranked_played: number;
     loved_total: number;
     loved_played: number;
-    fr_firsts: number;
-    fr_ranked: number;
-    fr_loved: number;
+    country_firsts: number;
+    country_ranked: number;
+    country_loved: number;
     fc: number;
     fc_ranked: number;
     fc_loved: number;
@@ -37,9 +37,9 @@ statsRouter.get("/stats", (_req, res) => {
       SUM(CASE WHEN b.status IN (1, 2) AND u.played = 1 THEN 1 ELSE 0 END) ranked_played,
       SUM(CASE WHEN b.status = 4 THEN 1 ELSE 0 END) loved_total,
       SUM(CASE WHEN b.status = 4 AND u.played = 1 THEN 1 ELSE 0 END) loved_played,
-      SUM(COALESCE(u.fr_first, 0)) fr_firsts,
-      SUM(CASE WHEN b.status IN (1, 2) THEN COALESCE(u.fr_first, 0) ELSE 0 END) fr_ranked,
-      SUM(CASE WHEN b.status = 4 THEN COALESCE(u.fr_first, 0) ELSE 0 END) fr_loved,
+      SUM(COALESCE(u.country_first, 0)) country_firsts,
+      SUM(CASE WHEN b.status IN (1, 2) THEN COALESCE(u.country_first, 0) ELSE 0 END) country_ranked,
+      SUM(CASE WHEN b.status = 4 THEN COALESCE(u.country_first, 0) ELSE 0 END) country_loved,
       SUM(COALESCE(u.any_fc, 0)) fc,
       SUM(CASE WHEN b.status IN (1, 2) THEN COALESCE(u.any_fc, 0) ELSE 0 END) fc_ranked,
       SUM(CASE WHEN b.status = 4 THEN COALESCE(u.any_fc, 0) ELSE 0 END) fc_loved
@@ -106,7 +106,7 @@ statsRouter.get("/stats", (_req, res) => {
     .prepare(
       `SELECT MIN(CAST(b.star_rating AS INTEGER), 10) sr,
         COUNT(*) total, SUM(CASE WHEN u.played = 1 THEN 1 ELSE 0 END) played,
-        SUM(COALESCE(u.fr_first, 0)) fr,
+        SUM(COALESCE(u.country_first, 0)) country,
         SUM(COALESCE(u.any_fc, 0)) fc
        FROM beatmaps b LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
        WHERE b.ruleset = 0 AND b.status IN (1, 2, 4) AND b.star_rating IS NOT NULL
@@ -118,7 +118,7 @@ statsRouter.get("/stats", (_req, res) => {
     .prepare(
       `SELECT strftime('%Y', st.ranked_date) year,
         COUNT(*) total, SUM(CASE WHEN u.played = 1 THEN 1 ELSE 0 END) played,
-        SUM(COALESCE(u.fr_first, 0)) fr,
+        SUM(COALESCE(u.country_first, 0)) country,
         SUM(COALESCE(u.any_fc, 0)) fc
        FROM beatmaps b
        JOIN beatmapsets st ON st.id = b.beatmapset_id
@@ -134,7 +134,7 @@ statsRouter.get("/stats", (_req, res) => {
       .prepare(
         `SELECT MIN(CAST(${expr} AS INTEGER), ${cap}) AS bucket,
           COUNT(*) total, SUM(CASE WHEN u.played = 1 THEN 1 ELSE 0 END) played,
-          SUM(COALESCE(u.fr_first, 0)) fr,
+          SUM(COALESCE(u.country_first, 0)) country,
           SUM(COALESCE(u.any_fc, 0)) fc
          FROM beatmaps b LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
          WHERE b.ruleset = 0 AND b.status IN (1, 2, 4) AND ${expr} IS NOT NULL
@@ -213,7 +213,7 @@ statsRouter.get("/overlay", (_req, res) => {
         SUM(COALESCE(u.played, 0)) clears,
         SUM(CASE WHEN s.rank IN ('S','SH','X','XH') THEN 1 ELSE 0 END) s_count,
         SUM(COALESCE(u.any_fc, 0)) fc,
-        SUM(COALESCE(u.fr_first, 0)) fr,
+        SUM(COALESCE(u.country_first, 0)) country,
         COALESCE(SUM(COALESCE(s.classic_total_score, s.total_score)), 0) ranked_classic,
         COALESCE(SUM(CASE WHEN ${N_OBJ} > 0
           THEN ${witherSql("s.total_score")}
@@ -228,7 +228,7 @@ statsRouter.get("/overlay", (_req, res) => {
     clears: number | null;
     s_count: number | null;
     fc: number | null;
-    fr: number | null;
+    country: number | null;
     ranked_classic: number;
     ranked_wither: number;
   };
@@ -237,7 +237,7 @@ statsRouter.get("/overlay", (_req, res) => {
     clears: row.clears ?? 0,
     s: row.s_count ?? 0,
     fc: row.fc ?? 0,
-    fr: row.fr ?? 0,
+    country: row.country ?? 0,
     rankedClassic: row.ranked_classic,
     rankedWither: row.ranked_wither,
   });

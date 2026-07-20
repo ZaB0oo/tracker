@@ -133,7 +133,7 @@ export function mapWhere(
   r("b.max_combo", c.comboMin, c.comboMax);
   r("b.bpm", c.bpmMin, c.bpmMax);
   if (c.country1 && !opts.ignoreCountry1)
-    w.push("COALESCE(u.fr_first, 0) = 1");
+    w.push("COALESCE(u.country_first, 0) = 1");
   if (Array.isArray(c.ids) && c.ids.length) {
     const ids = c.ids
       .filter((v) => Number.isInteger(v) && v > 0)

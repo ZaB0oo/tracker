@@ -32,7 +32,7 @@ export interface TableRow {
   missing_pct: number | null;
   played: number;
   any_fc: number;
-  fr_first: number;
+  country_first: number;
 }
 
 export interface MapDetail {
@@ -74,11 +74,11 @@ export interface MapDetail {
   user: {
     played: number;
     any_fc: number;
-    fr_first: number;
-    fr_checked_at: string | null;
+    country_first: number;
+    country_checked_at: string | null;
     fetched_at: string | null;
   } | null;
-  frEvents: {
+  countryEvents: {
     event: string;
     at: string;
     score_at: string | null;
@@ -103,9 +103,9 @@ export interface Stats {
     ranked_played: number | null;
     loved_total: number;
     loved_played: number | null;
-    fr_firsts: number | null;
-    fr_ranked: number | null;
-    fr_loved: number | null;
+    country_firsts: number | null;
+    country_ranked: number | null;
+    country_loved: number | null;
     fc: number | null;
     fc_ranked: number | null;
     fc_loved: number | null;
@@ -120,8 +120,8 @@ export interface Stats {
   };
   grades: { grade: string; c: number }[];
   fc: { fc_state: number; c: number }[];
-  bySr: { sr: number; total: number; played: number; fr: number | null; fc: number | null }[];
-  byYear: { year: string; total: number; played: number; fr: number | null; fc: number | null }[];
+  bySr: { sr: number; total: number; played: number; country: number | null; fc: number | null }[];
+  byYear: { year: string; total: number; played: number; country: number | null; fc: number | null }[];
   byAr: Bucket[];
   byOd: Bucket[];
   byHp: Bucket[];
@@ -134,7 +134,7 @@ export interface Bucket {
   bucket: number;
   total: number;
   played: number;
-  fr: number | null;
+  country: number | null;
   fc: number | null;
 }
 
@@ -171,7 +171,7 @@ export interface Filters {
   fcState: string[];
   statuses: string[];
   mods: string;
-  frFirst: boolean;
+  countryFirst: boolean;
   platform: "" | "lazer" | "stable";
   srMin: string; srMax: string;
   arMin: string; arMax: string;
@@ -189,7 +189,7 @@ export const DEFAULT_FILTERS: Filters = {
   fcState: [],
   statuses: [],
   mods: "",
-  frFirst: false,
+  countryFirst: false,
   platform: "",
   srMin: "", srMax: "",
   arMin: "", arMax: "",

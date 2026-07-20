@@ -7,13 +7,13 @@ import {
   getDaemonStatus,
   importSetById,
   pauseBackfill,
-  pauseFrSweep,
+  pauseCountrySweep,
   pollRecentScores,
   recomputeAllBests,
   refreshCatalogDelta,
   resumeBackfill,
   runBigSetsRepair,
-  runFrSweep,
+  runCountrySweep,
   runPipeline,
   verifyYearAndBackfill,
 } from "../sync/daemon.js";
@@ -22,12 +22,12 @@ export const syncRouter = Router();
 
 // Manual country leaderboard sweep (otherwise: auto after login, after each
 // new score, and daily re-check of held #1s)
-syncRouter.post("/sync/fr-sweep", (_req, res) => {
-  void runFrSweep();
+syncRouter.post("/sync/country-sweep", (_req, res) => {
+  void runCountrySweep();
   res.json({ ok: true, started: true });
 });
-syncRouter.post("/sync/fr-pause", (_req, res) => {
-  pauseFrSweep();
+syncRouter.post("/sync/country-pause", (_req, res) => {
+  pauseCountrySweep();
   res.json({ ok: true });
 });
 
@@ -38,9 +38,9 @@ syncRouter.post("/sync/rebackfill", (_req, res) => {
   db.exec("UPDATE beatmap_user SET fetched_at = NULL");
   // integrated country re-sweep: all played maps go back to the #1 check
   // (also catches "inherited" #1s without replaying)
-  db.exec("UPDATE beatmap_user SET fr_checked_at = NULL WHERE played = 1");
+  db.exec("UPDATE beatmap_user SET country_checked_at = NULL WHERE played = 1");
   void resumeBackfill();
-  if (isUserConnected()) void runFrSweep();
+  if (isUserConnected()) void runCountrySweep();
   res.json({
     ok: true,
     note: "Re-backfill + country re-sweep started, tracked in the sync bar",

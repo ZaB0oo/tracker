@@ -64,6 +64,51 @@ export function getDb(): DatabaseSync {
 
 /** Additive migrations + cleanups for DBs created before a change. */
 function migrate(d: DatabaseSync): void {
+  // Rename the historical "fr_*" names (the tracker was FR-only at first) to
+  // the generic "country_*" ones. Must run before anything referencing them.
+  const oldBu = d.prepare("PRAGMA table_info(beatmap_user)").all() as { name: string }[];
+  const hasOldCols = oldBu.some((c) => c.name === "fr_first");
+  const hasNewCols = oldBu.some((c) => c.name === "country_first");
+  if (hasOldCols && !hasNewCols) {
+    d.exec("ALTER TABLE beatmap_user RENAME COLUMN fr_first TO country_first");
+    d.exec("ALTER TABLE beatmap_user RENAME COLUMN fr_checked_at TO country_checked_at");
+  } else if (hasOldCols && hasNewCols) {
+    // Half-migrated DB: an interim build added empty country_* columns next to
+    // the fr_* ones (and a fresh sweep may have started filling them). Merge:
+    // keep any fresh re-check result, restore the old state everywhere else.
+    d.exec(
+      `UPDATE beatmap_user SET
+         country_first = CASE WHEN country_checked_at IS NOT NULL
+           THEN country_first ELSE fr_first END,
+         country_checked_at = COALESCE(country_checked_at, fr_checked_at)`
+    );
+    d.exec("ALTER TABLE beatmap_user DROP COLUMN fr_first");
+    d.exec("ALTER TABLE beatmap_user DROP COLUMN fr_checked_at");
+  }
+  // schema.sql has already created the country_events table at this point (and
+  // it may even hold fresh rows on a half-migrated DB), so copy the old rows
+  // over WITHOUT their ids (avoids collisions; chronology lives in `at`).
+  const hasOldEvents = d
+    .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='fr_first_events'")
+    .get();
+  if (hasOldEvents) {
+    const oldCols = (
+      d.prepare("PRAGMA table_info(fr_first_events)").all() as { name: string }[]
+    ).map((c) => c.name);
+    const cols = ["beatmap_id", "event", "at", "score_at", "by_user_id", "by_username"]
+      .filter((c) => oldCols.includes(c))
+      .join(", ");
+    d.exec(
+      `INSERT INTO country_events (${cols})
+       SELECT ${cols} FROM fr_first_events ORDER BY id`
+    );
+    d.exec("DROP TABLE fr_first_events");
+  }
+  d.exec(
+    `UPDATE OR IGNORE sync_state SET key = 'country_recheck_hours'
+     WHERE key = 'fr_recheck_hours'`
+  );
+
   const scoreCols = d.prepare("PRAGMA table_info(scores)").all() as { name: string }[];
   if (!scoreCols.some((c) => c.name === "classic_total_score")) {
     d.exec("ALTER TABLE scores ADD COLUMN classic_total_score INTEGER");
@@ -92,10 +137,10 @@ function migrate(d: DatabaseSync): void {
     if (cols.some((c) => c.name === col))
       d.exec(`ALTER TABLE ${table} DROP COLUMN ${col}`);
   }
-  const frEvCols = d.prepare("PRAGMA table_info(fr_first_events)").all() as { name: string }[];
+  const frEvCols = d.prepare("PRAGMA table_info(country_events)").all() as { name: string }[];
   if (frEvCols.length > 0 && !frEvCols.some((c) => c.name === "score_at")) {
     // real date of the score/snipe (ended_at), in addition to the detection date
-    d.exec("ALTER TABLE fr_first_events ADD COLUMN score_at TEXT");
+    d.exec("ALTER TABLE country_events ADD COLUMN score_at TEXT");
   }
   const buCols = d.prepare("PRAGMA table_info(beatmap_user)").all() as { name: string }[];
   if (!buCols.some((c) => c.name === "any_fc")) {
@@ -107,9 +152,9 @@ function migrate(d: DatabaseSync): void {
            AND s.passed = 1 AND s.fc_state <= 1)`
     );
   }
-  if (!buCols.some((c) => c.name === "fr_first")) {
-    d.exec("ALTER TABLE beatmap_user ADD COLUMN fr_first INTEGER NOT NULL DEFAULT 0");
-    d.exec("ALTER TABLE beatmap_user ADD COLUMN fr_checked_at TEXT");
+  if (!buCols.some((c) => c.name === "country_first")) {
+    d.exec("ALTER TABLE beatmap_user ADD COLUMN country_first INTEGER NOT NULL DEFAULT 0");
+    d.exec("ALTER TABLE beatmap_user ADD COLUMN country_checked_at TEXT");
   }
   seedDefaultMetrics(d);
   // One-shot repair: older versions stamped fetched_at as soon as a score
@@ -135,12 +180,12 @@ function migrate(d: DatabaseSync): void {
   // sweep re-checks them shortly after startup. Cheap and idempotent: a map
   // leaves the window as soon as a check lands 15 min after its last score.
   d.exec(
-    `UPDATE beatmap_user SET fr_checked_at = NULL
-     WHERE fr_first = 0 AND played = 1 AND fr_checked_at IS NOT NULL
+    `UPDATE beatmap_user SET country_checked_at = NULL
+     WHERE country_first = 0 AND played = 1 AND country_checked_at IS NOT NULL
        AND EXISTS (
          SELECT 1 FROM scores s
          WHERE s.beatmap_id = beatmap_user.beatmap_id
-           AND datetime(s.ended_at) >= datetime(fr_checked_at, '-15 minutes'))`
+           AND datetime(s.ended_at) >= datetime(country_checked_at, '-15 minutes'))`
   );
   // Graveyard/WIP diffs attached to ranked sets may have been imported by
   // older versions: we only keep ranked(1)/approved(2)/loved(4).

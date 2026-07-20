@@ -79,7 +79,7 @@ export function StreamOverlay() {
             <span>Clears <b>{plus(delta(data.clears, b.clears))}</b></span>
             <span>S <b>{plus(delta(data.s, b.s))}</b></span>
             <span>FC <b>{plus(delta(data.fc, b.fc))}</b></span>
-            <span>{firstPlaceLabel(country)} <b>{plus(delta(data.fr, b.fr))}</b></span>
+            <span>{firstPlaceLabel(country)} <b>{plus(delta(data.country, b.country))}</b></span>
             <span>
               Score <b>{rankedGain > 0 ? `+${fmt(rankedGain)}` : "0"}</b>
             </span>
@@ -94,7 +94,7 @@ export function StreamOverlay() {
             </span>
             <span>S <b>{fmt(data.s)}</b></span>
             <span>FC <b>{fmt(data.fc)}</b></span>
-            <span>{firstPlaceLabel(country)} <b>{fmt(data.fr)}</b></span>
+            <span>{firstPlaceLabel(country)} <b>{fmt(data.country)}</b></span>
           </div>
         )}
         {!hide.has("ranked") && (

@@ -90,7 +90,7 @@ tableRouter.get("/table", (req, res) => {
       params[`mod${i}`] = `%"${m.toUpperCase()}"%`;
     }
   }
-  if (q.frFirst === "1") where.push("u.fr_first = 1");
+  if (q.countryFirst === "1") where.push("u.country_first = 1");
   // best's platform: native lazer (no legacy id) vs stable (converted)
   if (q.platform === "lazer") where.push("s.legacy_score_id IS NULL AND s.id IS NOT NULL");
   if (q.platform === "stable") where.push("s.legacy_score_id IS NOT NULL");
@@ -157,7 +157,7 @@ tableRouter.get("/table", (req, res) => {
              ELSE -1 END AS grade_order,
         COALESCE(u.played, 0) AS played,
         COALESCE(u.any_fc, 0) AS any_fc,
-        COALESCE(u.fr_first, 0) AS fr_first
+        COALESCE(u.country_first, 0) AS country_first
       ${baseSql}
       ORDER BY ${sortParts.join(", ")}
       LIMIT @limit OFFSET @offset`
@@ -197,15 +197,15 @@ tableRouter.get("/map/:id", (req, res) => {
   const user =
     db
       .prepare(
-        `SELECT played, any_fc, fr_first, fr_checked_at, fetched_at
+        `SELECT played, any_fc, country_first, country_checked_at, fetched_at
          FROM beatmap_user WHERE beatmap_id = ?`
       )
       .get(id) ?? null;
-  const frEvents = db
+  const countryEvents = db
     .prepare(
       `SELECT event, at, score_at, by_username
-       FROM fr_first_events WHERE beatmap_id = ? ORDER BY at DESC`
+       FROM country_events WHERE beatmap_id = ? ORDER BY at DESC`
     )
     .all(id);
-  res.json({ map, scores, user, frEvents });
+  res.json({ map, scores, user, countryEvents });
 });

@@ -13,7 +13,7 @@ const BUILTIN: Preset[] = [
   { label: "Unplayed", filters: { played: "unplayed" }, sort: [{ id: "star_rating", desc: false }] },
   { label: "Non-FC", filters: { played: "played", fcState: ["2"] }, sort: [{ id: "missing", desc: true }] },
   { label: "Grades < S", filters: { played: "played", grades: ["A", "B", "C", "D"] }, sort: [{ id: "grade", desc: true }] },
-  { label: "My country #1", filters: { frFirst: true }, sort: [{ id: "ended_at", desc: true }] },
+  { label: "My country #1", filters: { countryFirst: true }, sort: [{ id: "ended_at", desc: true }] },
   { label: "Missing score", filters: {}, sort: [{ id: "missing", desc: true }] },
   { label: "Best lazer", filters: { platform: "lazer" }, sort: [{ id: "ended_at", desc: true }] },
   { label: "Best stable", filters: { platform: "stable" }, sort: [{ id: "ended_at", desc: true }] },

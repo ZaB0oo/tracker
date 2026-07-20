@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { fetchClears, fetchFrHistory } from "../api";
+import { fetchClears, fetchCountryHistory } from "../api";
 import { firstPlaceLabel, useCountryCode } from "../country";
 import { fmtDateTime } from "../format";
 import { FC_LABELS } from "../types";
@@ -83,11 +83,11 @@ function ClearsList() {
   );
 }
 
-function FrList({ filter }: { filter: "" | "gained" | "lost" }) {
+function CountryList({ filter }: { filter: "" | "gained" | "lost" }) {
   const query = useInfiniteQuery({
-    queryKey: ["fr-history", filter],
+    queryKey: ["country-history", filter],
     queryFn: ({ pageParam }) =>
-      fetchFrHistory(pageParam, PAGE, filter || undefined),
+      fetchCountryHistory(pageParam, PAGE, filter || undefined),
     initialPageParam: 0,
     getNextPageParam: (last, all) => {
       const loaded = all.reduce((n, p) => n + p.rows.length, 0);
@@ -196,7 +196,7 @@ export function HistoryView() {
               </button>
             </div>
           </div>
-          <FrList filter={frFilter} />
+          <CountryList filter={frFilter} />
         </div>
       </div>
     </div>

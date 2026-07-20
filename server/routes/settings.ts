@@ -10,7 +10,7 @@ import {
   logoutUser,
   resetAuthTokens,
 } from "../osu/api.js";
-import { applyPollInterval, getFrRecheckHours } from "../sync/daemon.js";
+import { applyPollInterval, getCountryRecheckHours } from "../sync/daemon.js";
 import { getDisplayPrefs, setDisplayPrefs } from "../prefs.js";
 
 export const settingsRouter = Router();
@@ -38,7 +38,7 @@ settingsRouter.get("/settings", (_req, res) =>
   res.json({
     apiRpm: getCurrentRpm(),
     pollIntervalSeconds: getPollSeconds(),
-    frRecheckHours: getFrRecheckHours(),
+    countryRecheckHours: getCountryRecheckHours(),
     display: getDisplayPrefs(),
     oauth: {
       clientId: config.osuClientId,
@@ -53,7 +53,7 @@ settingsRouter.post("/settings", (req, res) => {
   const body = req.body as {
     apiRpm?: unknown;
     pollIntervalSeconds?: unknown;
-    frRecheckHours?: unknown;
+    countryRecheckHours?: unknown;
     display?: { wither?: unknown };
   };
   if (body.display != null) {
@@ -62,13 +62,13 @@ settingsRouter.post("/settings", (req, res) => {
         body.display.wither == null ? undefined : Boolean(body.display.wither),
     });
   }
-  if (body.frRecheckHours != null) {
-    const h = Number(body.frRecheckHours);
+  if (body.countryRecheckHours != null) {
+    const h = Number(body.countryRecheckHours);
     if (!Number.isFinite(h) || h < 1 || h > 720)
       return res
         .status(400)
-        .json({ ok: false, error: "invalid frRecheckHours (1..720)" });
-    setState("fr_recheck_hours", String(Math.round(h)));
+        .json({ ok: false, error: "invalid countryRecheckHours (1..720)" });
+    setState("country_recheck_hours", String(Math.round(h)));
   }
   if (body.apiRpm != null) {
     const r = Number(body.apiRpm);

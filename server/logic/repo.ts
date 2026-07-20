@@ -83,7 +83,7 @@ export function saveScores(
     // (Polling re-stamps right after via its immediate check.)
     if (hasNewScore)
       db.prepare(
-        "UPDATE beatmap_user SET fr_checked_at = NULL WHERE beatmap_id = ?"
+        "UPDATE beatmap_user SET country_checked_at = NULL WHERE beatmap_id = ?"
       ).run(beatmapId);
   });
 }

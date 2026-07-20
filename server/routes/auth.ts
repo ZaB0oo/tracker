@@ -7,7 +7,7 @@ import {
   isUserConnected,
   logoutUser,
 } from "../osu/api.js";
-import { runFrSweep } from "../sync/daemon.js";
+import { runCountrySweep } from "../sync/daemon.js";
 
 // User OAuth (country leaderboards, requires supporter)
 export const authRouter = Router();
@@ -25,7 +25,7 @@ authRouter.get("/auth/callback", async (req, res) => {
     } catch {
       /* profile will be fetched later via /auth/status */
     }
-    void runFrSweep();
+    void runCountrySweep();
     res.send(
       "<body style='background:#17131f;color:#e8e3f2;font-family:sans-serif'>" +
         "<h2>osu! account connected ✔</h2><p>The country leaderboard sweep is " +

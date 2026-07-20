@@ -72,8 +72,8 @@ CREATE TABLE IF NOT EXISTS beatmap_user (
   fetched_at TEXT,                    -- last backfill of this map (NULL = never fetched)
   played INTEGER NOT NULL DEFAULT 0,
   any_fc INTEGER NOT NULL DEFAULT 0,  -- at least one FC (any mods)
-  fr_first INTEGER NOT NULL DEFAULT 0, -- I hold the country #1 on the leaderboard
-  fr_checked_at TEXT,                  -- last country leaderboard check
+  country_first INTEGER NOT NULL DEFAULT 0, -- I hold the country #1 on the leaderboard
+  country_checked_at TEXT,                  -- last country leaderboard check
   best_lazer_score_id INTEGER REFERENCES scores(id),
   best_legacy_score_id INTEGER REFERENCES scores(id)
 );
@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS metrics (
 
 -- country #1 history: one row per transition detected by the checks
 -- (gained = I take the #1, lost = someone snipes me).
-CREATE TABLE IF NOT EXISTS fr_first_events (
+CREATE TABLE IF NOT EXISTS country_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   beatmap_id INTEGER NOT NULL,
   event TEXT NOT NULL,                -- 'gained' | 'lost'
@@ -106,5 +106,5 @@ CREATE TABLE IF NOT EXISTS fr_first_events (
   by_user_id INTEGER,                 -- for 'lost': the sniper
   by_username TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_fr_events_at ON fr_first_events(at);
+CREATE INDEX IF NOT EXISTS idx_country_events_at ON country_events(at);
 

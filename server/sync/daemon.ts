@@ -146,7 +146,7 @@ export function getDaemonStatus(): DaemonStatus & { busy: string[] } {
   if (status.phase === "catalog") busy.push("catalog import");
   if (status.phase === "enrich") busy.push("enrichment");
   if (status.backfill.running) busy.push("backfill");
-  if (frRunning) {
+  if (countryRunning) {
     const cc = getStoredCountryCode();
     busy.push(`${cc ? `#1 ${cc}` : "country #1"} sweep`);
   }
@@ -241,24 +241,24 @@ export async function pollRecentScores(): Promise<number> {
   // New score => IMMEDIATE country leaderboard check at high priority (without
   // it, the map would wait its turn behind the whole initial sweep).
   if (freshBeatmapIds.length > 0 && isUserConnected()) {
-    const invalidateFr = db.prepare(
-      "UPDATE beatmap_user SET fr_checked_at = NULL WHERE beatmap_id = ?"
+    const invalidateCountry = db.prepare(
+      "UPDATE beatmap_user SET country_checked_at = NULL WHERE beatmap_id = ?"
     );
     for (const id of freshBeatmapIds) {
       try {
         const top = await getCountryTop(id, "high");
-        applyFrCheck(id, top, true);
+        applyCountryCheck(id, top, true);
         // The leaderboard can lag behind a fresh submit: if I'm not on top
         // right now, don't trust the result. Leave the map in the sweep queue
         // (survives a restart: the periodic tick re-checks it within minutes)
         // AND schedule a quick confirmation ~10 min from now.
         if (!(top && top.user_id === config.osuUserId)) {
-          invalidateFr.run(id);
-          scheduleFrConfirm(id);
+          invalidateCountry.run(id);
+          scheduleCountryConfirm(id);
         }
       } catch (e) {
         logError(e, `immediate country check map ${id}`);
-        invalidateFr.run(id); // the background sweep will retry
+        invalidateCountry.run(id); // the background sweep will retry
         const msg = String(e);
         if (msg.includes("not connected") || msg.includes("supporter")) break;
       }
@@ -276,8 +276,8 @@ function getPollMs(): number {
 }
 
 /** Delay (hours) before re-checking a held country #1 — configurable in the UI. */
-export function getFrRecheckHours(): number {
-  const v = Number(getState("fr_recheck_hours"));
+export function getCountryRecheckHours(): number {
+  const v = Number(getState("country_recheck_hours"));
   // 48h default: with 20k+ #1s a 24h cycle would spend hours/day just
   // re-checking, competing with polling and new-map catch-up.
   return Number.isFinite(v) && v >= 1 ? Math.round(v) : 48;
@@ -398,15 +398,15 @@ export function startCatalogRefresh(): void {
       if (isUserConnected()) {
         // maps with a fresh score still awaiting their country check: high
         // priority, ahead of the low-priority sweep
-        await confirmRecentFrChecks();
+        await confirmRecentCountryChecks();
         getDb()
           .prepare(
-            `UPDATE beatmap_user SET fr_checked_at = NULL
-             WHERE fr_first = 1
-               AND fr_checked_at < datetime('now', '-' || ? || ' hours')`
+            `UPDATE beatmap_user SET country_checked_at = NULL
+             WHERE country_first = 1
+               AND country_checked_at < datetime('now', '-' || ? || ' hours')`
           )
-          .run(getFrRecheckHours());
-        void runFrSweep();
+          .run(getCountryRecheckHours());
+        void runCountrySweep();
       }
       const last = getState("catalog_delta_at");
       if (last && Date.now() - Date.parse(last) < MIN_INTERVAL_MS) return;
@@ -421,25 +421,25 @@ export function startCatalogRefresh(): void {
 
 // ---------- Country leaderboard sweep: my country #1s ----------
 
-let frWanted = false;
-let frRunning = false;
+let countryWanted = false;
+let countryRunning = false;
 
 /**
  * Deferred confirmation after a new score: osu!'s leaderboard can take a
  * moment to include a fresh submit, so an immediate "not #1" result may be
  * stale. One re-check ~2 min later catches the propagation lag (without it,
  * the map would be stamped as checked and never revisited, since the periodic
- * snipe re-check only targets maps where fr_first = 1).
+ * snipe re-check only targets maps where country_first = 1).
  */
-const FR_CONFIRM_DELAY_MS = 2 * 60_000;
+const COUNTRY_CONFIRM_DELAY_MS = 2 * 60_000;
 
-function scheduleFrConfirm(beatmapId: number): void {
+function scheduleCountryConfirm(beatmapId: number): void {
   const t = setTimeout(() => {
     if (!isUserConnected()) return;
     getCountryTop(beatmapId, "high")
-      .then((top) => applyFrCheck(beatmapId, top, true))
+      .then((top) => applyCountryCheck(beatmapId, top, true))
       .catch((e) => logError(e, `deferred country check map ${beatmapId}`));
-  }, FR_CONFIRM_DELAY_MS);
+  }, COUNTRY_CONFIRM_DELAY_MS);
   t.unref(); // never keeps the process alive
 }
 
@@ -449,13 +449,13 @@ function scheduleFrConfirm(beatmapId: number): void {
  * would only reach these maps at low priority behind the whole queue. Runs at
  * each periodic tick (1 min after startup, then every 6 h); cheap when empty.
  */
-export async function confirmRecentFrChecks(): Promise<void> {
+export async function confirmRecentCountryChecks(): Promise<void> {
   if (!isUserConnected()) return;
   const rows = getDb()
     .prepare(
       `SELECT u.beatmap_id AS id FROM beatmap_user u
        JOIN beatmaps b ON b.id = u.beatmap_id
-       WHERE u.played = 1 AND u.fr_checked_at IS NULL AND b.ruleset = 0
+       WHERE u.played = 1 AND u.country_checked_at IS NULL AND b.ruleset = 0
          AND EXISTS (
            SELECT 1 FROM scores s
            WHERE s.beatmap_id = u.beatmap_id
@@ -466,7 +466,7 @@ export async function confirmRecentFrChecks(): Promise<void> {
   for (const { id } of rows) {
     try {
       const top = await getCountryTop(id, "high");
-      applyFrCheck(id, top, true);
+      applyCountryCheck(id, top, true);
       logActivity(
         "country #1",
         () =>
@@ -484,12 +484,12 @@ export async function confirmRecentFrChecks(): Promise<void> {
 
 /**
  * Applies the result of a country leaderboard check and logs the transitions
- * (gained/lost) into fr_first_events.
+ * (gained/lost) into country_events.
  * `recordInitial`: also logs taking a #1 on a never-checked map (the case of
  * the immediate check after a new score); the initial sweep, in contrast, sets
  * the state silently so as not to flood the history.
  */
-export function applyFrCheck(
+export function applyCountryCheck(
   beatmapId: number,
   top: import("../osu/types.js").SoloScore | null,
   recordInitial: boolean
@@ -497,22 +497,22 @@ export function applyFrCheck(
   const db = getDb();
   const prev = db
     .prepare(
-      "SELECT fr_first, fr_checked_at FROM beatmap_user WHERE beatmap_id = ?"
+      "SELECT country_first, country_checked_at FROM beatmap_user WHERE beatmap_id = ?"
     )
     .get(beatmapId) as
-    | { fr_first: number; fr_checked_at: string | null }
+    | { country_first: number; country_checked_at: string | null }
     | undefined;
   const isFirst = top && top.user_id === config.osuUserId ? 1 : 0;
-  const wasChecked = prev?.fr_checked_at != null;
-  const prevFirst = prev?.fr_first ?? 0;
+  const wasChecked = prev?.country_checked_at != null;
+  const prevFirst = prev?.country_first ?? 0;
 
-  // Losing a held #1 is ALWAYS logged (fr_first=1 implies a check had
-  // established it, even if fr_checked_at was reset to NULL for the re-check).
+  // Losing a held #1 is ALWAYS logged (country_first=1 implies a check had
+  // established it, even if country_checked_at was reset to NULL for the re-check).
   // Gains stay silent during the initial sweep.
   const shouldRecord = prevFirst === 1 || wasChecked || recordInitial;
   if (shouldRecord && prevFirst !== isFirst) {
     db.prepare(
-      `INSERT INTO fr_first_events (beatmap_id, event, at, score_at, by_user_id, by_username)
+      `INSERT INTO country_events (beatmap_id, event, at, score_at, by_user_id, by_username)
        VALUES (?, ?, datetime('now'), ?, ?, ?)`
     ).run(
       beatmapId,
@@ -524,38 +524,38 @@ export function applyFrCheck(
     );
   }
   db.prepare(
-    "UPDATE beatmap_user SET fr_first = ?, fr_checked_at = datetime('now') WHERE beatmap_id = ?"
+    "UPDATE beatmap_user SET country_first = ?, country_checked_at = datetime('now') WHERE beatmap_id = ?"
   ).run(isFirst, beatmapId);
 }
 
 /**
  * Checks the country leaderboard of each played, not-yet-checked map
- * (fr_checked_at NULL) and marks fr_first if I hold the top.
+ * (country_checked_at NULL) and marks country_first if I hold the top.
  * Resumable, low priority, requires a connected account (+supporter).
  */
-export async function runFrSweep(): Promise<void> {
-  if (frRunning) return;
-  frRunning = true;
-  frWanted = true;
+export async function runCountrySweep(): Promise<void> {
+  if (countryRunning) return;
+  countryRunning = true;
+  countryWanted = true;
   try {
     const db = getDb();
     const nextBatch = db.prepare(
       `SELECT u.beatmap_id AS id FROM beatmap_user u
        JOIN beatmaps b ON b.id = u.beatmap_id
-       WHERE u.played = 1 AND u.fr_checked_at IS NULL AND b.ruleset = 0
-       ORDER BY u.fr_first DESC, u.beatmap_id
+       WHERE u.played = 1 AND u.country_checked_at IS NULL AND b.ruleset = 0
+       ORDER BY u.country_first DESC, u.beatmap_id
        LIMIT 200`
     );
     let done = 0;
-    while (frWanted) {
+    while (countryWanted) {
       const ids = (nextBatch.all() as { id: number }[]).map((r) => r.id);
       if (ids.length === 0) break;
       for (const id of ids) {
-        if (!frWanted) break;
+        if (!countryWanted) break;
         try {
           const top = await getCountryTop(id, "low");
           const cc = getStoredCountryCode();
-          applyFrCheck(id, top, false);
+          applyCountryCheck(id, top, false);
           done++;
           logActivity(
               `${cc ? `#1 ${cc}` : "country #1"} sweep`,
@@ -575,7 +575,7 @@ export async function runFrSweep(): Promise<void> {
           const msg = String(e);
           // no connected account or no supporter: no point insisting
           if (msg.includes("not connected") || msg.includes("supporter")) {
-            frWanted = false;
+            countryWanted = false;
             break;
           }
         }
@@ -583,12 +583,12 @@ export async function runFrSweep(): Promise<void> {
     }
     if (done > 0) console.log(`[sync] country sweep: ${done} maps checked`);
   } finally {
-    frRunning = false;
+    countryRunning = false;
   }
 }
 
-export function pauseFrSweep(): void {
-  frWanted = false;
+export function pauseCountrySweep(): void {
+  countryWanted = false;
 }
 
 /**

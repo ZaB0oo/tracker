@@ -107,8 +107,8 @@ const COLUMNS: Col[] = [
     render: (r) => (r.mod_multiplier == null ? "—" : `×${r.mod_multiplier.toFixed(2)}`),
   },
   {
-    id: "fr_first", label: "#1", width: 40,
-    render: (r) => (r.fr_first ? "🥇" : ""),
+    id: "country_first", label: "#1", width: 40,
+    render: (r) => (r.country_first ? "🥇" : ""),
   },
   { id: "pp", label: "pp", width: 55, sortable: true, render: (r) => (r.pp == null ? "—" : Math.round(r.pp)) },
   { id: "ended_at", label: "Played on", width: 90, sortable: true, render: (r) => fmtDate(r.ended_at) },

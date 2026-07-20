@@ -30,10 +30,10 @@ historyRouter.get("/clears", (req, res) => {
 });
 
 /**
- * GET /api/fr-history — history of country #1s gained/lost.
+ * GET /api/country-history — history of country #1s gained/lost.
  * Params: event=gained|lost (optional), offset, limit.
  */
-historyRouter.get("/fr-history", (req, res) => {
+historyRouter.get("/country-history", (req, res) => {
   const db = getDb();
   const q = req.query as Record<string, string | undefined>;
   const ev = q.event === "gained" || q.event === "lost" ? q.event : null;
@@ -45,7 +45,7 @@ historyRouter.get("/fr-history", (req, res) => {
     .prepare(
       `SELECT e.id, e.event, e.at, e.score_at, e.by_user_id, e.by_username,
         e.beatmap_id, b.version, b.star_rating, st.artist, st.title
-       FROM fr_first_events e
+       FROM country_events e
        JOIN beatmaps b ON b.id = e.beatmap_id
        JOIN beatmapsets st ON st.id = b.beatmapset_id
        ${where}
@@ -54,7 +54,7 @@ historyRouter.get("/fr-history", (req, res) => {
     )
     .all(limit, offset);
   const total = (
-    db.prepare(`SELECT COUNT(*) c FROM fr_first_events e ${where}`).get() as {
+    db.prepare(`SELECT COUNT(*) c FROM country_events e ${where}`).get() as {
       c: number;
     }
   ).c;
