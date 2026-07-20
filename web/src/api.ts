@@ -23,6 +23,19 @@ export async function fetchOverlayStats(): Promise<OverlayStats> {
   return res.json();
 }
 
+export interface OverlayMetric {
+  id: number;
+  name: string;
+  kind: "count" | "ranked_score";
+  count: number;
+}
+
+export async function fetchOverlayMetrics(ids: number[]): Promise<{ metrics: OverlayMetric[] }> {
+  const res = await fetch(`/api/overlay-metrics?ids=${ids.join(",")}`);
+  if (!res.ok) throw new Error(`overlay-metrics: HTTP ${res.status}`);
+  return res.json();
+}
+
 export async function fetchMapDetail(id: number): Promise<MapDetail> {
   const res = await fetch(`/api/map/${id}`);
   if (!res.ok) throw new Error(`map: HTTP ${res.status}`);

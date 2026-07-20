@@ -4,6 +4,7 @@ import { fetchSkillCurve, fetchStats } from "../api";
 import { firstPlaceLabel, useCountryCode } from "../country";
 import { useDisplayPrefs } from "../prefs";
 import { useHidden } from "../visibility";
+import { ShareCard } from "./ShareCard";
 import { VisibilityMenu } from "./VisibilityMenu";
 import {
   FC_LABELS,
@@ -287,6 +288,7 @@ export function Dashboard() {
   const country = useCountryCode();
   const prefs = useDisplayPrefs();
   const distHidden = useHidden("dashboard-dist");
+  const [shareOpen, setShareOpen] = useState(false);
   const { data, isLoading, error } = useQuery({
     queryKey: ["stats"],
     queryFn: fetchStats,
@@ -442,6 +444,9 @@ export function Dashboard() {
       </div>
 
       <div className="view-toolbar">
+        <button onClick={() => setShareOpen(true)} title="Snapshot of your stats as a PNG image">
+          📤 Share card
+        </button>
         <VisibilityMenu
           items={dists.map((d) => ({ id: d.title, label: `Completion by ${d.title}` }))}
           isHidden={distHidden.isHidden}
@@ -449,6 +454,9 @@ export function Dashboard() {
           label="Completion shown"
         />
       </div>
+      {shareOpen && (
+        <ShareCard stats={data} country={country} onClose={() => setShareOpen(false)} />
+      )}
       <div className="dist-grid">
         {dists
           .filter((d) => !distHidden.isHidden(d.title))

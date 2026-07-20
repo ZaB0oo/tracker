@@ -62,45 +62,26 @@ export function getDb(): DatabaseSync {
   return db;
 }
 
-/** Additive migrations + cleanups for DBs created before a change. */
+/** Migrations for DBs created before a change (idempotent, cheap once done). */
 function migrate(d: DatabaseSync): void {
   // Rename the historical "fr_*" names (the tracker was FR-only at first) to
   // the generic "country_*" ones. Must run before anything referencing them.
-  const oldBu = d.prepare("PRAGMA table_info(beatmap_user)").all() as { name: string }[];
-  const hasOldCols = oldBu.some((c) => c.name === "fr_first");
-  const hasNewCols = oldBu.some((c) => c.name === "country_first");
-  if (hasOldCols && !hasNewCols) {
+  const buCols = d.prepare("PRAGMA table_info(beatmap_user)").all() as { name: string }[];
+  if (buCols.some((c) => c.name === "fr_first")) {
     d.exec("ALTER TABLE beatmap_user RENAME COLUMN fr_first TO country_first");
     d.exec("ALTER TABLE beatmap_user RENAME COLUMN fr_checked_at TO country_checked_at");
-  } else if (hasOldCols && hasNewCols) {
-    // Half-migrated DB: an interim build added empty country_* columns next to
-    // the fr_* ones (and a fresh sweep may have started filling them). Merge:
-    // keep any fresh re-check result, restore the old state everywhere else.
-    d.exec(
-      `UPDATE beatmap_user SET
-         country_first = CASE WHEN country_checked_at IS NOT NULL
-           THEN country_first ELSE fr_first END,
-         country_checked_at = COALESCE(country_checked_at, fr_checked_at)`
-    );
-    d.exec("ALTER TABLE beatmap_user DROP COLUMN fr_first");
-    d.exec("ALTER TABLE beatmap_user DROP COLUMN fr_checked_at");
   }
-  // schema.sql has already created the country_events table at this point (and
-  // it may even hold fresh rows on a half-migrated DB), so copy the old rows
-  // over WITHOUT their ids (avoids collisions; chronology lives in `at`).
+  // schema.sql has already created the (empty) country_events table at this
+  // point, so copy the old rows over WITHOUT their ids (avoids collisions;
+  // chronology lives in `at`).
   const hasOldEvents = d
     .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='fr_first_events'")
     .get();
   if (hasOldEvents) {
-    const oldCols = (
-      d.prepare("PRAGMA table_info(fr_first_events)").all() as { name: string }[]
-    ).map((c) => c.name);
-    const cols = ["beatmap_id", "event", "at", "score_at", "by_user_id", "by_username"]
-      .filter((c) => oldCols.includes(c))
-      .join(", ");
     d.exec(
-      `INSERT INTO country_events (${cols})
-       SELECT ${cols} FROM fr_first_events ORDER BY id`
+      `INSERT INTO country_events (beatmap_id, event, at, score_at, by_user_id, by_username)
+       SELECT beatmap_id, event, at, score_at, by_user_id, by_username
+       FROM fr_first_events ORDER BY id`
     );
     d.exec("DROP TABLE fr_first_events");
   }
@@ -109,70 +90,7 @@ function migrate(d: DatabaseSync): void {
      WHERE key = 'fr_recheck_hours'`
   );
 
-  const scoreCols = d.prepare("PRAGMA table_info(scores)").all() as { name: string }[];
-  if (!scoreCols.some((c) => c.name === "classic_total_score")) {
-    d.exec("ALTER TABLE scores ADD COLUMN classic_total_score INTEGER");
-  }
-  const setCols = d.prepare("PRAGMA table_info(beatmapsets)").all() as { name: string }[];
-  if (!setCols.some((c) => c.name === "download_disabled")) {
-    d.exec(
-      "ALTER TABLE beatmapsets ADD COLUMN download_disabled INTEGER NOT NULL DEFAULT 0"
-    );
-  }
-  if (!setCols.some((c) => c.name === "checked_at")) {
-    // direct check date via GET /beatmapsets/{id} (DMCA dump-diff)
-    d.exec("ALTER TABLE beatmapsets ADD COLUMN checked_at TEXT");
-  }
-  // leftovers from the old dump-diff job (removed once the catalog is complete)
-  d.exec("DROP TABLE IF EXISTS unresolved_sets");
-  // leftovers from the removed goal/near-SS features (replaced by custom metrics)
-  d.exec("DROP TABLE IF EXISTS goals");
-  for (const [table, col] of [
-    ["scores", "goal_eligible"],
-    ["scores", "near_ss"],
-    ["beatmap_user", "goal_fc"],
-    ["beatmap_user", "near_ss"],
-  ]) {
-    const cols = d.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
-    if (cols.some((c) => c.name === col))
-      d.exec(`ALTER TABLE ${table} DROP COLUMN ${col}`);
-  }
-  const frEvCols = d.prepare("PRAGMA table_info(country_events)").all() as { name: string }[];
-  if (frEvCols.length > 0 && !frEvCols.some((c) => c.name === "score_at")) {
-    // real date of the score/snipe (ended_at), in addition to the detection date
-    d.exec("ALTER TABLE country_events ADD COLUMN score_at TEXT");
-  }
-  const buCols = d.prepare("PRAGMA table_info(beatmap_user)").all() as { name: string }[];
-  if (!buCols.some((c) => c.name === "any_fc")) {
-    d.exec("ALTER TABLE beatmap_user ADD COLUMN any_fc INTEGER NOT NULL DEFAULT 0");
-    d.exec(
-      `UPDATE beatmap_user SET any_fc = EXISTS(
-         SELECT 1 FROM scores s
-         WHERE s.beatmap_id = beatmap_user.beatmap_id
-           AND s.passed = 1 AND s.fc_state <= 1)`
-    );
-  }
-  if (!buCols.some((c) => c.name === "country_first")) {
-    d.exec("ALTER TABLE beatmap_user ADD COLUMN country_first INTEGER NOT NULL DEFAULT 0");
-    d.exec("ALTER TABLE beatmap_user ADD COLUMN country_checked_at TEXT");
-  }
   seedDefaultMetrics(d);
-  // One-shot repair: older versions stamped fetched_at as soon as a score
-  // arrived via POLLING, skipping the map in the backfill (an old best could
-  // stay on osu!'s side). We re-queue all maps played since installation so
-  // the backfill re-fetches their complete list of scores.
-  const healed = d
-    .prepare("SELECT value FROM sync_state WHERE key = 'heal_poll_fetched'")
-    .get();
-  if (!healed) {
-    d.exec(
-      `UPDATE beatmap_user SET fetched_at = NULL WHERE beatmap_id IN (
-         SELECT DISTINCT beatmap_id FROM scores WHERE ended_at >= '2026-07-12')`
-    );
-    d.prepare(
-      "INSERT OR REPLACE INTO sync_state(key, value) VALUES('heal_poll_fetched', '1')"
-    ).run();
-  }
   // Startup repair: the immediate country check after a new score can race
   // osu!'s leaderboard update and stamp a false "not #1" (and the deferred
   // confirmation timer does not survive a restart). Re-queue maps whose

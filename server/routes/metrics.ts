@@ -20,6 +20,30 @@ metricsRouter.get("/metrics", (req, res) => {
   });
 });
 
+// Lean values for the stream overlay (polled every 5 s): name + current count
+// only. evalMetric is cached by params+scores-version, so repeat calls are free
+// until a new score arrives.
+metricsRouter.get("/overlay-metrics", (req, res) => {
+  const ids = String(req.query.ids ?? "")
+    .split(",")
+    .map(Number)
+    .filter((n) => Number.isInteger(n) && n > 0);
+  if (ids.length === 0) return res.json({ metrics: [] });
+  const rows = getDb()
+    .prepare(
+      `SELECT id, name, params FROM metrics
+       WHERE id IN (${ids.join(",")}) ORDER BY sort_order, id`
+    )
+    .all() as { id: number; name: string; params: string }[];
+  res.json({
+    metrics: rows.map((r) => {
+      const params = JSON.parse(r.params) as MetricParams;
+      const { count } = evalMetric(params, "month");
+      return { id: r.id, name: r.name, kind: params.kind, count };
+    }),
+  });
+});
+
 // Live preview for the builder: count + per-star-rating breakdown, unsaved.
 metricsRouter.post("/metrics/preview", (req, res) => {
   try {

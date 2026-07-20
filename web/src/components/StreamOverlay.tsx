@@ -1,7 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchOverlayStats, fetchSyncStatus, type OverlayStats } from "../api";
+import {
+  fetchOverlayMetrics,
+  fetchOverlayStats,
+  fetchSyncStatus,
+  type OverlayStats,
+} from "../api";
 import { firstPlaceLabel, useCountryCode } from "../country";
+
+// Custom metric ids from the ?metrics= query param (chosen in the configurator)
+const METRIC_IDS = (new URLSearchParams(window.location.search).get("metrics") ?? "")
+  .split(",")
+  .map(Number)
+  .filter((n) => Number.isInteger(n) && n > 0);
 
 // OBS overlay => English text, numbers in en-US format.
 const fmt = (n: number) => n.toLocaleString("en-US");
@@ -30,7 +41,14 @@ export function StreamOverlay() {
     queryFn: fetchSyncStatus,
     refetchInterval: 5000,
   });
+  const { data: metrics } = useQuery({
+    queryKey: ["overlay-metrics"],
+    queryFn: () => fetchOverlayMetrics(METRIC_IDS),
+    refetchInterval: 5000,
+    enabled: METRIC_IDS.length > 0,
+  });
   const country = useCountryCode();
+  const metricBaseline = useRef<Map<number, number> | null>(null);
   const baseline = useRef<OverlayStats | null>(null);
   const startedAt = useRef(Date.now());
   const [, tick] = useState(0);
@@ -43,6 +61,8 @@ export function StreamOverlay() {
   }, []);
 
   if (data && !baseline.current) baseline.current = data;
+  if (metrics && !metricBaseline.current)
+    metricBaseline.current = new Map(metrics.metrics.map((m) => [m.id, m.count]));
   if (!data || !baseline.current) return null;
   const b = baseline.current;
 
@@ -101,6 +121,22 @@ export function StreamOverlay() {
           <div className="ov-row">
             <span className="ov-tag">RANKED SCORE</span>
             <span>Classic <b>{fmt(data.rankedClassic)}</b></span>
+          </div>
+        )}
+        {metrics && metrics.metrics.length > 0 && (
+          <div className="ov-row">
+            <span className="ov-tag">METRICS</span>
+            {metrics.metrics.map((m) => {
+              const base = metricBaseline.current?.get(m.id) ?? m.count;
+              const gain = m.count - base;
+              const f = m.kind === "ranked_score" ? fmtB : fmt;
+              return (
+                <span key={m.id}>
+                  {m.name} <b>{f(m.count)}</b>
+                  {gain > 0 && <span className="ov-gain"> +{f(gain)}</span>}
+                </span>
+              );
+            })}
           </div>
         )}
         {!hide.has("last") && lastPlay && (

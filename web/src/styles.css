@@ -636,6 +636,12 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 /* evolution inside the card */
 .metric-evo { margin-top: 8px; }
 
+.ov-gain { color: var(--green); font-weight: 700; }
+
+/* Share card modal */
+.share-preview { display: flex; justify-content: center; margin: 10px 0; }
+.share-preview svg { max-width: 100%; height: auto; border-radius: 10px; }
+
 /* Metric builder */
 .mb-ids {
   width: 100%; box-sizing: border-box; resize: vertical; min-height: 70px;
