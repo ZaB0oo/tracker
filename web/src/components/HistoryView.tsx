@@ -3,6 +3,7 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { fetchClears, fetchCountryHistory } from "../api";
 import { firstPlaceLabel, useCountryCode } from "../country";
 import { fmtDateTime } from "../format";
+import { GradeBadge } from "./GradeBadge";
 import { FC_LABELS } from "../types";
 
 const PAGE = 100;
@@ -53,8 +54,8 @@ function ClearsList() {
           title="Double-click: open the map on osu.ppy.sh"
         >
           <span className="fr-event-date">{fmtDate(c.ended_at)}</span>
-          <span className={`fr-event-badge grade grade-${grade(c.rank)}`}>
-            {grade(c.rank)}
+          <span className="fr-event-badge">
+            <GradeBadge grade={c.rank} width={36} title={grade(c.rank)} />
           </span>
           <span className="fr-event-map">
             {c.artist} – {c.title}{" "}
@@ -131,7 +132,7 @@ function CountryList({ filter }: { filter: "" | "gained" | "lost" }) {
             {fmtDate(e.score_at ?? e.at)}
           </span>
           <span className={`fr-event-badge ${e.event}`}>
-            {e.event === "gained" ? "🥇 GAINED" : "💀 LOST"}
+            {e.event === "gained" ? "GAINED" : "LOST"}
           </span>
           <span className="fr-event-map">
             {e.artist} – {e.title}{" "}

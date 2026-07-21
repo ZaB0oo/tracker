@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { deleteMetric, fetchMetrics, type Metric } from "../api";
 import { fmtNum, fmtDate } from "../format";
 import { EvoChart } from "./EvoChart";
+import { MissingIcon } from "./Icons";
 import { MetricBuilder } from "./MetricBuilder";
 
 const fmtBig = (n: number) =>
@@ -18,10 +19,12 @@ function MetricCard({
   m,
   onDelete,
   onEdit,
+  onMissing,
 }: {
   m: Metric;
   onDelete: (id: number) => void;
   onEdit: (m: Metric) => void;
+  onMissing: (m: Metric) => void;
 }) {
   const fmtV = m.params.kind === "ranked_score" ? fmtBig : fmtNum;
   const isRanked = m.params.kind === "ranked_score";
@@ -59,6 +62,15 @@ function MetricCard({
     <div className="panel metric-card">
       <div className="metric-head">
         <h3>{m.name}</h3>
+        {!isRanked && (
+          <button
+            className="metric-btn"
+            title="List the missing maps in the Maps tab"
+            onClick={() => onMissing(m)}
+          >
+            <MissingIcon />
+          </button>
+        )}
         <button className="metric-btn" title="Edit this metric" onClick={() => onEdit(m)}>
           ✎
         </button>
@@ -86,6 +98,7 @@ function MetricCard({
             const w = hasTotals
               ? b.total > 0 ? (b.value / b.total) * 100 : 0
               : (b.value / srMax) * 100;
+            const pct = hasTotals && b.total > 0 ? (b.value / b.total) * 100 : null;
             return (
               <div key={b.sr} className="metric-sr-row">
                 <span className="metric-sr-label">{srLabel(b.sr)}</span>
@@ -93,7 +106,11 @@ function MetricCard({
                   <div className="metric-sr-fill" style={{ width: `${w}%` }} />
                 </div>
                 <span className="metric-sr-val">
-                  {hasTotals ? `${fmtV(b.value)}/${fmtV(b.total)}` : fmtV(b.value)}
+                  <b>{fmtV(b.value)}</b>
+                  {hasTotals && <span className="metric-sr-total"> / {fmtV(b.total)}</span>}
+                  {pct != null && (
+                    <span className="metric-sr-pct">{pct.toFixed(1)}%</span>
+                  )}
                 </span>
               </div>
             );
@@ -131,7 +148,11 @@ function MetricCard({
 }
 
 /** Metrics tab: user-defined metrics as milestones + optional evolution. */
-export function MetricsView() {
+export function MetricsView({
+  onMissingMaps,
+}: {
+  onMissingMaps: (id: number, name: string) => void;
+}) {
   const qc = useQueryClient();
   const [gran, setGran] = useState<"month" | "day">("month");
   const [builderOpen, setBuilderOpen] = useState(false);
@@ -176,6 +197,7 @@ export function MetricsView() {
             m={m}
             onDelete={(id) => del.mutate(id)}
             onEdit={(metric) => setEditing(metric)}
+            onMissing={(metric) => onMissingMaps(metric.id, metric.name)}
           />
         ))}
       </div>

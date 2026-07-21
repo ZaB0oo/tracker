@@ -95,6 +95,12 @@ export function FilterBar({
     badges.push({ key: "mods", label: `Mods: ${local.mods}`, clear: () => set("mods", "") });
   if (local.countryFirst)
     badges.push({ key: "fr", label: firstPlaceLabel(country), clear: () => set("countryFirst", false) });
+  if (local.metricMissing)
+    badges.push({
+      key: "metric",
+      label: `Missing: ${local.metricMissing.name}`,
+      clear: () => set("metricMissing", null),
+    });
   if (local.platform)
     badges.push({
       key: "platform",

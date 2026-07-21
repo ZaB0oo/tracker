@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { getDb } from "../db/db.js";
+import { mapWhere, scoreWhere, type MetricParams } from "../logic/metrics.js";
 import { missingExprs } from "../logic/scoreSql.js";
 
 export const tableRouter = Router();
@@ -91,6 +92,22 @@ tableRouter.get("/table", (req, res) => {
     }
   }
   if (q.countryFirst === "1") where.push("u.country_first = 1");
+  // Missing maps of a metric: maps matching its MAP conditions that have no
+  // score matching its SCORE conditions (the inner alias `s` shadows the
+  // outer best-score join on purpose — scoreWhere targets the subquery rows).
+  if (q.metricMissing != null && q.metricMissing !== "") {
+    const row = db
+      .prepare("SELECT params FROM metrics WHERE id = ?")
+      .get(Number(q.metricMissing)) as { params: string } | undefined;
+    if (row) {
+      const p = JSON.parse(row.params) as MetricParams;
+      where.push(mapWhere(p.map));
+      where.push(
+        `NOT EXISTS (SELECT 1 FROM scores s
+           WHERE s.beatmap_id = b.id AND ${scoreWhere(p.score)})`
+      );
+    }
+  }
   // best's platform: native lazer (no legacy id) vs stable (converted)
   if (q.platform === "lazer") where.push("s.legacy_score_id IS NULL AND s.id IS NOT NULL");
   if (q.platform === "stable") where.push("s.legacy_score_id IS NOT NULL");

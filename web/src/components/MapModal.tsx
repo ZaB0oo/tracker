@@ -1,6 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { fetchMapDetail } from "../api";
 import { firstPlaceLabel, useCountryCode } from "../country";
+import { GradeBadge } from "./GradeBadge";
+import { MedalIcon } from "./Icons";
 import { fmtDate, fmtDateTime } from "../format";
 import { FC_LABELS, STATUS_LABELS } from "../types";
 
@@ -90,7 +92,9 @@ export function MapModal({
                 </span>
               ))}
               {data.user?.country_first ? (
-                <span className="mm-stat mm-gold">🥇 {firstPlaceLabel(country)}</span>
+                <span className="mm-stat mm-gold">
+                  <MedalIcon width={13} /> {firstPlaceLabel(country)}
+                </span>
               ) : null}
               {data.user?.any_fc ? (
                 <span className="mm-stat mm-green">FC ✓</span>
@@ -104,8 +108,8 @@ export function MapModal({
             {data.scores.map((s) => (
               <div key={s.id} className="mm-score-row">
                 <span className="mm-date">{fmtDT(s.ended_at)}</span>
-                <span className={`grade grade-${displayGrade(s.rank)}`}>
-                  {displayGrade(s.rank)}
+                <span className="mm-grade">
+                  <GradeBadge grade={s.rank} width={34} title={displayGrade(s.rank)} />
                 </span>
                 <span className="mm-mods">{modsText(s.mods)}</span>
                 <span className="mm-acc">{(s.accuracy * 100).toFixed(2)}%</span>
@@ -116,8 +120,8 @@ export function MapModal({
                     : ""}
                 </span>
                 <span className="mm-combo">{fmt(s.max_combo)}x</span>
-                <span className="mm-fc">
-                  {s.fc_state <= 1 ? FC_LABELS[s.fc_state] : ""}
+                <span className={`mm-fc fc fc-${s.fc_state}`}>
+                  {FC_LABELS[s.fc_state]}
                 </span>
                 <span className="mm-pp">
                   {s.pp != null ? `${Math.round(s.pp)}pp` : ""}

@@ -35,11 +35,27 @@ metricsRouter.get("/overlay-metrics", (req, res) => {
        WHERE id IN (${ids.join(",")}) ORDER BY sort_order, id`
     )
     .all() as { id: number; name: string; params: string }[];
+  // Total (and %) are only meaningful when the metric restricts its map pool:
+  // for "all maps" metrics the total is just the whole catalog — noise on
+  // stream. total: 0 tells the overlay to hide it.
+  const catalogTotal = (
+    getDb()
+      .prepare(
+        "SELECT COUNT(*) c FROM beatmaps WHERE ruleset = 0 AND status IN (1, 2, 4)"
+      )
+      .get() as { c: number }
+  ).c;
   res.json({
     metrics: rows.map((r) => {
       const params = JSON.parse(r.params) as MetricParams;
-      const { count } = evalMetric(params, "month");
-      return { id: r.id, name: r.name, kind: params.kind, count };
+      const { count, total } = evalMetric(params, "month");
+      return {
+        id: r.id,
+        name: r.name,
+        kind: params.kind,
+        count,
+        total: total !== catalogTotal ? total : 0,
+      };
     }),
   });
 });

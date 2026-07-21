@@ -23,7 +23,7 @@ export const syncRouter = Router();
 // Manual country leaderboard sweep (otherwise: auto after login, after each
 // new score, and daily re-check of held #1s)
 syncRouter.post("/sync/country-sweep", (_req, res) => {
-  void runCountrySweep();
+  void runCountrySweep(true); // manual start: overrides the backfill deferral
   res.json({ ok: true, started: true });
 });
 syncRouter.post("/sync/country-pause", (_req, res) => {

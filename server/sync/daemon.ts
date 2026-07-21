@@ -533,8 +533,19 @@ export function applyCountryCheck(
  * (country_checked_at NULL) and marks country_first if I hold the top.
  * Resumable, low priority, requires a connected account (+supporter).
  */
-export async function runCountrySweep(): Promise<void> {
+export async function runCountrySweep(force = false): Promise<void> {
   if (countryRunning) return;
+  // The full sweep and the backfill both consume the same 60 req/min budget:
+  // interleaving them doubles the duration of BOTH. Automatic starts (periodic
+  // tick, auth callback) are deferred while the backfill runs — the sweep is
+  // launched as soon as the backfill completes. Manual starts (menu) force.
+  if (!force && status.backfill.running) {
+    logActivity(
+      "country #1",
+      "sweep deferred until the backfill completes (shared rate limit)"
+    );
+    return;
+  }
   countryRunning = true;
   countryWanted = true;
   try {
@@ -754,9 +765,13 @@ async function runBackfill(): Promise<void> {
        ORDER BY b.id
        LIMIT 200`
     );
+    let completed = false;
     while (backfillWanted) {
       const ids = (nextBatch.all() as { id: number }[]).map((r) => r.id);
-      if (ids.length === 0) break;
+      if (ids.length === 0) {
+        completed = true;
+        break;
+      }
       for (const id of ids) {
         if (!backfillWanted) break;
         try {
@@ -773,6 +788,12 @@ async function runBackfill(): Promise<void> {
           logError(e, `backfill map ${id}`);
         }
       }
+    }
+    // Backfill done => start the country sweep that was deferred meanwhile
+    // (automatic starts skip while the backfill holds the rate budget).
+    if (completed && isUserConnected()) {
+      status.backfill.running = false;
+      void runCountrySweep();
     }
   } finally {
     status.backfill.running = false;

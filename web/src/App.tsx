@@ -67,7 +67,16 @@ export default function App() {
           <ScoreTable filters={filters} sort={sort} onSortChange={setSort} />
         </>
       )}
-      {view === "metrics" && <MetricsView />}
+      {view === "metrics" && (
+        <MetricsView
+          onMissingMaps={(id, name) =>
+            drillDown(
+              { ...DEFAULT_FILTERS, mode: filters.mode, metricMissing: { id, name } },
+              [{ id: "star_rating", desc: false }]
+            )
+          }
+        />
+      )}
       {view === "history" && <HistoryView />}
       {view === "dashboard" && <Dashboard />}
     </div>

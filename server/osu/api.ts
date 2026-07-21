@@ -154,11 +154,31 @@ async function getUserToken(): Promise<string> {
   return userToken!.value;
 }
 
-/** Connected account profile (username, avatar, country), via GET /me. */
+/** osu! profile stats used by the share card (subset of GET /me statistics). */
+export interface ProfileStats {
+  play_count: number;
+  play_time: number; // seconds
+  total_hits: number;
+  level: number;
+  medals: number;
+  global_rank: number | null;
+  country_rank: number | null;
+  pp: number;
+  accuracy: number; // hit accuracy in percent
+  ranked_score: number;
+  total_score: number;
+  followers: number;
+  join_date: string; // ISO
+  supporter: boolean;
+}
+
+/** Connected account profile (username, avatar, country, stats), via GET /me. */
 export async function fetchUserProfile(): Promise<{
   username: string;
   avatar_url: string;
+  cover_url: string;
   country_code: string;
+  stats: ProfileStats;
 } | null> {
   return limiter.schedule(async () => {
     const auth = await getUserToken();
@@ -173,13 +193,48 @@ export async function fetchUserProfile(): Promise<{
     const j = (await res.json()) as {
       username: string;
       avatar_url: string;
+      cover_url?: string;
+      cover?: { url?: string; custom_url?: string };
       country_code?: string;
       country?: { code?: string };
+      statistics?: {
+        play_count?: number;
+        play_time?: number;
+        total_hits?: number;
+        level?: { current?: number };
+        global_rank?: number | null;
+        country_rank?: number | null;
+        pp?: number;
+        hit_accuracy?: number;
+        ranked_score?: number;
+        total_score?: number;
+      };
+      user_achievements?: unknown[];
+      follower_count?: number;
+      join_date?: string;
+      is_supporter?: boolean;
     };
     return {
       username: j.username,
       avatar_url: j.avatar_url,
+      cover_url: j.cover_url ?? j.cover?.custom_url ?? j.cover?.url ?? "",
       country_code: j.country_code ?? j.country?.code ?? "",
+      stats: {
+        play_count: j.statistics?.play_count ?? 0,
+        play_time: j.statistics?.play_time ?? 0,
+        total_hits: j.statistics?.total_hits ?? 0,
+        level: j.statistics?.level?.current ?? 0,
+        medals: j.user_achievements?.length ?? 0,
+        global_rank: j.statistics?.global_rank ?? null,
+        country_rank: j.statistics?.country_rank ?? null,
+        pp: j.statistics?.pp ?? 0,
+        accuracy: j.statistics?.hit_accuracy ?? 0,
+        ranked_score: j.statistics?.ranked_score ?? 0,
+        total_score: j.statistics?.total_score ?? 0,
+        followers: j.follower_count ?? 0,
+        join_date: j.join_date ?? "",
+        supporter: j.is_supporter ?? false,
+      },
     };
   }, "high");
 }

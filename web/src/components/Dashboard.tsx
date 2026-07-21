@@ -4,7 +4,8 @@ import { fetchSkillCurve, fetchStats } from "../api";
 import { firstPlaceLabel, useCountryCode } from "../country";
 import { useDisplayPrefs } from "../prefs";
 import { useHidden } from "../visibility";
-import { ShareCard } from "./ShareCard";
+import { GradeBadge } from "./GradeBadge";
+import { MedalIcon } from "./Icons";
 import { VisibilityMenu } from "./VisibilityMenu";
 import {
   FC_LABELS,
@@ -248,7 +249,12 @@ function Bar({
       <span className="bar-label">
         {fmt(played)} / {fmt(total)} ({pct.toFixed(1)}%)
         {fc > 0 ? ` · FC ${fmt(fc)}` : ""}
-        {country > 0 ? ` · 🥇 ${fmt(country)}` : ""}
+        {country > 0 && (
+          <>
+            {" · "}
+            <MedalIcon width={12} /> {fmt(country)}
+          </>
+        )}
       </span>
       {done && <span className="bar-check">✓</span>}
     </div>
@@ -288,7 +294,6 @@ export function Dashboard() {
   const country = useCountryCode();
   const prefs = useDisplayPrefs();
   const distHidden = useHidden("dashboard-dist");
-  const [shareOpen, setShareOpen] = useState(false);
   const { data, isLoading, error } = useQuery({
     queryKey: ["stats"],
     queryFn: fetchStats,
@@ -309,9 +314,11 @@ export function Dashboard() {
 
   const gradeOrder = ["XH", "X", "SH", "S", "A", "B", "C", "D"];
   const gradeDisplay: Record<string, string> = { XH: "SSH", X: "SS" };
-  const grades = gradeOrder
-    .map((g) => ({ g, c: data.grades.find((x) => x.grade === g)?.c ?? 0 }))
-    .filter((x) => x.c > 0);
+  // all grades, zeros included (fixed 2x4 grid like the share card)
+  const grades = gradeOrder.map((g) => ({
+    g,
+    c: data.grades.find((x) => x.grade === g)?.c ?? 0,
+  }));
 
   const bucketRows = (buckets: Bucket[], label: (b: number) => string): DistRow[] =>
     buckets.map((b) => ({
@@ -426,17 +433,19 @@ export function Dashboard() {
         </div>
         <div className="hero-stat hero-grades">
           <h3>Grades</h3>
-          <div className="grade-dist">
+          <div className="grade-grid">
             {grades.map(({ g, c }) => (
-              <div key={g} className={`grade-pill grade-${gradeDisplay[g] ?? g}`}>
-                <b>{gradeDisplay[g] ?? g}</b> {fmt(c)}
+              <div key={g} className="grade-cell2">
+                <GradeBadge grade={g} width={48} title={gradeDisplay[g] ?? g} />
+                <span>{fmt(c)}</span>
               </div>
             ))}
           </div>
           <div className="grade-dist">
             {data.fc.map((f) => (
               <div key={f.fc_state} className="grade-pill">
-                <b>{FC_LABELS[f.fc_state]}</b> {fmt(f.c)}
+                <b className={`fc fc-${f.fc_state}`}>{FC_LABELS[f.fc_state]}</b>{" "}
+                {fmt(f.c)}
               </div>
             ))}
           </div>
@@ -444,9 +453,6 @@ export function Dashboard() {
       </div>
 
       <div className="view-toolbar">
-        <button onClick={() => setShareOpen(true)} title="Snapshot of your stats as a PNG image">
-          📤 Share card
-        </button>
         <VisibilityMenu
           items={dists.map((d) => ({ id: d.title, label: `Completion by ${d.title}` }))}
           isHidden={distHidden.isHidden}
@@ -454,9 +460,6 @@ export function Dashboard() {
           label="Completion shown"
         />
       </div>
-      {shareOpen && (
-        <ShareCard stats={data} country={country} onClose={() => setShareOpen(false)} />
-      )}
       <div className="dist-grid">
         {dists
           .filter((d) => !distHidden.isHidden(d.title))

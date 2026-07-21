@@ -2,6 +2,8 @@ import { useMemo, useRef, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { fetchTable } from "../api";
+import { GradeBadge } from "./GradeBadge";
+import { MedalIcon } from "./Icons";
 import { FC_LABELS, STATUS_LABELS, type Filters, type TableRow } from "../types";
 import { MapModal } from "./MapModal";
 import type { SortSpec } from "../App";
@@ -78,8 +80,8 @@ const COLUMNS: Col[] = [
   { id: "creator", label: "Mapper", width: 110, sortable: true, render: (r) => r.creator },
   {
     id: "grade", label: "Grade", width: 55, sortable: true,
-    render: (r) => grade(r.grade),
-    className: (r) => `grade grade-${grade(r.grade)}`,
+    render: (r) => <GradeBadge grade={r.grade} width={36} title={grade(r.grade)} />,
+    className: () => "grade-cell",
   },
   {
     id: "fc_state", label: "FC", width: 45, sortable: true,
@@ -108,7 +110,7 @@ const COLUMNS: Col[] = [
   },
   {
     id: "country_first", label: "#1", width: 40,
-    render: (r) => (r.country_first ? "🥇" : ""),
+    render: (r) => (r.country_first ? <MedalIcon width={15} /> : ""),
   },
   { id: "pp", label: "pp", width: 55, sortable: true, render: (r) => (r.pp == null ? "—" : Math.round(r.pp)) },
   { id: "ended_at", label: "Played on", width: 90, sortable: true, render: (r) => fmtDate(r.ended_at) },

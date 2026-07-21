@@ -172,6 +172,7 @@ export interface Filters {
   statuses: string[];
   mods: string;
   countryFirst: boolean;
+  metricMissing: { id: number; name: string } | null;
   platform: "" | "lazer" | "stable";
   srMin: string; srMax: string;
   arMin: string; arMax: string;
@@ -190,6 +191,7 @@ export const DEFAULT_FILTERS: Filters = {
   statuses: [],
   mods: "",
   countryFirst: false,
+  metricMissing: null,
   platform: "",
   srMin: "", srMax: "",
   arMin: "", arMax: "",
@@ -208,5 +210,5 @@ export const STATUS_LABELS: Record<number, string> = {
 export const FC_LABELS: Record<number, string> = {
   0: "PFC",
   1: "FC",
-  2: "—",
+  2: "non-FC",
 };

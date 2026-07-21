@@ -10,7 +10,7 @@ import type {
 export interface OverlayStats {
   totalMaps: number;
   clears: number;
-  s: number;
+  grades: Record<string, number>; // XH, X, SH, S, A, B, C, D
   fc: number;
   country: number;
   rankedClassic: number;
@@ -28,6 +28,7 @@ export interface OverlayMetric {
   name: string;
   kind: "count" | "ranked_score";
   count: number;
+  total: number; // maps matching the metric's map filters (0 for ranked_score)
 }
 
 export async function fetchOverlayMetrics(ids: number[]): Promise<{ metrics: OverlayMetric[] }> {
@@ -67,6 +68,7 @@ export function buildTableQuery(
   if (filters.statuses.length) p.set("statuses", filters.statuses.join(","));
   if (filters.mods) p.set("mods", filters.mods);
   if (filters.countryFirst) p.set("countryFirst", "1");
+  if (filters.metricMissing) p.set("metricMissing", String(filters.metricMissing.id));
   if (filters.platform) p.set("platform", filters.platform);
   for (const k of [
     "srMin", "srMax", "arMin", "arMax", "odMin", "odMax",
@@ -143,12 +145,30 @@ export async function postSync(
   return res.json().catch(() => ({}));
 }
 
+export interface ProfileStats {
+  play_count: number;
+  play_time: number; // seconds
+  total_hits: number;
+  level: number;
+  medals: number;
+  global_rank: number | null;
+  country_rank: number | null;
+  pp: number;
+  accuracy: number; // hit accuracy in percent
+  ranked_score: number;
+  total_score: number;
+  followers: number;
+  join_date: string;
+  supporter: boolean;
+}
+
 export interface AuthStatus {
   connected: boolean;
   profile: {
     username: string;
     avatar_url: string;
     country_code?: string;
+    stats?: ProfileStats;
   } | null;
 }
 
@@ -160,6 +180,16 @@ export async function fetchAuthStatus(): Promise<AuthStatus> {
 
 export async function postLogout(): Promise<void> {
   await fetch("/api/auth/logout", { method: "POST" });
+}
+
+/** Banner + avatar proxied as data URLs (embeddable in the share-card SVG). */
+export async function fetchProfileImages(): Promise<{
+  avatar: string | null;
+  cover: string | null;
+}> {
+  const res = await fetch("/api/profile-images");
+  if (!res.ok) return { avatar: null, cover: null };
+  return res.json();
 }
 
 export async function postClearErrors(): Promise<void> {

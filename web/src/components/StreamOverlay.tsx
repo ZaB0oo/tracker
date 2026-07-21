@@ -7,6 +7,9 @@ import {
   type OverlayStats,
 } from "../api";
 import { firstPlaceLabel, useCountryCode } from "../country";
+import { GradeBadge } from "./GradeBadge";
+
+const GRADE_KEYS = ["XH", "X", "SH", "S", "A", "B", "C", "D"];
 
 // Custom metric ids from the ?metrics= query param (chosen in the configurator)
 const METRIC_IDS = (new URLSearchParams(window.location.search).get("metrics") ?? "")
@@ -73,7 +76,6 @@ export function StreamOverlay() {
   )}:${pad(elapsed % 60)}`;
 
   const completion = data.totalMaps > 0 ? (data.clears / data.totalMaps) * 100 : 0;
-  const nextS = (Math.floor(data.s / 1000) + 1) * 1000;
   const rankedGain = delta(data.rankedClassic, b.rankedClassic);
 
   // last new score seen by the poll (activity feed)
@@ -96,25 +98,52 @@ export function StreamOverlay() {
           <div className="ov-row ov-session">
             <span className="ov-tag">SESSION</span>
             <span className="ov-timer">{timer}</span>
-            <span>Clears <b>{plus(delta(data.clears, b.clears))}</b></span>
-            <span>S <b>{plus(delta(data.s, b.s))}</b></span>
-            <span>FC <b>{plus(delta(data.fc, b.fc))}</b></span>
-            <span>{firstPlaceLabel(country)} <b>{plus(delta(data.country, b.country))}</b></span>
-            <span>
-              Score <b>{rankedGain > 0 ? `+${fmt(rankedGain)}` : "0"}</b>
-            </span>
+            {!hide.has("session.clears") && (
+              <span>Clears <b>{plus(delta(data.clears, b.clears))}</b></span>
+            )}
+            {GRADE_KEYS.map(
+              (k) =>
+                !hide.has(`session.${k.toLowerCase()}`) && (
+                  <span key={k} className="ov-grade">
+                    <GradeBadge grade={k} width={26} />{" "}
+                    <b>{plus(delta(data.grades[k] ?? 0, b.grades[k] ?? 0))}</b>
+                  </span>
+                )
+            )}
+            {!hide.has("session.fc") && (
+              <span>FC <b>{plus(delta(data.fc, b.fc))}</b></span>
+            )}
+            {!hide.has("session.country") && (
+              <span>{firstPlaceLabel(country)} <b>{plus(delta(data.country, b.country))}</b></span>
+            )}
+            {!hide.has("session.score") && (
+              <span>
+                Score <b>{rankedGain > 0 ? `+${fmt(rankedGain)}` : "0"}</b>
+              </span>
+            )}
           </div>
         )}
         {!hide.has("total") && (
           <div className="ov-row">
             <span className="ov-tag">TOTAL</span>
-            <span>
-              Clears <b>{fmt(data.clears)}</b>
-              <span className="ov-dim"> / {fmt(data.totalMaps)} ({completion.toFixed(2)}%)</span>
-            </span>
-            <span>S <b>{fmt(data.s)}</b></span>
-            <span>FC <b>{fmt(data.fc)}</b></span>
-            <span>{firstPlaceLabel(country)} <b>{fmt(data.country)}</b></span>
+            {!hide.has("total.clears") && (
+              <span>
+                Clears <b>{fmt(data.clears)}</b>
+                <span className="ov-dim"> / {fmt(data.totalMaps)} ({completion.toFixed(2)}%)</span>
+              </span>
+            )}
+            {GRADE_KEYS.map(
+              (k) =>
+                !hide.has(`total.${k.toLowerCase()}`) && (
+                  <span key={k} className="ov-grade">
+                    <GradeBadge grade={k} width={26} /> <b>{fmt(data.grades[k] ?? 0)}</b>
+                  </span>
+                )
+            )}
+            {!hide.has("total.fc") && <span>FC <b>{fmt(data.fc)}</b></span>}
+            {!hide.has("total.country") && (
+              <span>{firstPlaceLabel(country)} <b>{fmt(data.country)}</b></span>
+            )}
           </div>
         )}
         {!hide.has("ranked") && (
@@ -133,6 +162,11 @@ export function StreamOverlay() {
               return (
                 <span key={m.id}>
                   {m.name} <b>{f(m.count)}</b>
+                  {m.total > 0 && (
+                    <span className="ov-dim">
+                      {" "}/ {f(m.total)} ({((m.count / m.total) * 100).toFixed(1)}%)
+                    </span>
+                  )}
                   {gain > 0 && <span className="ov-gain"> +{f(gain)}</span>}
                 </span>
               );

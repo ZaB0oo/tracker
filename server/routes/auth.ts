@@ -41,7 +41,13 @@ let profileFetchInFlight = false;
 authRouter.get("/auth/status", (_req, res) => {
   const connected = isUserConnected();
   let profile:
-    | { username: string; avatar_url: string; country_code?: string }
+    | {
+        username: string;
+        avatar_url: string;
+        cover_url?: string;
+        country_code?: string;
+        stats?: unknown;
+      }
     | null = null;
   if (connected) {
     try {
@@ -49,8 +55,13 @@ authRouter.get("/auth/status", (_req, res) => {
     } catch {
       profile = null;
     }
-    // refetch if missing, or cached before country_code existed
-    if ((!profile || !profile.country_code) && !profileFetchInFlight) {
+    // refetch if missing, or cached by an older version (fields added since)
+    const stale =
+      !profile ||
+      !profile.country_code ||
+      profile.cover_url == null ||
+      (profile.stats as { join_date?: string } | undefined)?.join_date == null;
+    if (stale && !profileFetchInFlight) {
       profileFetchInFlight = true;
       void fetchUserProfile()
         .then((p) => {
@@ -68,4 +79,43 @@ authRouter.get("/auth/status", (_req, res) => {
 authRouter.post("/auth/logout", (_req, res) => {
   logoutUser();
   res.json({ ok: true });
+});
+
+// ---------- Profile images for the share card ----------
+// An SVG exported through a canvas cannot reference external images (they are
+// simply not loaded in <img> mode), so the banner/avatar are proxied here and
+// inlined as base64 data URLs. Cached 10 min; assets, not API => no limiter.
+
+let imgCache: { at: number; data: { avatar: string | null; cover: string | null } } | null =
+  null;
+
+async function toDataUrl(url: string | undefined): Promise<string | null> {
+  if (!url) return null;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (buf.length > 8_000_000) return null; // keep the SVG payload sane
+    const ct = r.headers.get("content-type") ?? "image/jpeg";
+    return `data:${ct};base64,${buf.toString("base64")}`;
+  } catch {
+    return null;
+  }
+}
+
+authRouter.get("/profile-images", async (_req, res) => {
+  if (imgCache && Date.now() - imgCache.at < 10 * 60_000)
+    return res.json(imgCache.data);
+  let profile: { avatar_url?: string; cover_url?: string } | null = null;
+  try {
+    profile = JSON.parse(getState("user_profile") || "null");
+  } catch {
+    /* no profile */
+  }
+  const [avatar, cover] = await Promise.all([
+    toDataUrl(profile?.avatar_url),
+    toDataUrl(profile?.cover_url),
+  ]);
+  imgCache = { at: Date.now(), data: { avatar, cover } };
+  res.json({ avatar, cover });
 });

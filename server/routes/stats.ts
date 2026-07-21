@@ -206,12 +206,16 @@ statsRouter.get("/skill-curve", (_req, res) => {
 // Compact stats for the stream overlay (?overlay=1) — polled every 5s,
 // session deltas are computed client-side vs the first response.
 statsRouter.get("/overlay", (_req, res) => {
+  const GRADE_KEYS = ["XH", "X", "SH", "S", "A", "B", "C", "D"] as const;
+  const gradeCols = GRADE_KEYS.map(
+    (k) => `SUM(CASE WHEN s.rank = '${k}' THEN 1 ELSE 0 END) g_${k.toLowerCase()}`
+  ).join(",\n        ");
   const row = getDb()
     .prepare(
       `SELECT
         COUNT(*) total_maps,
         SUM(COALESCE(u.played, 0)) clears,
-        SUM(CASE WHEN s.rank IN ('S','SH','X','XH') THEN 1 ELSE 0 END) s_count,
+        ${gradeCols},
         SUM(COALESCE(u.any_fc, 0)) fc,
         SUM(COALESCE(u.country_first, 0)) country,
         COALESCE(SUM(COALESCE(s.classic_total_score, s.total_score)), 0) ranked_classic,
@@ -223,22 +227,16 @@ statsRouter.get("/overlay", (_req, res) => {
       LEFT JOIN scores s ON s.id = u.best_lazer_score_id
       WHERE b.ruleset = 0 AND b.status IN (1, 2, 4)`
     )
-    .get() as {
-    total_maps: number;
-    clears: number | null;
-    s_count: number | null;
-    fc: number | null;
-    country: number | null;
-    ranked_classic: number;
-    ranked_wither: number;
-  };
+    .get() as Record<string, number | null> & { total_maps: number };
+  const grades: Record<string, number> = {};
+  for (const k of GRADE_KEYS) grades[k] = (row[`g_${k.toLowerCase()}`] as number) ?? 0;
   res.json({
     totalMaps: row.total_maps,
     clears: row.clears ?? 0,
-    s: row.s_count ?? 0,
+    grades,
     fc: row.fc ?? 0,
     country: row.country ?? 0,
-    rankedClassic: row.ranked_classic,
-    rankedWither: row.ranked_wither,
+    rankedClassic: row.ranked_classic ?? 0,
+    rankedWither: row.ranked_wither ?? 0,
   });
 });

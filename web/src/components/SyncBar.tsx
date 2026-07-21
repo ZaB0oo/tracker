@@ -11,6 +11,7 @@ import {
 } from "../api";
 import { AdvancedSettings } from "./AdvancedSettings";
 import { OverlayConfig } from "./OverlayConfig";
+import { ShareCard } from "./ShareCard";
 import { firstPlaceLabel, useCountryCode } from "../country";
 import { fmtTime } from "../format";
 
@@ -87,6 +88,7 @@ export function SyncBar() {
   const [userIdInput, setUserIdInput] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [overlayOpen, setOverlayOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const country = useCountryCode();
   const lbl = firstPlaceLabel(country); // "#1 FR", "#1 US"… or "Country #1"
 
@@ -323,6 +325,15 @@ export function SyncBar() {
               >
                 Stream overlay (OBS)
               </button>
+              <button
+                onClick={() => {
+                  setMenuOpen(false);
+                  setShareOpen(true);
+                }}
+                title="Snapshot of your stats as a PNG image"
+              >
+                Share card (PNG)
+              </button>
 
               <details className="menu-group" open>
               <summary className="menu-section">Synchronization</summary>
@@ -497,6 +508,7 @@ export function SyncBar() {
         <AdvancedSettings onClose={() => setAdvancedOpen(false)} />
       )}
       {overlayOpen && <OverlayConfig onClose={() => setOverlayOpen(false)} />}
+      {shareOpen && <ShareCard onClose={() => setShareOpen(false)} />}
     </div>
   );
 }
