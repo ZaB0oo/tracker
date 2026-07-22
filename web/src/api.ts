@@ -189,6 +189,32 @@ export function collectionExportUrl(filters: Filters, name: string): string {
   return `/api/export-collection?${buildTableQuery(filters, [], 0, 1)}&name=${encodeURIComponent(name)}`;
 }
 
+export interface LazerImportResult {
+  mapCount: number;
+  created: number;
+  updated: number;
+  hashes: number;
+  invalid: number;
+}
+
+/** Whether direct import into osu!lazer is configured on the server. */
+export async function fetchLazerImportStatus(): Promise<{ available: boolean }> {
+  const res = await fetch("/api/lazer-import/status");
+  if (!res.ok) return { available: false };
+  return res.json();
+}
+
+/** Imports the maps matching the filters straight into osu!lazer (merge mode). */
+export async function lazerImport(filters: Filters, name: string): Promise<LazerImportResult> {
+  const res = await fetch(
+    `/api/lazer-import?${buildTableQuery(filters, [], 0, 1)}&name=${encodeURIComponent(name)}`,
+    { method: "POST" }
+  );
+  const json = (await res.json()) as LazerImportResult & { ok: boolean; error?: string };
+  if (!res.ok || !json.ok) throw new Error(json.error ?? `lazer import: HTTP ${res.status}`);
+  return json;
+}
+
 export async function fetchStats(): Promise<Stats> {
   const res = await fetch("/api/stats");
   if (!res.ok) throw new Error(`stats: HTTP ${res.status}`);
@@ -332,10 +358,15 @@ export interface MetricMapConds {
   ids?: number[] | null;
   query?: string | null;
 }
+export type MetricBreakdown =
+  | "sr" | "year" | "length" | "combo" | "ar" | "od" | "cs" | "hp";
+
 export interface MetricParams {
   kind: "count" | "ranked_score";
   score: MetricScoreConds;
   map: MetricMapConds;
+  /** dimension of the per-bucket completion on the card (default sr) */
+  breakdown?: MetricBreakdown;
   progressMode: "milestone" | "total";
   step: number;
   showEvolution: boolean;
@@ -349,7 +380,7 @@ export interface Metric {
   step: number;
   milestones: { threshold: number; at: string }[];
   evolution: { period: string; value: number }[] | null;
-  bySr: { sr: number; value: number; total: number }[];
+  byBucket: { bucket: number | string; value: number; total: number }[];
 }
 
 export async function fetchMetrics(
@@ -362,7 +393,10 @@ export async function fetchMetrics(
 
 export async function previewMetric(
   params: MetricParams
-): Promise<{ count: number; bySr: { sr: number; value: number; total: number }[] }> {
+): Promise<{
+  count: number;
+  byBucket: { bucket: number | string; value: number; total: number }[];
+}> {
   const res = await fetch("/api/metrics/preview", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -434,6 +468,7 @@ export const DEFAULT_METRIC_PARAMS: MetricParams = {
     bpmMin: null, bpmMax: null, statuses: [], country1: false, ids: null,
     query: null,
   },
+  breakdown: "sr",
   progressMode: "milestone",
   step: 1000,
   showEvolution: true,

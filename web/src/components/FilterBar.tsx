@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { firstPlaceLabel, useCountryCode } from "../country";
-import { collectionExportUrl } from "../api";
+import { collectionExportUrl, fetchLazerImportStatus, lazerImport } from "../api";
 import { displayGrade } from "../format";
 import { useDisplayPrefs } from "../prefs";
 import { DEFAULT_FILTERS, type Filters } from "../types";
@@ -47,6 +47,13 @@ export function FilterBar({
   const country = useCountryCode();
   const prefs = useDisplayPrefs();
   useEffect(() => setLocal(filters), [filters]);
+
+  // Direct lazer import: button shown only if the server has the importer.
+  const [lazerAvailable, setLazerAvailable] = useState(false);
+  const [lazerBusy, setLazerBusy] = useState(false);
+  useEffect(() => {
+    void fetchLazerImportStatus().then((s) => setLazerAvailable(s.available));
+  }, []);
 
   // 300ms debounce for text / numbers
   useEffect(() => {
@@ -164,7 +171,7 @@ export function FilterBar({
         )}
         <button
           className="export-coll"
-          title="Download these maps as an osu! collection (drag the file onto osu!lazer to import)"
+          title="Download these maps as a collection.db file"
           onClick={() => {
             const name = window.prompt(
               "Collection name:",
@@ -176,6 +183,34 @@ export function FilterBar({
         >
           ⤓ Collection
         </button>
+        {lazerAvailable && (
+          <button
+            className="export-coll"
+            disabled={lazerBusy}
+            title="Import these maps as a collection directly into osu!lazer (osu! must be closed; a backup of the database is made first)"
+            onClick={() => {
+              const name = window.prompt(
+                "Collection name (merged into lazer):",
+                local.metricMissing ? `Missing - ${local.metricMissing.name}` : "osu!completionist"
+              );
+              if (!name?.trim()) return;
+              setLazerBusy(true);
+              lazerImport(local, name.trim())
+                .then((r) =>
+                  window.alert(
+                    `Imported into osu!lazer:\n` +
+                      `  ${r.created} collection(s) created, ${r.updated} updated\n` +
+                      `  ${r.hashes} map(s) added (of ${r.mapCount} matching)` +
+                      (r.invalid ? `\n  ${r.invalid} invalid hash(es) skipped` : "")
+                  )
+                )
+                .catch((e: Error) => window.alert(`lazer import failed:\n${e.message}`))
+                .finally(() => setLazerBusy(false));
+            }}
+          >
+            {lazerBusy ? "…" : "⇥ lazer"}
+          </button>
+        )}
       </div>
 
       <div className="filter-groups">

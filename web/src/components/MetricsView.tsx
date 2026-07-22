@@ -1,14 +1,31 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { deleteMetric, fetchMetrics, type Metric } from "../api";
+import { deleteMetric, fetchMetrics, type Metric, type MetricBreakdown } from "../api";
 import { fmtCompact, fmtDate, fmtNum } from "../format";
 import { EvoChart } from "./EvoChart";
 import { MissingIcon } from "./Icons";
 import { MetricBuilder } from "./MetricBuilder";
 
 
-function srLabel(sr: number): string {
-  return sr >= 10 ? "10★+" : `${sr}–${sr + 1}★`;
+const BREAKDOWN_TITLES: Record<MetricBreakdown, string> = {
+  sr: "star rating", year: "rank year", length: "length", combo: "max combo",
+  ar: "AR", od: "OD", cs: "CS", hp: "HP",
+};
+
+function bucketLabel(dim: MetricBreakdown, bucket: number | string): string {
+  const n = Number(bucket);
+  switch (dim) {
+    case "sr":
+      return n >= 10 ? "10★+" : `${n}–${n + 1}★`;
+    case "year":
+      return String(bucket);
+    case "length":
+      return n >= 10 ? "10 min+" : `${n}–${n + 1} min`;
+    case "combo":
+      return n >= 8 ? "2000+" : `${n * 250}–${(n + 1) * 250}`;
+    default:
+      return n >= 10 ? "10" : `${n}–${n + 1}`;
+  }
 }
 
 function MetricCard({
@@ -28,9 +45,10 @@ function MetricCard({
   const achieved = [...m.milestones].reverse();
   // Per-bucket completion: maps matched / all maps in the star-rating band.
   // (Country #1 metrics compare against every map in the band, not just my #1s.)
-  const hasTotals = m.bySr.some((b) => b.total > 0);
-  const srMax = Math.max(...m.bySr.map((b) => b.value), 1);
-  const srTitle = "Completion by star rating";
+  const dim = (m.params.breakdown ?? "sr") as MetricBreakdown;
+  const hasTotals = m.byBucket.some((b) => b.total > 0);
+  const srMax = Math.max(...m.byBucket.map((b) => b.value), 1);
+  const srTitle = `Completion by ${BREAKDOWN_TITLES[dim]}`;
   // days between consecutive milestones (ascending order)
   const daysBetween = new Map<number, number>();
   for (let i = 1; i < m.milestones.length; i++) {
@@ -90,14 +108,14 @@ function MetricCard({
         {!isRanked && (
         <div className="metric-sr">
           <div className="metric-sub">{srTitle}</div>
-          {m.bySr.map((b) => {
+          {m.byBucket.map((b) => {
             const w = hasTotals
               ? b.total > 0 ? (b.value / b.total) * 100 : 0
               : (b.value / srMax) * 100;
             const pct = hasTotals && b.total > 0 ? (b.value / b.total) * 100 : null;
             return (
-              <div key={b.sr} className="metric-sr-row">
-                <span className="metric-sr-label">{srLabel(b.sr)}</span>
+              <div key={String(b.bucket)} className="metric-sr-row">
+                <span className="metric-sr-label">{bucketLabel(dim, b.bucket)}</span>
                 <div className="metric-sr-bar">
                   <div className="metric-sr-fill" style={{ width: `${w}%` }} />
                 </div>

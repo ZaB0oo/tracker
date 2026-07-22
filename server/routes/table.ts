@@ -267,17 +267,20 @@ function osuString(s: string): Buffer {
 }
 
 /**
- * GET /api/export-collection?name=...&<same filters as /table>
- * Builds a legacy collection.db with one collection containing every map
- * matching the current filters. Collections are keyed by the .osu MD5
+ * Builds a legacy collection.db buffer with one collection containing every
+ * map matching the given /table filters. Maps are keyed by the .osu MD5
  * (beatmaps.checksum): missing checksums are fetched inline (50/req) up to a
  * cap — beyond that, the background enrichment fills them and the user
- * retries. To import: drag the downloaded file onto osu!(lazer).
+ * retries. Shared by the file export and the direct lazer import.
  */
-tableRouter.get("/export-collection", async (req, res) => {
+export async function buildCollectionDb(
+  q: Record<string, string | undefined>
+): Promise<
+  | { buffer: Buffer; name: string; mapCount: number }
+  | { error: string; status: number }
+> {
   ensureMissingFresh();
   const db = getDb();
-  const q = req.query as Record<string, string | undefined>;
   const mode = q.mode === "classic" ? "classic" : "lazer";
   const missingSql = `COALESCE(u.missing_${mode}, 0)`;
   const { where, params } = buildFilters(db, q, missingSql);
@@ -293,18 +296,18 @@ tableRouter.get("/export-collection", async (req, res) => {
     )
     .all(params) as { id: number; checksum: string | null }[];
   if (rows.length === 0)
-    return res.status(400).json({ ok: false, error: "no map matches these filters" });
+    return { error: "no map matches these filters", status: 400 };
 
   // fetch missing checksums inline (bounded so the request stays reasonable)
   const missing = rows.filter((r) => !r.checksum).map((r) => r.id);
   const CAP = 3000; // 60 requests ≈ 1 min at the polite rate
   if (missing.length > CAP)
-    return res.status(400).json({
-      ok: false,
+    return {
+      status: 400,
       error:
         `${missing.length} maps still lack their MD5 checksum (cap ${CAP} per export). ` +
         "The background enrichment is filling them in — retry later or narrow the filters.",
-    });
+    };
   const md5ById = new Map(rows.filter((r) => r.checksum).map((r) => [r.id, r.checksum!]));
   const setChecksum = db.prepare("UPDATE beatmaps SET checksum = ? WHERE id = ?");
   for (let i = 0; i < missing.length; i += 50) {
@@ -318,7 +321,7 @@ tableRouter.get("/export-collection", async (req, res) => {
         }
       }
     } catch (e) {
-      return res.status(502).json({ ok: false, error: `checksum fetch failed: ${String(e)}` });
+      return { error: `checksum fetch failed: ${String(e)}`, status: 502 };
     }
   }
 
@@ -329,10 +332,22 @@ tableRouter.get("/export-collection", async (req, res) => {
   header.writeInt32LE(1, 4); // one collection
   const count = Buffer.alloc(4);
   count.writeInt32LE(md5s.length, 0);
-  const body = Buffer.concat([header, osuString(name), count, ...md5s.map(osuString)]);
+  const buffer = Buffer.concat([header, osuString(name), count, ...md5s.map(osuString)]);
+  return { buffer, name, mapCount: md5s.length };
+}
 
-  const safe = name.replace(/[^\w\- ]+/g, "_");
+/**
+ * GET /api/export-collection?name=...&<same filters as /table>
+ * Downloads the collection.db (importable into osu!lazer via the direct
+ * import endpoint below, or any external collection tool).
+ */
+tableRouter.get("/export-collection", async (req, res) => {
+  const built = await buildCollectionDb(req.query as Record<string, string | undefined>);
+  if ("error" in built)
+    return res.status(built.status).json({ ok: false, error: built.error });
+
+  const safe = built.name.replace(/[^\w\- ]+/g, "_");
   res.setHeader("Content-Type", "application/octet-stream");
   res.setHeader("Content-Disposition", `attachment; filename="${safe}.db"`);
-  res.send(body);
+  res.send(built.buffer);
 });

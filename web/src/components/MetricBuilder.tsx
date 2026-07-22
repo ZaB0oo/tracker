@@ -5,6 +5,7 @@ import {
   postMetric,
   previewMetric,
   putMetric,
+  type MetricBreakdown,
   type MetricParams,
   type Range,
 } from "../api";
@@ -141,6 +142,7 @@ export function MetricBuilder({
             },
           },
           map: { ...DEFAULT_METRIC_PARAMS.map, ...edit.params.map },
+          breakdown: edit.params.breakdown ?? "sr",
           progressMode: edit.params.progressMode ?? "milestone",
           step: edit.params.step || 1000,
         }
@@ -154,7 +156,7 @@ export function MetricBuilder({
   );
   const [preview, setPreview] = useState<{
     count: number;
-    bySr: { sr: number; value: number; total: number }[];
+    byBucket: { bucket: number | string; value: number; total: number }[];
   } | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -184,7 +186,7 @@ export function MetricBuilder({
   });
 
   const isCount = p.kind === "count";
-  const srMax = Math.max(...(preview?.bySr.map((b) => b.value) ?? [1]), 1);
+  const srMax = Math.max(...(preview?.byBucket.map((b) => b.value) ?? [1]), 1);
 
   return (
     <>
@@ -397,6 +399,26 @@ export function MetricBuilder({
               />
             </label>
           )}
+          {isCount && (
+            <label>
+              Breakdown by
+              <select
+                value={p.breakdown ?? "sr"}
+                onChange={(e) =>
+                  setP((s) => ({ ...s, breakdown: e.target.value as MetricBreakdown }))
+                }
+              >
+                <option value="sr">Star rating</option>
+                <option value="year">Rank year</option>
+                <option value="length">Length</option>
+                <option value="combo">Max combo</option>
+                <option value="ar">AR</option>
+                <option value="od">OD</option>
+                <option value="cs">CS</option>
+                <option value="hp">HP</option>
+              </select>
+            </label>
+          )}
           <label className="mb-check">
             <input
               type="checkbox" checked={p.showEvolution}
@@ -411,12 +433,16 @@ export function MetricBuilder({
             {isCount ? "Maps matching now: " : "Ranked score now: "}
             <b>{preview ? fmtNum(preview.count) : "…"}</b>
           </div>
-          {preview && preview.bySr.length > 0 && (
+          {preview && preview.byBucket.length > 0 && (
             <div className="mb-preview-sr">
-              {preview.bySr.map((b) => (
-                <div key={b.sr} className="mb-sr-col" title={`${b.sr}★: ${b.value}`}>
+              {preview.byBucket.map((b) => (
+                <div
+                  key={String(b.bucket)}
+                  className="mb-sr-col"
+                  title={`${b.bucket}: ${b.value}`}
+                >
                   <div className="mb-sr-bar" style={{ height: `${(b.value / srMax) * 100}%` }} />
-                  <span>{b.sr}</span>
+                  <span>{String(b.bucket).slice(-2)}</span>
                 </div>
               ))}
             </div>

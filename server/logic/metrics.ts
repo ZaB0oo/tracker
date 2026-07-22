@@ -43,10 +43,15 @@ export interface MetricMapConds {
   query?: string | null;
 }
 
+export type MetricBreakdown =
+  | "sr" | "year" | "length" | "combo" | "ar" | "od" | "cs" | "hp";
+
 export interface MetricParams {
   kind: "count" | "ranked_score";
   score: MetricScoreConds;
   map: MetricMapConds;
+  /** dimension of the per-bucket completion shown on the card (default sr) */
+  breakdown?: MetricBreakdown;
   /** "milestone": progress toward the next step. "total": X / all available maps. */
   progressMode: "milestone" | "total";
   step: number;

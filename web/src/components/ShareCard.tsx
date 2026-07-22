@@ -2,9 +2,30 @@ import { useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchAuthStatus, fetchProfileImages, fetchStats } from "../api";
 import { useCountryCode } from "../country";
+import { useDisplayPrefs } from "../prefs";
 import { gradeDataUrl } from "./GradeBadge";
 import { fmtNum } from "../format";
 
+
+/**
+ * "Wither level" — the level rework proposal from ppy/osu#17124 (revised):
+ * XP is a composite of profile stats (SS x200, S x100, A x50, ranked
+ * score /125k, total score /250k, medals x20k, playtime hours x300) and
+ * Total XP Required = 5L^3 + 80L^2 + 225L - 310. Inverted exactly by binary
+ * search. Top players land around level 200 on this scale.
+ */
+const witherXp = (L: number) => 5 * L ** 3 + 80 * L ** 2 + 225 * L - 310;
+function witherLevel(xpTotal: number): number {
+  if (!Number.isFinite(xpTotal) || xpTotal <= 0) return 1;
+  let lo = 1;
+  let hi = 100_000;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (witherXp(mid) <= xpTotal) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
 
 // Layout constants (SVG units) — mirrors the reference card:
 // banner header, then 3 big stats, 5 mid stats, 4 wide stats, 8 grade badges.
@@ -28,6 +49,7 @@ export function ShareCard({ onClose }: { onClose: () => void }) {
     staleTime: 10 * 60_000,
   });
   const country = useCountryCode();
+  const prefs = useDisplayPrefs();
   const username = auth?.profile?.username ?? "osu! player";
   const ps = auth?.profile?.stats;
 
@@ -95,6 +117,18 @@ export function ShareCard({ onClose }: { onClose: () => void }) {
     { label: "Completion", value: `${completion}%` },
   ];
   const gradeRow = ["XH", "X", "SH", "S", "A", "B", "C", "D"];
+
+  // composite XP for the wither level (grade counts from the tracker's
+  // per-map bests, the rest from the osu! profile)
+  const witherXpTotal = ps
+    ? (g("XH") + g("X")) * 200 +
+      (g("SH") + g("S")) * 100 +
+      g("A") * 50 +
+      ps.ranked_score / 125_000 +
+      ps.total_score / 250_000 +
+      ps.medals * 20_000 +
+      (ps.play_time / 3600) * 300
+    : 0;
 
   const BIG_Y = HEADER_H + 46;
   const MID_Y = BIG_Y + 88;
@@ -208,7 +242,7 @@ export function ShareCard({ onClose }: { onClose: () => void }) {
             )}
             {/* country + level, top right */}
             {country && (
-              <g transform={`translate(${W - 160}, 30)`}>
+              <g transform={`translate(${W - 238}, 30)`}>
                 <rect width="52" height="34" rx="8" fill="#17131f" opacity="0.75" />
                 <text x="26" y="23" fontSize="16" fontWeight="700" fill="#ffffff" textAnchor="middle">
                   {country}
@@ -216,7 +250,7 @@ export function ShareCard({ onClose }: { onClose: () => void }) {
               </g>
             )}
             {ps && (
-              <g transform={`translate(${W - 78}, 64)`}>
+              <g transform={`translate(${W - 138}, 64)`}>
                 {/* rounded corners: fat round-joined dark stroke as the base,
                     then the gradient border drawn with round joins on top */}
                 <polygon
@@ -237,6 +271,33 @@ export function ShareCard({ onClose }: { onClose: () => void }) {
                 />
                 <text x="0" y="9" fontSize="26" fontWeight="700" fill="#ffffff" textAnchor="middle">
                   {ps.level}
+                </text>
+              </g>
+            )}
+            {/* wither level (level rework proposal), right of the osu! level */}
+            {prefs.wither && ps && (
+              <g transform={`translate(${W - 56}, 64)`}>
+                <polygon
+                  points="0,-24 21,-12 21,12 0,24 -21,12 -21,-12"
+                  fill="#17131f"
+                  fillOpacity="0.9"
+                  stroke="#17131f"
+                  strokeOpacity="0.9"
+                  strokeWidth="7"
+                  strokeLinejoin="round"
+                />
+                <polygon
+                  points="0,-24 21,-12 21,12 0,24 -21,12 -21,-12"
+                  fill="none"
+                  stroke="#ff66aa"
+                  strokeWidth="3.5"
+                  strokeLinejoin="round"
+                />
+                <text x="0" y="6" fontSize="17" fontWeight="700" fill="#ffffff" textAnchor="middle">
+                  {fmtNum(witherLevel(witherXpTotal))}
+                </text>
+                <text x="0" y="44" fontSize="9.5" fill="#b6adc9" textAnchor="middle">
+                  WitherLevel
                 </text>
               </g>
             )}
