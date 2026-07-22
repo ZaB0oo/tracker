@@ -3,14 +3,12 @@ import { fetchMapDetail } from "../api";
 import { firstPlaceLabel, useCountryCode } from "../country";
 import { GradeBadge } from "./GradeBadge";
 import { MedalIcon } from "./Icons";
-import { fmtDate, fmtDateTime } from "../format";
+import { displayGrade, fmtDate, fmtDateTime, fmtNum } from "../format";
 import { FC_LABELS, STATUS_LABELS } from "../types";
 
-const fmt = (n: number) => n.toLocaleString("en-US");
 const fmtDT = (iso: string) => fmtDateTime(iso);
 const mmss = (s: number | null) =>
   s == null ? "—" : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-const displayGrade = (r: string) => (r === "XH" ? "SSH" : r === "X" ? "SS" : r);
 
 function modsText(raw: string): string {
   try {
@@ -113,13 +111,13 @@ export function MapModal({
                 </span>
                 <span className="mm-mods">{modsText(s.mods)}</span>
                 <span className="mm-acc">{(s.accuracy * 100).toFixed(2)}%</span>
-                <span className="mm-score">{fmt(s.total_score)} std</span>
+                <span className="mm-score">{fmtNum(s.total_score)} std</span>
                 <span className="mm-score">
                   {s.classic_total_score != null
-                    ? `${fmt(s.classic_total_score)} classic`
+                    ? `${fmtNum(s.classic_total_score)} classic`
                     : ""}
                 </span>
-                <span className="mm-combo">{fmt(s.max_combo)}x</span>
+                <span className="mm-combo">{fmtNum(s.max_combo)}x</span>
                 <span className={`mm-fc fc fc-${s.fc_state}`}>
                   {FC_LABELS[s.fc_state]}
                 </span>

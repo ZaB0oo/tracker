@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { fetchClears, fetchCountryHistory } from "../api";
 import { firstPlaceLabel, useCountryCode } from "../country";
-import { fmtDateTime } from "../format";
+import { displayGrade, fmtDateTime, fmtNum } from "../format";
 import { GradeBadge } from "./GradeBadge";
 import { FC_LABELS } from "../types";
 
@@ -13,9 +13,7 @@ const fmtDate = (at: string) => {
   const iso = at.includes("T") ? at : at.replace(" ", "T") + "Z";
   return fmtDateTime(iso);
 };
-const fmtInt = (n: number | null | undefined) =>
-  n == null ? "—" : n.toLocaleString("en-US");
-const grade = (g: string) => (g === "X" ? "SS" : g === "XH" ? "SSH" : g);
+const fmtInt = (n: number | null | undefined) => (n == null ? "—" : fmtNum(n));
 
 function ClearsList() {
   const query = useInfiniteQuery({
@@ -55,7 +53,7 @@ function ClearsList() {
         >
           <span className="fr-event-date">{fmtDate(c.ended_at)}</span>
           <span className="fr-event-badge">
-            <GradeBadge grade={c.rank} width={36} title={grade(c.rank)} />
+            <GradeBadge grade={c.rank} width={36} title={displayGrade(c.rank)} />
           </span>
           <span className="fr-event-map">
             {c.artist} – {c.title}{" "}

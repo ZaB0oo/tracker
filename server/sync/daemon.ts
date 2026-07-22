@@ -118,6 +118,7 @@ const status = new Proxy(statusData, {
 let backfillWanted = false;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let deltaTimer: ReturnType<typeof setInterval> | null = null;
+let enrichCatchupRunning = false;
 let deltaRunning = false;
 
 export function getDaemonStatus(): DaemonStatus & { busy: string[] } {
@@ -393,7 +394,19 @@ export function startCatalogRefresh(): void {
           .prepare("SELECT COUNT(*) c FROM beatmaps WHERE ruleset = 0")
           .get() as { c: number }
       ).c;
-      if (diffs >= MIN_EXPECTED_STD_DIFFS) void importMissingKnownSets();
+      if (diffs >= MIN_EXPECTED_STD_DIFFS) {
+        void importMissingKnownSets();
+        // background fill of enrichment gaps (max_combo, and the MD5 checksums
+        // added for collection export on DBs enriched before that column)
+        if (!enrichCatchupRunning && !status.backfill.running) {
+          enrichCatchupRunning = true;
+          void enrichMaxCombo(enrichProgress)
+            .catch((e) => logError(e, "background enrichment"))
+            .finally(() => {
+              enrichCatchupRunning = false;
+            });
+        }
+      }
       // snipe check: re-check my country #1s older than the configured delay
       if (isUserConnected()) {
         // maps with a fresh score still awaiting their country check: high

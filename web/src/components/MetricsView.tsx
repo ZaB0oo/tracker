@@ -1,15 +1,11 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { deleteMetric, fetchMetrics, type Metric } from "../api";
-import { fmtNum, fmtDate } from "../format";
+import { fmtCompact, fmtDate, fmtNum } from "../format";
 import { EvoChart } from "./EvoChart";
 import { MissingIcon } from "./Icons";
 import { MetricBuilder } from "./MetricBuilder";
 
-const fmtBig = (n: number) =>
-  n >= 1_000_000_000
-    ? `${(n / 1_000_000_000).toLocaleString("en-US", { maximumFractionDigits: 2 })}B`
-    : fmtNum(n);
 
 function srLabel(sr: number): string {
   return sr >= 10 ? "10★+" : `${sr}–${sr + 1}★`;
@@ -26,7 +22,7 @@ function MetricCard({
   onEdit: (m: Metric) => void;
   onMissing: (m: Metric) => void;
 }) {
-  const fmtV = m.params.kind === "ranked_score" ? fmtBig : fmtNum;
+  const fmtV = m.params.kind === "ranked_score" ? fmtCompact : fmtNum;
   const isRanked = m.params.kind === "ranked_score";
   const totalMode = m.params.progressMode === "total" && m.params.kind === "count";
   const achieved = [...m.milestones].reverse();

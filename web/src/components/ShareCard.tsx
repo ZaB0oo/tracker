@@ -3,8 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchAuthStatus, fetchProfileImages, fetchStats } from "../api";
 import { useCountryCode } from "../country";
 import { gradeDataUrl } from "./GradeBadge";
+import { fmtNum } from "../format";
 
-const fmt = (n: number) => n.toLocaleString("en-US");
 
 // Layout constants (SVG units) — mirrors the reference card:
 // banner header, then 3 big stats, 5 mid stats, 4 wide stats, 8 grade badges.
@@ -47,7 +47,7 @@ export function ShareCard({ onClose }: { onClose: () => void }) {
     ? Math.floor((Date.now() - joined.getTime()) / 86_400_000)
     : null;
   const playTime = ps
-    ? `${fmt(Math.floor(ps.play_time / 3600))}h ${Math.floor((ps.play_time % 3600) / 60)}m`
+    ? `${fmtNum(Math.floor(ps.play_time / 3600))}h ${Math.floor((ps.play_time % 3600) / 60)}m`
     : "—";
 
   const download = () => {
@@ -77,21 +77,21 @@ export function ShareCard({ onClose }: { onClose: () => void }) {
 
   // Row definitions (label, value, optional color), following the reference.
   const bigRow = [
-    { label: `#1 ${country ?? ""}`.trim(), value: fmt(t.country_firsts ?? 0), color: "#ffd966" },
-    { label: "Global Rank", value: ps?.global_rank != null ? `#${fmt(ps.global_rank)}` : "—", color: "#e8e3f2" },
-    { label: "Country Rank", value: ps?.country_rank != null ? `#${fmt(ps.country_rank)}` : "—", color: "#b9a8ee" },
+    { label: `#1 ${country ?? ""}`.trim(), value: fmtNum(t.country_firsts ?? 0), color: "#ffd966" },
+    { label: "Global Rank", value: ps?.global_rank != null ? `#${fmtNum(ps.global_rank)}` : "—", color: "#e8e3f2" },
+    { label: "Country Rank", value: ps?.country_rank != null ? `#${fmtNum(ps.country_rank)}` : "—", color: "#b9a8ee" },
   ];
   const midRow = [
-    { label: "Medals", value: ps ? fmt(ps.medals) : "—" },
-    { label: "pp", value: ps ? fmt(Math.round(ps.pp)) : "—" },
+    { label: "Medals", value: ps ? fmtNum(ps.medals) : "—" },
+    { label: "pp", value: ps ? fmtNum(Math.round(ps.pp)) : "—" },
     { label: "Play Time", value: playTime },
-    { label: "Play Count", value: ps ? fmt(ps.play_count) : "—" },
+    { label: "Play Count", value: ps ? fmtNum(ps.play_count) : "—" },
     { label: "Accuracy", value: ps ? `${ps.accuracy.toFixed(2)}%` : "—" },
   ];
   const wideRow = [
-    { label: "Ranked Score", value: ps ? fmt(ps.ranked_score) : "—" },
-    { label: "Total Score", value: ps ? fmt(ps.total_score) : "—" },
-    { label: "Clears", value: fmt(played) },
+    { label: "Ranked Score", value: ps ? fmtNum(ps.ranked_score) : "—" },
+    { label: "Total Score", value: ps ? fmtNum(ps.total_score) : "—" },
+    { label: "Clears", value: fmtNum(played) },
     { label: "Completion", value: `${completion}%` },
   ];
   const gradeRow = ["XH", "X", "SH", "S", "A", "B", "C", "D"];
@@ -184,7 +184,7 @@ export function ShareCard({ onClose }: { onClose: () => void }) {
                     <path d="M2 16c0-3.6 2.7-5.8 6-5.8s6 2.2 6 5.8z" />
                   </g>
                   <text x="34" y="18" fontSize="14" fill="#ffffff">
-                    {fmt(ps.followers)}
+                    {fmtNum(ps.followers)}
                   </text>
                   {ps.supporter && (
                     <>
@@ -201,7 +201,7 @@ export function ShareCard({ onClose }: { onClose: () => void }) {
                 {joinedLabel && (
                   <text x="158" y="120" fontSize="15" fill="#e6e0f0">
                     Joined <tspan fontWeight="700">{joinedLabel}</tspan>
-                    <tspan fill="#b6adc9"> ({fmt(joinedDays ?? 0)}d ago)</tspan>
+                    <tspan fill="#b6adc9"> ({fmtNum(joinedDays ?? 0)}d ago)</tspan>
                   </text>
                 )}
               </>
@@ -303,7 +303,7 @@ export function ShareCard({ onClose }: { onClose: () => void }) {
                     fill="#ffffff"
                     textAnchor="middle"
                   >
-                    {fmt(g(gr))}
+                    {fmtNum(g(gr))}
                   </text>
                 </g>
               );

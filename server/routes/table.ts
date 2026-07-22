@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { getDb } from "../db/db.js";
 import { mapWhere, scoreWhere, type MetricParams } from "../logic/metrics.js";
-import { missingExprs } from "../logic/scoreSql.js";
+import { ensureMissingFresh } from "../logic/scoreSql.js";
+import { getBeatmapsByIds } from "../osu/api.js";
 
 export const tableRouter = Router();
 
@@ -44,19 +45,16 @@ const SORT_COLUMNS: Record<string, string> = {
   score_combo: "s.max_combo",
 };
 
-tableRouter.get("/table", (req, res) => {
-  const db = getDb();
-  const q = req.query as Record<string, string | undefined>;
-  const mode = q.mode === "classic" ? "classic" : "lazer";
-  // classic is monotone vs standardised on a given map: same best as lazer
-  const bestCol = "best_lazer_score_id";
-  const scoreExpr =
-    mode === "classic"
-      ? "COALESCE(s.classic_total_score, s.total_score)"
-      : "s.total_score";
-
-  const { predExpr, missingSql } = missingExprs(mode);
-
+/**
+ * Builds the shared WHERE clause + params for the table filters (also used by
+ * the collection export). Aliases: b = beatmaps, st = sets, u = beatmap_user,
+ * s = best score.
+ */
+function buildFilters(
+  db: ReturnType<typeof getDb>,
+  q: Record<string, string | undefined>,
+  missingSql: string
+): { where: string[]; params: Record<string, string | number | null> } {
   // defense in depth: never any graveyard/WIP diffs even if imported
   const where: string[] = ["b.ruleset = 0", "b.status IN (1, 2, 4)"];
   const params: Record<string, string | number | null> = {};
@@ -132,6 +130,31 @@ tableRouter.get("/table", (req, res) => {
   num("yearMax", "CAST(strftime('%Y', st.ranked_date) AS INTEGER)", "<=");
   num("accMin", "s.accuracy * 100", ">="); num("accMax", "s.accuracy * 100", "<=");
   num("missingMin", missingSql, ">=");
+  return { where, params };
+}
+
+tableRouter.get("/table", (req, res) => {
+  const db = getDb();
+  const q = req.query as Record<string, string | undefined>;
+  const mode = q.mode === "classic" ? "classic" : "lazer";
+  // classic is monotone vs standardised on a given map: same best as lazer
+  const bestCol = "best_lazer_score_id";
+  const scoreExpr =
+    mode === "classic"
+      ? "COALESCE(s.classic_total_score, s.total_score)"
+      : "s.total_score";
+
+  ensureMissingFresh();
+  // materialized missing + its best-derived prediction (pred = missing + best)
+  const missingSql = `COALESCE(u.missing_${mode}, 0)`;
+  const bestExpr =
+    mode === "classic"
+      ? "COALESCE(s.classic_total_score, s.total_score, 0)"
+      : "COALESCE(s.total_score, 0)";
+  const predExpr = `(${missingSql} + ${bestExpr})`;
+
+  const { where, params } = buildFilters(db, q, missingSql);
+
 
   const sortParts: string[] = [];
   for (const part of (q.sort ?? "missing:desc").split(",")) {
@@ -225,4 +248,91 @@ tableRouter.get("/map/:id", (req, res) => {
     )
     .all(id);
   res.json({ map, scores, user, countryEvents });
+});
+
+// ---------- Collection export (osu! legacy collection.db, importable in lazer) ----------
+
+/** osu! binary "string": 0x0b marker + ULEB128 length + UTF-8 bytes. */
+function osuString(s: string): Buffer {
+  const utf8 = Buffer.from(s, "utf8");
+  const len: number[] = [];
+  let n = utf8.length;
+  do {
+    let b = n & 0x7f;
+    n >>= 7;
+    if (n > 0) b |= 0x80;
+    len.push(b);
+  } while (n > 0);
+  return Buffer.concat([Buffer.from([0x0b, ...len]), utf8]);
+}
+
+/**
+ * GET /api/export-collection?name=...&<same filters as /table>
+ * Builds a legacy collection.db with one collection containing every map
+ * matching the current filters. Collections are keyed by the .osu MD5
+ * (beatmaps.checksum): missing checksums are fetched inline (50/req) up to a
+ * cap — beyond that, the background enrichment fills them and the user
+ * retries. To import: drag the downloaded file onto osu!(lazer).
+ */
+tableRouter.get("/export-collection", async (req, res) => {
+  ensureMissingFresh();
+  const db = getDb();
+  const q = req.query as Record<string, string | undefined>;
+  const mode = q.mode === "classic" ? "classic" : "lazer";
+  const missingSql = `COALESCE(u.missing_${mode}, 0)`;
+  const { where, params } = buildFilters(db, q, missingSql);
+
+  const rows = db
+    .prepare(
+      `SELECT b.id, b.checksum
+       FROM beatmaps b
+       JOIN beatmapsets st ON st.id = b.beatmapset_id
+       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
+       LEFT JOIN scores s ON s.id = u.best_lazer_score_id
+       WHERE ${where.join(" AND ")}`
+    )
+    .all(params) as { id: number; checksum: string | null }[];
+  if (rows.length === 0)
+    return res.status(400).json({ ok: false, error: "no map matches these filters" });
+
+  // fetch missing checksums inline (bounded so the request stays reasonable)
+  const missing = rows.filter((r) => !r.checksum).map((r) => r.id);
+  const CAP = 3000; // 60 requests ≈ 1 min at the polite rate
+  if (missing.length > CAP)
+    return res.status(400).json({
+      ok: false,
+      error:
+        `${missing.length} maps still lack their MD5 checksum (cap ${CAP} per export). ` +
+        "The background enrichment is filling them in — retry later or narrow the filters.",
+    });
+  const md5ById = new Map(rows.filter((r) => r.checksum).map((r) => [r.id, r.checksum!]));
+  const setChecksum = db.prepare("UPDATE beatmaps SET checksum = ? WHERE id = ?");
+  for (let i = 0; i < missing.length; i += 50) {
+    const batch = missing.slice(i, i + 50);
+    try {
+      const maps = await getBeatmapsByIds(batch, "high");
+      for (const m of maps) {
+        if (m.checksum) {
+          md5ById.set(m.id, m.checksum);
+          setChecksum.run(m.checksum, m.id);
+        }
+      }
+    } catch (e) {
+      return res.status(502).json({ ok: false, error: `checksum fetch failed: ${String(e)}` });
+    }
+  }
+
+  const md5s = rows.map((r) => md5ById.get(r.id)).filter((x): x is string => Boolean(x));
+  const name = String(q.name ?? "osu!completionist").slice(0, 120) || "osu!completionist";
+  const header = Buffer.alloc(8);
+  header.writeInt32LE(20220101, 0); // osu! version stamp (format is stable)
+  header.writeInt32LE(1, 4); // one collection
+  const count = Buffer.alloc(4);
+  count.writeInt32LE(md5s.length, 0);
+  const body = Buffer.concat([header, osuString(name), count, ...md5s.map(osuString)]);
+
+  const safe = name.replace(/[^\w\- ]+/g, "_");
+  res.setHeader("Content-Type", "application/octet-stream");
+  res.setHeader("Content-Disposition", `attachment; filename="${safe}.db"`);
+  res.send(body);
 });

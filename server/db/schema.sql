@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS beatmaps (
   cs REAL, ar REAL, od REAL, hp REAL,
   star_rating REAL,
   max_combo INTEGER,                  -- via API enrichment pass (missing from dumps)
+  checksum TEXT,                      -- .osu MD5 (collection export), via enrichment
   count_circles INTEGER,
   count_sliders INTEGER,
   count_spinners INTEGER,
@@ -74,6 +75,12 @@ CREATE TABLE IF NOT EXISTS beatmap_user (
   any_fc INTEGER NOT NULL DEFAULT 0,  -- at least one FC (any mods)
   country_first INTEGER NOT NULL DEFAULT 0, -- I hold the country #1 on the leaderboard
   country_checked_at TEXT,                  -- last country leaderboard check
+  -- Materialized "realistic missing" (skill-curve prediction minus my best),
+  -- refreshed when scores change or the curve is recomputed: keeps /table and
+  -- /stats free of the heavy per-row prediction CASE.
+  missing_lazer INTEGER,
+  missing_classic INTEGER,
+  missing_wither INTEGER,
   best_lazer_score_id INTEGER REFERENCES scores(id),
   best_legacy_score_id INTEGER REFERENCES scores(id)
 );

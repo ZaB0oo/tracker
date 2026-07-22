@@ -49,7 +49,7 @@ export async function fetchSkillCurve(): Promise<{ buckets: SkillCurveBucket[] }
   return res.json();
 }
 
-export function buildTableQuery(
+function buildTableQuery(
   filters: Filters,
   sort: { id: string; desc: boolean }[],
   offset: number,
@@ -114,6 +114,79 @@ export async function fetchClears(
   const res = await fetch(`/api/clears?offset=${offset}&limit=${limit}`);
   if (!res.ok) throw new Error(`clears: HTTP ${res.status}`);
   return res.json();
+}
+
+export interface DailyStats {
+  year: number;
+  years: { min: number; max: number };
+  days: { d: string; c: number }[];
+  streak: { current: number; longest: number; best: { d: string; c: number } };
+}
+
+export async function fetchDaily(year?: number): Promise<DailyStats> {
+  const res = await fetch(`/api/daily${year ? `?year=${year}` : ""}`);
+  if (!res.ok) throw new Error(`daily: HTTP ${res.status}`);
+  return res.json();
+}
+
+export interface TimelinePoint {
+  day: string;
+  /** catalog size at that date (maps ranked/loved on or before it) */
+  total: number;
+  totalRanked: number;
+  totalLoved: number;
+  clears: number;
+  clearsRanked: number;
+  clearsLoved: number;
+  fc: number;
+  fcRanked: number;
+  fcLoved: number;
+  ranked: number;
+  country: number;
+  countryRanked: number;
+  countryLoved: number;
+  /** counts per tier, ordered D, C, B, A, S, SH, X, XH */
+  grades: number[];
+}
+
+export async function fetchTimeline(): Promise<{
+  tiers: string[];
+  points: TimelinePoint[];
+}> {
+  const res = await fetch("/api/timeline");
+  if (!res.ok) throw new Error(`timeline: HTTP ${res.status}`);
+  return res.json();
+}
+
+export interface SnapshotBucket {
+  bucket: string | number;
+  total: number;
+  played: number;
+  fc: number;
+  country: number;
+}
+
+export interface Snapshot {
+  day: string;
+  bySr: SnapshotBucket[];
+  byYear: SnapshotBucket[];
+  byLen: SnapshotBucket[];
+  byCombo: SnapshotBucket[];
+  byAr: SnapshotBucket[];
+  byOd: SnapshotBucket[];
+  byCs: SnapshotBucket[];
+  byHp: SnapshotBucket[];
+}
+
+export async function fetchSnapshot(day: string): Promise<Snapshot> {
+  const res = await fetch(`/api/snapshot?day=${day}`);
+  if (!res.ok) throw new Error(`snapshot: HTTP ${res.status}`);
+  return res.json();
+}
+
+/** Download URL for a legacy collection.db built from the current filters. */
+export function collectionExportUrl(filters: Filters, name: string): string {
+  return `/api/export-collection?${buildTableQuery(filters, [], 0, 1)}&name=${encodeURIComponent(name)}`;
 }
 
 export async function fetchStats(): Promise<Stats> {
@@ -257,6 +330,7 @@ export interface MetricMapConds {
   statuses: number[];
   country1: boolean;
   ids?: number[] | null;
+  query?: string | null;
 }
 export interface MetricParams {
   kind: "count" | "ranked_score";
@@ -358,6 +432,7 @@ export const DEFAULT_METRIC_PARAMS: MetricParams = {
     odMin: null, odMax: null, csMin: null, csMax: null,
     hpMin: null, hpMax: null, comboMin: null, comboMax: null,
     bpmMin: null, bpmMax: null, statuses: [], country1: false, ids: null,
+    query: null,
   },
   progressMode: "milestone",
   step: 1000,

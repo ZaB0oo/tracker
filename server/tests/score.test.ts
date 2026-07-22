@@ -4,9 +4,6 @@ import {
   FC_NO_MISS,
   FC_PERFECT,
   computeFcState,
-  displayGrade,
-  missingLazerScore,
-  pickBest,
 } from "../logic/score.js";
 import type { SoloScore } from "../osu/types.js";
 
@@ -121,42 +118,5 @@ describe("computeFcState", () => {
     expect(
       computeFcState(score({ statistics: { miss: 0 }, max_combo: 300 }), null)
     ).toBe(FC_NO_MISS);
-  });
-});
-
-describe("pickBest", () => {
-  it("separates best lazer and best legacy", () => {
-    const a = score({ total_score: 950_000, legacy_total_score: 12_000_000 });
-    const b = score({ total_score: 990_000, legacy_total_score: 8_000_000 });
-    const { lazer, legacy } = pickBest([a, b]);
-    expect(lazer).toBe(b);
-    expect(legacy).toBe(a);
-  });
-
-  it("score lazer natif: legacy metric = total_score (fallback)", () => {
-    const nativeLazer = score({ total_score: 999_000, legacy_total_score: null });
-    const oldStable = score({ total_score: 400_000, legacy_total_score: 900_000 });
-    const { legacy } = pickBest([nativeLazer, oldStable]);
-    expect(legacy).toBe(nativeLazer);
-  });
-
-  it("ignore les fails", () => {
-    const failed = score({ total_score: 999_999, passed: false });
-    const ok = score({ total_score: 100 });
-    expect(pickBest([failed, ok]).lazer).toBe(ok);
-  });
-});
-
-describe("grades & missing", () => {
-  it("mappe X/XH vers SS/SSH", () => {
-    expect(displayGrade("X")).toBe("SS");
-    expect(displayGrade("XH")).toBe("SSH");
-    expect(displayGrade("A")).toBe("A");
-  });
-
-  it("missing score lazer", () => {
-    expect(missingLazerScore(null)).toEqual({ value: 1_000_000, pct: 100 });
-    expect(missingLazerScore(900_000).value).toBe(100_000);
-    expect(missingLazerScore(1_200_000).value).toBe(0); // mods > 1x, clamp
   });
 });

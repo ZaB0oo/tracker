@@ -102,14 +102,14 @@ function RangeRow({
     <div className="mb-range">
       <span>{label}</span>
       <input
-        type="number" step={step} placeholder="min"
+        type="number" step={step} min={0} placeholder="min"
         value={value.min ?? ""}
-        onChange={(e) => onChange({ ...value, min: toNum(e.target.value) })}
+        onChange={(e) => onChange({ ...value, min: toNum(e.target.value.replace(/-/g, "")) })}
       />
       <input
-        type="number" step={step} placeholder="max"
+        type="number" step={step} min={0} placeholder="max"
         value={value.max ?? ""}
-        onChange={(e) => onChange({ ...value, max: toNum(e.target.value) })}
+        onChange={(e) => onChange({ ...value, max: toNum(e.target.value.replace(/-/g, "")) })}
       />
     </div>
   );
@@ -294,6 +294,17 @@ export function MetricBuilder({
 
         <div className="mb-title">{isCount ? "On maps matching…" : "On maps matching…"}</div>
         <Section title="Map filters (star rating, year, length, AR/OD/CS/HP…)">
+          <input
+            className="mb-query"
+            placeholder="Search artist / title / mapper / diff / source / tags…"
+            value={p.map.query ?? ""}
+            onChange={(e) =>
+              setP((s) => ({
+                ...s,
+                map: { ...s.map, query: e.target.value || null },
+              }))
+            }
+          />
           {MAP_FIELDS.map((f) => (
             <RangeRow
               key={f.min} label={f.label} step={f.step}

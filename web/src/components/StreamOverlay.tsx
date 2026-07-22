@@ -18,16 +18,10 @@ const METRIC_IDS = (new URLSearchParams(window.location.search).get("metrics") ?
   .filter((n) => Number.isInteger(n) && n > 0);
 
 // OBS overlay => English text, numbers in en-US format.
-const fmt = (n: number) => n.toLocaleString("en-US");
-const fmtB = (n: number) =>
-  n >= 1_000_000_000
-    ? `${(n / 1_000_000_000).toLocaleString("en-US", { maximumFractionDigits: 2 })}B`
-    : n >= 1_000_000
-      ? `${(n / 1_000_000).toLocaleString("en-US", { maximumFractionDigits: 1 })}M`
-      : fmt(n);
+import { fmtCompact, fmtNum } from "../format";
 
 const delta = (cur: number, base: number) => cur - base;
-const plus = (n: number) => (n > 0 ? `+${fmt(n)}` : "0");
+const plus = (n: number) => (n > 0 ? `+${fmtNum(n)}` : "0");
 
 /**
  * Stream overlay (OBS browser source, /?overlay=1): transparent background,
@@ -118,7 +112,7 @@ export function StreamOverlay() {
             )}
             {!hide.has("session.score") && (
               <span>
-                Score <b>{rankedGain > 0 ? `+${fmt(rankedGain)}` : "0"}</b>
+                Score <b>{rankedGain > 0 ? `+${fmtNum(rankedGain)}` : "0"}</b>
               </span>
             )}
           </div>
@@ -128,28 +122,28 @@ export function StreamOverlay() {
             <span className="ov-tag">TOTAL</span>
             {!hide.has("total.clears") && (
               <span>
-                Clears <b>{fmt(data.clears)}</b>
-                <span className="ov-dim"> / {fmt(data.totalMaps)} ({completion.toFixed(2)}%)</span>
+                Clears <b>{fmtNum(data.clears)}</b>
+                <span className="ov-dim"> / {fmtNum(data.totalMaps)} ({completion.toFixed(2)}%)</span>
               </span>
             )}
             {GRADE_KEYS.map(
               (k) =>
                 !hide.has(`total.${k.toLowerCase()}`) && (
                   <span key={k} className="ov-grade">
-                    <GradeBadge grade={k} width={26} /> <b>{fmt(data.grades[k] ?? 0)}</b>
+                    <GradeBadge grade={k} width={26} /> <b>{fmtNum(data.grades[k] ?? 0)}</b>
                   </span>
                 )
             )}
-            {!hide.has("total.fc") && <span>FC <b>{fmt(data.fc)}</b></span>}
+            {!hide.has("total.fc") && <span>FC <b>{fmtNum(data.fc)}</b></span>}
             {!hide.has("total.country") && (
-              <span>{firstPlaceLabel(country)} <b>{fmt(data.country)}</b></span>
+              <span>{firstPlaceLabel(country)} <b>{fmtNum(data.country)}</b></span>
             )}
           </div>
         )}
         {!hide.has("ranked") && (
           <div className="ov-row">
             <span className="ov-tag">RANKED SCORE</span>
-            <span>Classic <b>{fmt(data.rankedClassic)}</b></span>
+            <span>Classic <b>{fmtNum(data.rankedClassic)}</b></span>
           </div>
         )}
         {metrics && metrics.metrics.length > 0 && (
@@ -158,7 +152,7 @@ export function StreamOverlay() {
             {metrics.metrics.map((m) => {
               const base = metricBaseline.current?.get(m.id) ?? m.count;
               const gain = m.count - base;
-              const f = m.kind === "ranked_score" ? fmtB : fmt;
+              const f = m.kind === "ranked_score" ? fmtCompact : fmtNum;
               return (
                 <span key={m.id}>
                   {m.name} <b>{f(m.count)}</b>

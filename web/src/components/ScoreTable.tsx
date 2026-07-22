@@ -84,13 +84,13 @@ const COLUMNS: Col[] = [
     className: () => "grade-cell",
   },
   {
-    id: "fc_state", label: "FC", width: 45, sortable: true,
+    id: "fc_state", label: "FC", width: 65, sortable: true,
     render: (r) => (r.fc_state == null ? "—" : FC_LABELS[r.fc_state]),
     className: (r) => `fc fc-${r.fc_state ?? "none"}`,
   },
-  { id: "score", label: "Score", width: 95, sortable: true, render: (r) => fmtInt(r.score_value) },
+  { id: "score", label: "Score", width: 101, sortable: true, render: (r) => fmtInt(r.score_value) },
   {
-    id: "missing", label: "Missing", width: 100, sortable: true,
+    id: "missing", label: "Missing", width: 101, sortable: true,
     render: (r) => fmtInt(r.missing_value),
     className: (r) => (r.missing_value === 0 ? "missing-zero" : "missing"),
   },
@@ -112,7 +112,7 @@ const COLUMNS: Col[] = [
     id: "country_first", label: "#1", width: 40,
     render: (r) => (r.country_first ? <MedalIcon width={15} /> : ""),
   },
-  { id: "pp", label: "pp", width: 55, sortable: true, render: (r) => (r.pp == null ? "—" : Math.round(r.pp)) },
+  { id: "pp", label: "pp", width: 45, sortable: true, render: (r) => (r.pp == null ? "—" : Math.round(r.pp)) },
   { id: "ended_at", label: "Played on", width: 90, sortable: true, render: (r) => fmtDate(r.ended_at) },
   {
     id: "score_combo", label: "Combo", width: 90, sortable: true,

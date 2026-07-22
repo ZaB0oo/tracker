@@ -86,7 +86,7 @@ export interface MapDetail {
   }[];
 }
 
-export type ScoreMode = "lazer" | "classic";
+type ScoreMode = "lazer" | "classic";
 
 export interface TableResponse {
   rows: TableRow[];

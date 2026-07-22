@@ -1,19 +1,21 @@
-import { useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchSkillCurve, fetchStats } from "../api";
+import { fetchSkillCurve, fetchSnapshot, fetchStats, fetchTimeline, type Snapshot, type SnapshotBucket } from "../api";
 import { firstPlaceLabel, useCountryCode } from "../country";
 import { useDisplayPrefs } from "../prefs";
 import { useHidden } from "../visibility";
 import { GradeBadge } from "./GradeBadge";
+import { HeatmapPanel } from "./Heatmap";
+import { TimeMachineBar } from "./TimeMachine";
 import { MedalIcon } from "./Icons";
 import { VisibilityMenu } from "./VisibilityMenu";
+import { displayGrade, fmtNum } from "../format";
 import {
   FC_LABELS,
   type Bucket,
   type SkillCurveBucket,
 } from "../types";
 
-const fmt = (n: number) => n.toLocaleString("en-US");
 const fmtK = (n: number) =>
   n >= 1_000_000 ? `${(n / 1_000_000).toFixed(2)}M` : `${Math.round(n / 1000)}k`;
 
@@ -180,27 +182,27 @@ function SkillCurvePanel() {
             className="curve-tip"
             style={tipPos(x(hover.sr) / W, y(hover.predicted) / H)}
           >
-            <b>{hover.sr.toFixed(1)}★</b> Prediction: {fmt(hover.predicted)}
+            <b>{hover.sr.toFixed(1)}★</b> Prediction: {fmtNum(hover.predicted)}
             {hover.inherited ? " (inherited)" : ""}
             <br />
-            {fmt(hover.played)}/{fmt(hover.total)}{" "}
+            {fmtNum(hover.played)}/{fmtNum(hover.total)}{" "}
             maps played
             <br />
             Missing:
             <br />
-            - {fmt(hover.missingClassic)} Classic Score
+            - {fmtNum(hover.missingClassic)} Classic Score
             {prefs.wither && (
               <>
-                <br />- {fmt(hover.missingWither)} Wither Score
+                <br />- {fmtNum(hover.missingWither)} Wither Score
               </>
             )}
             <br />
             Cumulative missing (≤ {hover.sr.toFixed(1)}★):
             <br />
-            - {fmt(cumByQ.get(hover.sr)?.classic ?? 0)} Classic Score
+            - {fmtNum(cumByQ.get(hover.sr)?.classic ?? 0)} Classic Score
             {prefs.wither && (
               <>
-                <br />- {fmt(cumByQ.get(hover.sr)?.wither ?? 0)} Wither Score
+                <br />- {fmtNum(cumByQ.get(hover.sr)?.wither ?? 0)} Wither Score
               </>
             )}
           </div>
@@ -247,12 +249,12 @@ function Bar({
         <div className="bar-fill bar-fill-gold" style={{ width: `${countryPct}%` }} />
       )}
       <span className="bar-label">
-        {fmt(played)} / {fmt(total)} ({pct.toFixed(1)}%)
-        {fc > 0 ? ` · FC ${fmt(fc)}` : ""}
+        {fmtNum(played)} / {fmtNum(total)} ({pct.toFixed(1)}%)
+        {fc > 0 ? ` · FC ${fmtNum(fc)}` : ""}
         {country > 0 && (
           <>
             {" · "}
-            <MedalIcon width={12} /> {fmt(country)}
+            <MedalIcon width={12} /> {fmtNum(country)}
           </>
         )}
       </span>
@@ -269,7 +271,7 @@ interface DistRow {
   fc?: number | null;
 }
 
-function DistPanel({ title, rows }: { title: string; rows: DistRow[] }) {
+const DistPanel = memo(function DistPanel({ title, rows }: { title: string; rows: DistRow[] }) {
   return (
     <div className="panel">
       <h3>Completion by {title}</h3>
@@ -286,7 +288,7 @@ function DistPanel({ title, rows }: { title: string; rows: DistRow[] }) {
       ))}
     </div>
   );
-}
+});
 
 const statLabel = (b: number) => (b >= 10 ? "10" : `${b}–${b + 1}`);
 
@@ -299,6 +301,119 @@ export function Dashboard() {
     queryFn: fetchStats,
     refetchInterval: 60_000,
   });
+  const { data: timeline } = useQuery({
+    queryKey: ["timeline"],
+    queryFn: fetchTimeline,
+    refetchInterval: 5 * 60_000,
+  });
+  const [tmIdx, setTmIdx] = useState<number | null>(null);
+  const tmDay =
+    tmIdx != null && timeline && tmIdx < timeline.points.length - 1
+      ? timeline.points[tmIdx].day
+      : null;
+  // Real-time snapshot fetching, "latest wins": at most ONE request in flight
+  // (the endpoint answers in ~10-30 ms from an in-memory index); while it
+  // runs, only the latest slider position is remembered and fired next. The
+  // per-stat panels therefore track the slider with imperceptible latency,
+  // without flooding the server with one request per tick.
+  const [snap, setSnap] = useState<Snapshot | null>(null);
+  const inFlight = useRef(false);
+  const pendingDay = useRef<string | null>(null);
+  useEffect(() => {
+    if (tmDay == null) {
+      setSnap(null);
+      pendingDay.current = null;
+      return;
+    }
+    const run = (day: string) => {
+      inFlight.current = true;
+      fetchSnapshot(day)
+        .then((sn) => {
+          inFlight.current = false;
+          setSnap(sn);
+          if (pendingDay.current && pendingDay.current !== day) {
+            const next = pendingDay.current;
+            pendingDay.current = null;
+            run(next);
+          } else {
+            pendingDay.current = null;
+          }
+        })
+        .catch(() => {
+          inFlight.current = false;
+          pendingDay.current = null;
+        });
+    };
+    if (inFlight.current) pendingDay.current = tmDay;
+    else run(tmDay);
+  }, [tmDay]);
+
+  // Per-stat panels: memoized so they do NOT re-render on every slider tick —
+  // their rows only change when the (debounced) snapshot or live stats change.
+  const dists = useMemo<{ title: string; rows: DistRow[] }[]>(() => {
+    if (!data) return [];
+    const isPast = tmDay != null;
+    const useSnap = isPast && snap != null;
+    const snapDict = (rows: SnapshotBucket[] | undefined) =>
+      new Map((rows ?? []).map((r) => [String(r.bucket), r]));
+    const snapOf = (dim: keyof Snapshot) =>
+      useSnap ? snapDict(snap[dim] as SnapshotBucket[]) : null;
+    const over = (
+      dict: Map<string, SnapshotBucket> | null,
+      key: string | number,
+      live: { total: number; played: number | null; fc: number | null; country: number | null }
+    ) => {
+      if (!dict) return live;
+      const sv = dict.get(String(key));
+      return {
+        total: sv?.total ?? 0,
+        played: sv?.played ?? 0,
+        fc: sv?.fc ?? 0,
+        country: sv?.country ?? 0,
+      };
+    };
+    const bucketRows = (
+      buckets: Bucket[],
+      label: (b: number) => string,
+      dict: Map<string, SnapshotBucket> | null
+    ): DistRow[] =>
+      buckets.map((b) => ({
+        label: label(b.bucket),
+        ...over(dict, b.bucket, { total: b.total, played: b.played, country: b.country, fc: b.fc }),
+      }));
+    return [
+      {
+        title: "star rating",
+        rows: data.bySr.map((b) => ({
+          label: b.sr >= 10 ? "10★+" : `${b.sr}★–${b.sr + 1}★`,
+          ...over(snapOf("bySr"), b.sr, { total: b.total, played: b.played, country: b.country, fc: b.fc }),
+        })),
+      },
+      {
+        title: "rank year",
+        rows: data.byYear.map((b) => ({
+          label: b.year,
+          ...over(snapOf("byYear"), b.year, { total: b.total, played: b.played, country: b.country, fc: b.fc }),
+        })),
+      },
+      {
+        title: "length",
+        rows: bucketRows(data.byLen, (b) => (b >= 10 ? "10 min+" : `${b}–${b + 1} min`), snapOf("byLen")),
+      },
+      {
+        title: "max combo",
+        rows: bucketRows(
+          data.byCombo,
+          (b) => (b >= 8 ? "2000+" : `${b * 250}–${(b + 1) * 250}`),
+          snapOf("byCombo")
+        ),
+      },
+      { title: "AR", rows: bucketRows(data.byAr, statLabel, snapOf("byAr")) },
+      { title: "OD", rows: bucketRows(data.byOd, statLabel, snapOf("byOd")) },
+      { title: "CS", rows: bucketRows(data.byCs, statLabel, snapOf("byCs")) },
+      { title: "HP", rows: bucketRows(data.byHp, statLabel, snapOf("byHp")) },
+    ];
+  }, [data, snap, tmDay != null]);
 
   if (isLoading)
     return (
@@ -312,62 +427,46 @@ export function Dashboard() {
     );
   if (error || !data) return <div className="panel">Failed to load stats.</div>;
 
+  // Time machine: when a past day is selected, the EXISTING hero counters
+  // show that day's values (timeline lookup, instant). Panels that cannot be
+  // reconstructed historically (missing score, PFC split, std/wither sums)
+  // are dimmed instead.
+  const points = timeline?.points ?? [];
+  const past =
+    tmIdx != null && points.length > 1 && tmIdx < points.length - 1
+      ? points[tmIdx]
+      : null;
+  const t = data.totals;
+  const eff = {
+    total: past ? past.total : t.total,
+    totalRanked: past ? past.totalRanked : t.ranked_total,
+    totalLoved: past ? past.totalLoved : t.loved_total,
+    played: past ? past.clears : t.played ?? 0,
+    rankedPlayed: past ? past.clearsRanked : t.ranked_played ?? 0,
+    lovedPlayed: past ? past.clearsLoved : t.loved_played ?? 0,
+    fc: past ? past.fc : t.fc ?? 0,
+    fcRanked: past ? past.fcRanked : t.fc_ranked ?? 0,
+    fcLoved: past ? past.fcLoved : t.fc_loved ?? 0,
+    country: past ? past.country : t.country_firsts ?? 0,
+    countryRanked: past ? past.countryRanked : t.country_ranked ?? 0,
+    countryLoved: past ? past.countryLoved : t.country_loved ?? 0,
+    rankedClassic: past ? past.ranked : data.scoreSums.classic,
+  };
+
   const gradeOrder = ["XH", "X", "SH", "S", "A", "B", "C", "D"];
-  const gradeDisplay: Record<string, string> = { XH: "SSH", X: "SS" };
+  // timeline tiers are ordered D..XH; the grid shows XH..D
+  const TIER_IDX: Record<string, number> = { D: 0, C: 1, B: 2, A: 3, S: 4, SH: 5, X: 6, XH: 7 };
   // all grades, zeros included (fixed 2x4 grid like the share card)
   const grades = gradeOrder.map((g) => ({
     g,
-    c: data.grades.find((x) => x.grade === g)?.c ?? 0,
+    c: past ? past.grades[TIER_IDX[g]] ?? 0 : data.grades.find((x) => x.grade === g)?.c ?? 0,
   }));
-
-  const bucketRows = (buckets: Bucket[], label: (b: number) => string): DistRow[] =>
-    buckets.map((b) => ({
-      label: label(b.bucket),
-      total: b.total,
-      played: b.played,
-      country: b.country,
-      fc: b.fc,
-    }));
-
-  const dists: { title: string; rows: DistRow[] }[] = [
-    {
-      title: "star rating",
-      rows: data.bySr.map((b) => ({
-        label: b.sr >= 10 ? "10★+" : `${b.sr}★–${b.sr + 1}★`,
-        total: b.total,
-        played: b.played,
-        country: b.country,
-        fc: b.fc,
-      })),
-    },
-    {
-      title: "rank year",
-      rows: data.byYear.map((b) => ({
-        label: b.year,
-        total: b.total,
-        played: b.played,
-        country: b.country,
-        fc: b.fc,
-      })),
-    },
-    {
-      title: "length",
-      rows: bucketRows(data.byLen, (b) => (b >= 10 ? "10 min+" : `${b}–${b + 1} min`)),
-    },
-    {
-      title: "max combo",
-      rows: bucketRows(data.byCombo, (b) =>
-        b >= 8 ? "2000+" : `${b * 250}–${(b + 1) * 250}`
-      ),
-    },
-    { title: "AR", rows: bucketRows(data.byAr, statLabel) },
-    { title: "OD", rows: bucketRows(data.byOd, statLabel) },
-    { title: "CS", rows: bucketRows(data.byCs, statLabel) },
-    { title: "HP", rows: bucketRows(data.byHp, statLabel) },
-  ];
 
   return (
     <div className="dashboard">
+      {points.length > 1 && (
+        <TimeMachineBar points={points} idx={tmIdx} onChange={setTmIdx} />
+      )}
       {/* Hero: the essentials at a glance */}
       <div className="card hero">
         <div className="hero-bars">
@@ -375,82 +474,86 @@ export function Dashboard() {
           <div className="dist-row">
             <span className="dist-label">Global</span>
             <Bar
-              played={data.totals.played ?? 0}
-              total={data.totals.total}
-              country={data.totals.country_firsts ?? 0}
-              fc={data.totals.fc ?? 0}
+              played={eff.played}
+              total={eff.total}
+              country={eff.country}
+              fc={eff.fc}
             />
           </div>
           <div className="dist-row">
             <span className="dist-label">Ranked</span>
             <Bar
-              played={data.totals.ranked_played ?? 0}
-              total={data.totals.ranked_total}
-              country={data.totals.country_ranked ?? 0}
-              fc={data.totals.fc_ranked ?? 0}
+              played={eff.rankedPlayed}
+              total={eff.totalRanked}
+              country={eff.countryRanked}
+              fc={eff.fcRanked}
             />
           </div>
           <div className="dist-row">
             <span className="dist-label">Loved</span>
             <Bar
-              played={data.totals.loved_played ?? 0}
-              total={data.totals.loved_total}
-              country={data.totals.country_loved ?? 0}
-              fc={data.totals.fc_loved ?? 0}
+              played={eff.lovedPlayed}
+              total={eff.totalLoved}
+              country={eff.countryLoved}
+              fc={eff.fcLoved}
             />
           </div>
         </div>
         <div className="hero-stat">
           <h3>{firstPlaceLabel(country)}</h3>
-          <div className="big gold-text">{fmt(data.totals.country_firsts ?? 0)}</div>
-          <small>out of {fmt(data.totals.played ?? 0)} maps played</small>
+          <div className="big gold-text">{fmtNum(eff.country)}</div>
+          <small>out of {fmtNum(eff.played)} maps played</small>
         </div>
         <div className="hero-stat">
           <h3>Ranked score</h3>
           <div className="big">
-            {fmt(data.scoreSums.classic)} <span className="big-unit">Classic Score</span>
+            {fmtNum(eff.rankedClassic)} <span className="big-unit">Classic Score</span>
           </div>
           {prefs.wither && (
-            <div className="big">
-              {fmt(data.scoreSums.wither)} <span className="big-unit">Wither Score</span>
+            <div className={`big${past ? " tm-dim" : ""}`}>
+              {fmtNum(data.scoreSums.wither)} <span className="big-unit">Wither Score</span>
             </div>
           )}
-          <small>Standardised: {fmt(data.scoreSums.lazer)}</small>
+          <small className={past ? "tm-dim" : undefined}>
+            Standardised: {fmtNum(data.scoreSums.lazer)}
+          </small>
         </div>
-        <div className="hero-stat">
+        <div className={`hero-stat${past ? " tm-dim" : ""}`}>
           <h3>Missing score (estimate)</h3>
           <div className="big accent">
-            {fmt(data.scoreSums.missingClassic)}{" "}
+            {fmtNum(data.scoreSums.missingClassic)}{" "}
             <span className="big-unit">Classic Score</span>
           </div>
           {prefs.wither && (
             <div className="big accent">
-              {fmt(data.scoreSums.missingWither)}{" "}
+              {fmtNum(data.scoreSums.missingWither)}{" "}
               <span className="big-unit">Wither Score</span>
             </div>
           )}
-          <small>Standardised: {fmt(data.scoreSums.missing)}</small>
+          <small>Standardised: {fmtNum(data.scoreSums.missing)}</small>
         </div>
         <div className="hero-stat hero-grades">
           <h3>Grades</h3>
           <div className="grade-grid">
             {grades.map(({ g, c }) => (
               <div key={g} className="grade-cell2">
-                <GradeBadge grade={g} width={48} title={gradeDisplay[g] ?? g} />
-                <span>{fmt(c)}</span>
+                <GradeBadge grade={g} width={48} title={displayGrade(g)} />
+                <span>{fmtNum(c)}</span>
               </div>
             ))}
           </div>
-          <div className="grade-dist">
+          <div className={`grade-dist${past ? " tm-dim" : ""}`}>
             {data.fc.map((f) => (
               <div key={f.fc_state} className="grade-pill">
                 <b className={`fc fc-${f.fc_state}`}>{FC_LABELS[f.fc_state]}</b>{" "}
-                {fmt(f.c)}
+                {fmtNum(f.c)}
               </div>
             ))}
           </div>
         </div>
       </div>
+
+      <HeatmapPanel cutoffDay={past?.day ?? null} />
 
       <div className="view-toolbar">
         <VisibilityMenu

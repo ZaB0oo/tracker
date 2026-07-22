@@ -31,6 +31,7 @@ export interface SoloScore {
 }
 
 export interface ApiBeatmap {
+  checksum?: string | null;
   id: number;
   beatmapset_id: number;
   mode_int: number;

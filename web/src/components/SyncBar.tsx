@@ -13,9 +13,8 @@ import { AdvancedSettings } from "./AdvancedSettings";
 import { OverlayConfig } from "./OverlayConfig";
 import { ShareCard } from "./ShareCard";
 import { firstPlaceLabel, useCountryCode } from "../country";
-import { fmtTime } from "../format";
+import { fmtNum, fmtTime } from "../format";
 
-const fmt = (n: number) => n.toLocaleString("en-US");
 
 /** Labels + toasts per action (start / result). `lbl` = "#1 FR", "#1 US"… */
 const actionLabels = (
@@ -36,7 +35,7 @@ const actionLabels = (
   "country-pause": { start: "Pausing sweep…", done: () => `${lbl} sweep paused` },
   recompute: {
     start: "Recomputing…",
-    done: (r) => `Recompute done: ${fmt(Number(r.recomputed ?? 0))} maps`,
+    done: (r) => `Recompute done: ${fmtNum(Number(r.recomputed ?? 0))} maps`,
   },
   rebackfill: {
     start: "Re-backfill…",
@@ -239,11 +238,11 @@ export function SyncBar() {
       <div className="sync-mid">
         <div
           className="sync-progress"
-          title={`Scores fetched for ${fmt(s.backfill.fetched)} maps out of ${fmt(s.backfill.total)} in the catalog`}
+          title={`Scores fetched for ${fmtNum(s.backfill.fetched)} maps out of ${fmtNum(s.backfill.total)} in the catalog`}
         >
           <div className="sync-progress-fill" style={{ width: `${pct}%` }} />
           <span>
-            maps scanned {fmt(s.backfill.fetched)}/{fmt(s.backfill.total)} ({pct.toFixed(1)}%)
+            maps scanned {fmtNum(s.backfill.fetched)}/{fmtNum(s.backfill.total)} ({pct.toFixed(1)}%)
           </span>
         </div>
         <span className="sync-poll">

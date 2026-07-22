@@ -39,15 +39,16 @@ function upsertMapStmt() {
   return getDb().prepare(`
     INSERT INTO beatmaps (id, beatmapset_id, ruleset, version, status,
       total_length, hit_length, bpm, cs, ar, od, hp, star_rating,
-      count_circles, count_sliders, count_spinners, last_updated)
+      count_circles, count_sliders, count_spinners, last_updated, checksum)
     VALUES (@id, @beatmapset_id, @ruleset, @version, @status,
       @total_length, @hit_length, @bpm, @cs, @ar, @od, @hp, @star_rating,
-      @count_circles, @count_sliders, @count_spinners, @last_updated)
+      @count_circles, @count_sliders, @count_spinners, @last_updated, @checksum)
     ON CONFLICT(id) DO UPDATE SET
       version = excluded.version, status = excluded.status,
       star_rating = excluded.star_rating, bpm = excluded.bpm,
       cs = excluded.cs, ar = excluded.ar, od = excluded.od, hp = excluded.hp,
-      total_length = excluded.total_length, last_updated = excluded.last_updated
+      total_length = excluded.total_length, last_updated = excluded.last_updated,
+      checksum = COALESCE(excluded.checksum, beatmaps.checksum)
   `);
 }
 
@@ -94,28 +95,6 @@ export async function updateCatalogDelta(
   return newBeatmapIds;
 }
 
-/**
- * Direct upsert of beatmaps (+ their sets) from full API objects — used when
- * polling sees a score on a map unknown to the catalog.
- * Also fills in max_combo if present (available on /beatmaps?ids[]).
- */
-export function upsertApiBeatmapsWithSets(beatmaps: ApiBeatmap[]): void {
-  getDb();
-  const setStmt = upsertSetStmt();
-  const mapStmt = upsertMapStmt();
-  const comboStmt = getDb().prepare(
-    "UPDATE beatmaps SET max_combo = ? WHERE id = ?"
-  );
-  transaction(() => {
-    for (const b of beatmaps) {
-      if (b.mode_int !== 0 || !KEEP_STATUSES.has(b.ranked)) continue;
-      if (b.beatmapset) setStmt.run(apiSetToRow(b.beatmapset));
-      mapStmt.run(apiMapToRow(b));
-      if (b.max_combo != null) comboStmt.run(b.max_combo, b.id);
-    }
-  });
-}
-
 // ---------- Mega-collabs: sets > 100 diffs (truncated API payload) ----------
 
 /**
@@ -152,7 +131,7 @@ function modeIntOf(bm: ApiBeatmap & { mode?: string }): number {
 }
 
 /** Upsert a full set; returns the ids of the new std diffs. */
-export function upsertFullSet(set: ApiBeatmapset): number[] {
+function upsertFullSet(set: ApiBeatmapset): number[] {
   const db = getDb();
   const setStmt = upsertSetStmt();
   const mapStmt = upsertMapStmt();
@@ -459,6 +438,7 @@ function apiMapToRow(b: ApiBeatmap) {
     count_sliders: b.count_sliders ?? null,
     count_spinners: b.count_spinners ?? null,
     last_updated: b.last_updated ?? null,
+    checksum: b.checksum ?? null,
   };
 }
 
@@ -473,13 +453,14 @@ export async function enrichMaxCombo(
     `UPDATE beatmaps SET max_combo = @max_combo, star_rating = @sr,
        count_circles = COALESCE(@cc, count_circles),
        count_sliders = COALESCE(@cs, count_sliders),
-       count_spinners = COALESCE(@csp, count_spinners)
+       count_spinners = COALESCE(@csp, count_spinners),
+       checksum = COALESCE(@checksum, checksum)
      WHERE id = @id`
   );
   const total = (
     db
       .prepare(
-        "SELECT COUNT(*) AS c FROM beatmaps WHERE ruleset = 0 AND max_combo IS NULL"
+        "SELECT COUNT(*) AS c FROM beatmaps WHERE ruleset = 0 AND (max_combo IS NULL OR checksum IS NULL)"
       )
       .get() as { c: number }
   ).c;
@@ -489,7 +470,7 @@ export async function enrichMaxCombo(
     const ids = (
       db
         .prepare(
-          "SELECT id FROM beatmaps WHERE ruleset = 0 AND max_combo IS NULL LIMIT 50"
+          "SELECT id FROM beatmaps WHERE ruleset = 0 AND (max_combo IS NULL OR checksum IS NULL) LIMIT 50"
         )
         .all() as { id: number }[]
     ).map((r) => r.id);
@@ -506,6 +487,7 @@ export async function enrichMaxCombo(
           cc: b.count_circles ?? null,
           cs: b.count_sliders ?? null,
           csp: b.count_spinners ?? null,
+          checksum: b.checksum ?? null,
         });
       }
       // ids not returned (deleted maps?): max_combo = 0 to avoid looping

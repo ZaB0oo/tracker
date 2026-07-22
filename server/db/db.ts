@@ -89,6 +89,15 @@ function migrate(d: DatabaseSync): void {
     `UPDATE OR IGNORE sync_state SET key = 'country_recheck_hours'
      WHERE key = 'fr_recheck_hours'`
   );
+  // Columns added after the public release (safe additive ALTERs).
+  const bmCols = d.prepare("PRAGMA table_info(beatmaps)").all() as { name: string }[];
+  if (!bmCols.some((c) => c.name === "checksum"))
+    d.exec("ALTER TABLE beatmaps ADD COLUMN checksum TEXT");
+  const buCols2 = d.prepare("PRAGMA table_info(beatmap_user)").all() as { name: string }[];
+  for (const col of ["missing_lazer", "missing_classic", "missing_wither"]) {
+    if (!buCols2.some((c) => c.name === col))
+      d.exec(`ALTER TABLE beatmap_user ADD COLUMN ${col} INTEGER`);
+  }
 
   seedDefaultMetrics(d);
   // Startup repair: the immediate country check after a new score can race

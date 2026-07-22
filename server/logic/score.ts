@@ -56,30 +56,6 @@ export function computeFcState(
   return FC_NO_MISS;
 }
 
-/** API rank -> UI label. X/XH are the SS ranks. */
-export function displayGrade(rank: string): string {
-  switch (rank) {
-    case "XH":
-      return "SSH";
-    case "X":
-      return "SS";
-    default:
-      return rank;
-  }
-}
-
-/** Grade sort order (best = highest). */
-export const GRADE_ORDER: Record<string, number> = {
-  XH: 7,
-  X: 6,
-  SH: 5,
-  S: 4,
-  A: 3,
-  B: 2,
-  C: 1,
-  D: 0,
-};
-
 /**
  * Best score per metric. We keep TWO bests per map:
  * - "lazer" best  : max(total_score)        (current standardised system)
@@ -90,43 +66,4 @@ export const GRADE_ORDER: Record<string, number> = {
  */
 export function legacyMetric(s: Pick<SoloScore, "total_score" | "legacy_total_score">): number {
   return s.legacy_total_score ?? s.total_score;
-}
-
-export function pickBest<T extends SoloScore>(
-  scores: T[]
-): { lazer: T | null; legacy: T | null } {
-  let lazer: T | null = null;
-  let legacy: T | null = null;
-  for (const s of scores) {
-    if (!s.passed) continue;
-    if (!lazer || s.total_score > lazer.total_score) lazer = s;
-    if (!legacy || legacyMetric(s) > legacyMetric(legacy)) legacy = s;
-  }
-  return { lazer, legacy };
-}
-
-/**
- * Theoretical SS score (lazer standardised mode).
- *
- * DOCUMENTED APPROXIMATION: base 1,000,000 × the best's mod multiplier (the
- * score returned by the API already includes the multiplier; we take
- * NoMod = 1,000,000 as the reference for "SS achievable without mods").
- * The spinner bonus (~a few hundred points per spinner) is ignored: the gap
- * is < 0.1% on nearly all maps. Mod multipliers (rebalanced in 06/2026, all
- * scores recomputed on osu!'s side) are already baked into the values
- * returned by the API: we NEVER recompute a multiplier ourselves.
- *
- * In legacy mode (ScoreV1), the max depends on the map's combo/multipliers/
- * objects and can't be computed without parsing the .osu: missing legacy =
- * NULL (limitation documented in the README).
- */
-export const LAZER_SS_BASE = 1_000_000;
-
-export function missingLazerScore(bestTotalScore: number | null): {
-  value: number | null;
-  pct: number | null;
-} {
-  if (bestTotalScore == null) return { value: LAZER_SS_BASE, pct: 100 };
-  const missing = Math.max(0, LAZER_SS_BASE - bestTotalScore);
-  return { value: missing, pct: (missing / LAZER_SS_BASE) * 100 };
 }

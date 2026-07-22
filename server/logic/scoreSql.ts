@@ -6,7 +6,7 @@ import { getDb } from "../db/db.js";
 
 // ---------- Shared SQL expressions (required aliases: b = beatmaps, s = best) ----------
 
-export const FULL_BASE = 1_000_000;
+const FULL_BASE = 1_000_000;
 export const N_OBJ =
   "(COALESCE(b.count_circles,0) + COALESCE(b.count_sliders,0) + COALESCE(b.count_spinners,0))";
 // Max classic of a map (SS NoMod): n_objects² × 32.57 + 100000 (lazer formula)
@@ -46,11 +46,53 @@ export function missingExprs(mode: "classic" | "lazer"): {
 }
 
 /** Realistic missing in wither (standardised fallback if object count unknown). */
-export function witherMissingSql(): string {
+function witherMissingSql(): string {
   const pred = `(${skillCurveCase()})`;
   return `CASE WHEN ${N_OBJ} > 0
     THEN MAX(0, ${witherSql(pred)} - ${witherSql("COALESCE(s.total_score, 0)")})
     ELSE MAX(0, ${pred} - COALESCE(s.total_score, 0)) END`;
+}
+
+// ---------- Materialized missing (beatmap_user.missing_*) ----------
+// The prediction is a ~100-branch CASE: evaluating it per row on every /table
+// request made filtering feel sluggish. Instead it is materialized into
+// beatmap_user and refreshed only when scores change or the curve cache rolls
+// over (one ~1s UPDATE instead of seconds on every request).
+
+let missingStamp = "";
+
+export function ensureMissingFresh(): void {
+  const db = getDb();
+  const v = db
+    .prepare("SELECT COUNT(*) c, COALESCE(MAX(id), 0) m FROM scores")
+    .get() as { c: number; m: number };
+  const curve = computeSkillCurve(); // refreshes its own 10-min cache if needed
+  const stamp = `${v.c}-${v.m}-${curve.until}`;
+  if (stamp === missingStamp) return;
+
+  // every catalog map needs a row to carry its missing value (unplayed = full
+  // prediction); harmless for the backfill, which keys off fetched_at
+  db.exec(
+    "INSERT OR IGNORE INTO beatmap_user (beatmap_id) SELECT id FROM beatmaps WHERE ruleset = 0"
+  );
+  const lazer = missingExprs("lazer").missingSql;
+  const classic = missingExprs("classic").missingSql;
+  db.exec(
+    `UPDATE beatmap_user SET
+       missing_lazer = x.ml, missing_classic = x.mc, missing_wither = x.mw
+     FROM (
+       SELECT b.id AS bid,
+         ${lazer} AS ml,
+         ${classic} AS mc,
+         ${witherMissingSql()} AS mw
+       FROM beatmaps b
+       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
+       LEFT JOIN scores s ON s.id = u.best_lazer_score_id
+       WHERE b.ruleset = 0
+     ) AS x
+     WHERE beatmap_user.beatmap_id = x.bid`
+  );
+  missingStamp = stamp;
 }
 
 /**
@@ -69,7 +111,11 @@ interface CurveBucket {
 }
 let curveCache: { until: number; caseSql: string; buckets: CurveBucket[] } | null =
   null;
-export function computeSkillCurve(): { caseSql: string; buckets: CurveBucket[] } {
+export function computeSkillCurve(): {
+  until: number;
+  caseSql: string;
+  buckets: CurveBucket[];
+} {
   if (curveCache && Date.now() < curveCache.until) return curveCache;
   const db = getDb();
   const rows = db
@@ -143,6 +189,6 @@ export function computeSkillCurve(): { caseSql: string; buckets: CurveBucket[] }
   curveCache = { until: Date.now() + 10 * 60_000, caseSql, buckets };
   return curveCache;
 }
-export function skillCurveCase(): string {
+function skillCurveCase(): string {
   return computeSkillCurve().caseSql;
 }

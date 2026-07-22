@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { firstPlaceLabel, useCountryCode } from "../country";
+import { collectionExportUrl } from "../api";
+import { displayGrade } from "../format";
 import { useDisplayPrefs } from "../prefs";
 import { DEFAULT_FILTERS, type Filters } from "../types";
 
 const GRADES = ["XH", "X", "SH", "S", "A", "B", "C", "D"];
-const GRADE_DISPLAY: Record<string, string> = { XH: "SSH", X: "SS" };
 const FC_OPTS = [
   { v: "0", label: "PFC" },
   { v: "1", label: "FC" },
@@ -16,8 +17,11 @@ const STATUS_OPTS = [
   { v: "4", label: "Loved" },
 ];
 
+/** all map stats are non-negative: strip any minus sign typed or pasted */
+const noNeg = (v: string) => v.replace(/-/g, "");
+
 function Range({
-  label, min, max, onMin, onMax, step = "any", lo, hi,
+  label, min, max, onMin, onMax, step = "any", lo = 0, hi,
 }: {
   label: string; min: string; max: string;
   onMin: (v: string) => void; onMax: (v: string) => void;
@@ -26,8 +30,8 @@ function Range({
   return (
     <label className="range">
       <span>{label}</span>
-      <input type="number" step={step} min={lo} max={hi} placeholder={lo != null ? String(lo) : "min"} value={min} onChange={(e) => onMin(e.target.value)} />
-      <input type="number" step={step} min={lo} max={hi} placeholder={hi != null ? String(hi) : "max"} value={max} onChange={(e) => onMax(e.target.value)} />
+      <input type="number" step={step} min={lo} max={hi} placeholder={lo > 0 ? String(lo) : "min"} value={min} onChange={(e) => onMin(noNeg(e.target.value))} />
+      <input type="number" step={step} min={lo} max={hi} placeholder={hi != null ? String(hi) : "max"} value={max} onChange={(e) => onMax(noNeg(e.target.value))} />
     </label>
   );
 }
@@ -72,7 +76,7 @@ export function FilterBar({
   if (local.grades.length)
     badges.push({
       key: "grades",
-      label: `Grade: ${local.grades.map((g) => GRADE_DISPLAY[g] ?? g).join("/")}`,
+      label: `Grade: ${local.grades.map((g) => displayGrade(g)).join("/")}`,
       clear: () => set("grades", []),
     });
   if (local.fcState.length)
@@ -158,6 +162,20 @@ export function FilterBar({
             Reset all
           </button>
         )}
+        <button
+          className="export-coll"
+          title="Download these maps as an osu! collection (drag the file onto osu!lazer to import)"
+          onClick={() => {
+            const name = window.prompt(
+              "Collection name:",
+              local.metricMissing ? `Missing - ${local.metricMissing.name}` : "osu!completionist"
+            );
+            if (name?.trim())
+              window.location.href = collectionExportUrl(local, name.trim());
+          }}
+        >
+          ⤓ Collection
+        </button>
       </div>
 
       <div className="filter-groups">
@@ -185,7 +203,7 @@ export function FilterBar({
                 className={`chip ${local.grades.includes(g) ? "on" : ""}`}
                 onClick={() => toggle("grades", g)}
               >
-                {GRADE_DISPLAY[g] ?? g}
+                {displayGrade(g)}
               </button>
             ))}
           </div>

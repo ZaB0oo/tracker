@@ -13,6 +13,8 @@
     "build": "tsc -p tsconfig.json && node -e \"const f=require('fs');f.copyFileSync('server/db/schema.sql','dist/server/db/schema.sql');f.copyFileSync('server/db/seed-sets.json','dist/server/db/seed-sets.json')\" && npm --workspace web run build",
     "start": "node dist/server/index.js",
     "export-seed": "node scripts/export-seed-sets.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && npm --workspace web exec tsc -- --noEmit",
+    "check": "npm run typecheck && npm test",
     "test": "vitest run",
     "test:watch": "vitest"
   },

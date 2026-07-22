@@ -39,6 +39,8 @@ export interface MetricMapConds {
   statuses: number[]; // subset of [1,2,4]; empty = all
   country1: boolean; // only maps where I hold the country #1
   ids?: number[] | null; // explicit beatmap ids (custom map pool); null = all
+  /** free text over artist / title / mapper / diff name / source / tags */
+  query?: string | null;
 }
 
 export interface MetricParams {
@@ -134,6 +136,14 @@ export function mapWhere(
   r("b.bpm", c.bpmMin, c.bpmMax);
   if (c.country1 && !opts.ignoreCountry1)
     w.push("COALESCE(u.country_first, 0) = 1");
+  if (typeof c.query === "string" && c.query.trim() !== "") {
+    const like = `'%${c.query.trim().replaceAll("'", "''")}%'`;
+    w.push(
+      `(st.artist LIKE ${like} OR st.title LIKE ${like} OR st.creator LIKE ${like}
+        OR b.version LIKE ${like} OR COALESCE(st.source,'') LIKE ${like}
+        OR COALESCE(st.tags,'') LIKE ${like})`
+    );
+  }
   if (Array.isArray(c.ids) && c.ids.length) {
     const ids = c.ids
       .filter((v) => Number.isInteger(v) && v > 0)
@@ -166,4 +176,5 @@ export const DEFAULT_MAP_CONDS: MetricMapConds = {
   odMin: null, odMax: null, csMin: null, csMax: null,
   hpMin: null, hpMax: null, comboMin: null, comboMax: null,
   bpmMin: null, bpmMax: null, statuses: [], country1: false, ids: null,
+  query: null,
 };

@@ -23,6 +23,9 @@ Local, single-user web app that tracks your best score on **every ranked/approve
 - **Country #1 tracking**: which of your scores are #1 on your country's leaderboard, gained/lost history with sniper names, automatic re-checks. (Requires osu!supporter + connecting your account.)
 - **Dashboard**: completion by status/star rating/year, grade and FC distributions, skill curve, score sums (lazer / classic / optional witherscore).
 - **History**: full clear log and country #1 event log side by side.
+- **Collection export**: turn any filter (including a metric's missing maps) into an osu! collection — download the `.db` and drag it onto osu!(lazer) to import.
+- **Heatmap & streaks**: GitHub-style clears-per-day calendar with current/record streaks and best day.
+- **Time machine**: a date slider on the dashboard replaying your account state (clears, FCs, ranked score, country #1s) at any past day — instant, fully client-side.
 - **Stream overlay**: transparent browser source for OBS with live session gains.
 - **Polite syncing**: 60 req/min max against the osu! API, resumable backfill, automatic daily catch-up of newly ranked/loved maps.
 
