@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchSettings, postSettings } from "../api";
+import { fetchSettings, postDiscordTest, postSettings } from "../api";
 
 /**
  * Advanced settings modal: display options only. Completion, FC counts and
@@ -11,6 +11,10 @@ export function AdvancedSettings({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ["settings"], queryFn: fetchSettings });
   const [wither, setWither] = useState<boolean | null>(null);
+  const [webhookUrl, setWebhookUrl] = useState<string | null>(null); // null = unchanged
+  const [dBests, setDBests] = useState<boolean | null>(null);
+  const [dCountry, setDCountry] = useState<boolean | null>(null);
+  const [testMsg, setTestMsg] = useState<string | null>(null);
 
   const save = useMutation({
     mutationFn: postSettings,
@@ -19,9 +23,20 @@ export function AdvancedSettings({ onClose }: { onClose: () => void }) {
       onClose();
     },
   });
+  const test = useMutation({
+    mutationFn: async () => {
+      // save the URL first so the test uses what's in the input
+      if (webhookUrl != null) await postSettings({ discord: { webhookUrl } });
+      await postDiscordTest();
+    },
+    onSuccess: () => setTestMsg("Test message sent ✓"),
+    onError: (e: Error) => setTestMsg(e.message),
+  });
 
   if (!data) return null;
   const curWither = wither ?? data.display.wither;
+  const curBests = dBests ?? data.discord.bests;
+  const curCountry = dCountry ?? data.discord.country;
 
   return (
     <>
@@ -53,11 +68,60 @@ export function AdvancedSettings({ onClose }: { onClose: () => void }) {
           </span>
         </label>
 
+        <h3>Discord notifications</h3>
+        <label className="adv-toggle">
+          <input
+            type="password"
+            className="adv-input"
+            placeholder={
+              data.discord.webhookSet
+                ? "webhook configured ✓ (paste to replace, empty to keep)"
+                : "https://discord.com/api/webhooks/…"
+            }
+            value={webhookUrl ?? ""}
+            onChange={(e) => setWebhookUrl(e.target.value)}
+            autoComplete="off"
+          />
+        </label>
+        <label className="adv-toggle">
+          <input
+            type="checkbox"
+            checked={curBests}
+            onChange={(e) => setDBests(e.target.checked)}
+          />
+          <span>New bests (first clears and improvements, batched per poll)</span>
+        </label>
+        <label className="adv-toggle">
+          <input
+            type="checkbox"
+            checked={curCountry}
+            onChange={(e) => setDCountry(e.target.checked)}
+          />
+          <span>Country #1 gained / sniped (with sniper name)</span>
+        </label>
+        <div className="adv-toggle">
+          <button disabled={test.isPending} onClick={() => test.mutate()}>
+            {test.isPending ? "Sending…" : "Send a test message"}
+          </button>
+          {testMsg && <span> {testMsg}</span>}
+        </div>
+
         <div className="adv-actions">
           <button
             className="primary"
             disabled={save.isPending}
-            onClick={() => save.mutate({ display: { wither: curWither } })}
+            onClick={() =>
+              save.mutate({
+                display: { wither: curWither },
+                discord: {
+                  ...(webhookUrl != null && webhookUrl !== ""
+                    ? { webhookUrl }
+                    : {}),
+                  bests: curBests,
+                  country: curCountry,
+                },
+              })
+            }
           >
             {save.isPending ? "Saving…" : "Save"}
           </button>

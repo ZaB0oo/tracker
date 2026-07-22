@@ -12,6 +12,11 @@ import {
 } from "../osu/api.js";
 import { applyPollInterval, getCountryRecheckHours } from "../sync/daemon.js";
 import { getDisplayPrefs, setDisplayPrefs } from "../prefs.js";
+import {
+  getDiscordSettings,
+  sendTest,
+  setDiscordSettings,
+} from "../notify/discord.js";
 
 export const settingsRouter = Router();
 
@@ -40,6 +45,7 @@ settingsRouter.get("/settings", (_req, res) =>
     pollIntervalSeconds: getPollSeconds(),
     countryRecheckHours: getCountryRecheckHours(),
     display: getDisplayPrefs(),
+    discord: getDiscordSettings(),
     oauth: {
       clientId: config.osuClientId,
       userId: config.osuUserId,
@@ -55,7 +61,18 @@ settingsRouter.post("/settings", (req, res) => {
     pollIntervalSeconds?: unknown;
     countryRecheckHours?: unknown;
     display?: { wither?: unknown };
+    discord?: { webhookUrl?: unknown; bests?: unknown; country?: unknown };
   };
+  if (body.discord != null) {
+    const err = setDiscordSettings({
+      webhookUrl:
+        body.discord.webhookUrl == null ? null : String(body.discord.webhookUrl),
+      bests: body.discord.bests == null ? undefined : Boolean(body.discord.bests),
+      country:
+        body.discord.country == null ? undefined : Boolean(body.discord.country),
+    });
+    if (err) return res.status(400).json({ ok: false, error: err });
+  }
   if (body.display != null) {
     setDisplayPrefs({
       wither:
@@ -121,4 +138,11 @@ settingsRouter.post("/settings", (req, res) => {
     apiRpm: getCurrentRpm(),
     pollIntervalSeconds: getPollSeconds(),
   });
+});
+
+// Sends a test embed to the configured Discord webhook.
+settingsRouter.post("/settings/discord-test", async (_req, res) => {
+  const error = await sendTest();
+  if (error) return res.status(400).json({ ok: false, error });
+  res.json({ ok: true });
 });

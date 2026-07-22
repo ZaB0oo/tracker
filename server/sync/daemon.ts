@@ -21,6 +21,11 @@ import {
 } from "../osu/api.js";
 import { markFetchedEmpty, saveScores, refreshBest } from "../logic/repo.js";
 import {
+  notifyBests,
+  notifyCountryEvent,
+  type BestEvent,
+} from "../notify/discord.js";
+import {
   enrichMaxCombo,
   importCatalogFromApi,
   importOneSet,
@@ -225,19 +230,39 @@ export async function pollRecentScores(): Promise<number> {
 
   const exists = db.prepare("SELECT 1 FROM scores WHERE id = ?");
   const freshBeatmapIds: number[] = [];
+  const bestEvents: BestEvent[] = [];
+  const bestRow = db.prepare(
+    "SELECT rank, accuracy, fc_state, COALESCE(classic_total_score, total_score) AS score FROM scores WHERE id = ?"
+  );
   for (const [beatmapId, scores] of byBeatmap) {
     const fresh = scores.filter((s) => !exists.get(s.id));
     if (fresh.length === 0) continue;
     newCount += fresh.length;
     // markFetched: false => the map stays in the backfill queue, which will
     // later fetch the FULL list (old bests included)
-    saveScores(beatmapId, fresh, { markFetched: false });
+    const result = saveScores(beatmapId, fresh, { markFetched: false });
     freshBeatmapIds.push(beatmapId);
     logActivity(
       "poll",
       () => `${mapLabel(beatmapId)} — ${fresh.length} new score(s)`
     );
+    // Discord: only new BESTS (first clear or improvement), only via polling.
+    if (result.bestChanged && result.bestScoreId != null) {
+      const s = bestRow.get(result.bestScoreId) as
+        | { rank: string; accuracy: number; fc_state: number; score: number }
+        | undefined;
+      if (s)
+        bestEvents.push({
+          beatmapId,
+          firstClear: result.firstClear,
+          grade: s.rank,
+          accuracy: s.accuracy,
+          fcState: s.fc_state,
+          score: s.score,
+        });
+    }
   }
+  notifyBests(bestEvents);
 
   // New score => IMMEDIATE country leaderboard check at high priority (without
   // it, the map would wait its turn behind the whole initial sweep).
@@ -533,6 +558,13 @@ export function applyCountryCheck(
       // real date of the score that took the #1 (mine or the sniper's)
       top?.ended_at ?? null,
       isFirst ? null : top?.user_id ?? null,
+      isFirst ? null : top?.user?.username ?? null
+    );
+    // Discord: gains (incl. regains) and snipes; the silent initial sweep
+    // never reaches this branch.
+    notifyCountryEvent(
+      beatmapId,
+      isFirst ? "gained" : "lost",
       isFirst ? null : top?.user?.username ?? null
     );
   }

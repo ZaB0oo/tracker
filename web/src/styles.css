@@ -750,6 +750,11 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 .adv-toggle input { margin-top: 3px; }
 .adv-toggle a { color: var(--accent2); }
+.adv-input {
+  flex: 1; font-family: monospace; font-size: 12px;
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 8px; color: var(--fg); margin-top: 0 !important;
+}
 .adv-actions { display: flex; gap: 8px; margin-top: 16px; }
 .ov-url { display: flex; gap: 8px; margin-top: 12px; }
 .ov-url input {

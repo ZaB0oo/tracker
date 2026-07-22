@@ -483,8 +483,15 @@ export interface Settings {
   pollIntervalSeconds: number;
   countryRecheckHours: number;
   display: DisplayPrefs;
+  discord: { webhookSet: boolean; bests: boolean; country: boolean };
   oauth: { clientId: string; userId: number; secretSet: boolean };
   info: { port: number };
+}
+
+export async function postDiscordTest(): Promise<void> {
+  const res = await fetch("/api/settings/discord-test", { method: "POST" });
+  const json = (await res.json().catch(() => ({}))) as { error?: string };
+  if (!res.ok) throw new Error(json.error ?? `discord test: HTTP ${res.status}`);
 }
 
 export async function fetchSettings(): Promise<Settings> {
@@ -498,6 +505,7 @@ export async function postSettings(payload: {
   pollIntervalSeconds?: number;
   countryRecheckHours?: number;
   display?: Partial<DisplayPrefs>;
+  discord?: { webhookUrl?: string; bests?: boolean; country?: boolean };
   clientId?: string | number;
   clientSecret?: string | number;
   userId?: string | number;

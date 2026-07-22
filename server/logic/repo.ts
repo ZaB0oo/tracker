@@ -8,13 +8,24 @@ import { computeFcState, legacyMetric } from "./score.js";
  * "complete list of scores fetched by the backfill". Without it, a score
  * submitted via polling would skip the map in the backfill and an old best
  * would stay forever on osu!'s side.
+ *
+ * Returns whether the best (lazer pointer) changed and whether this was the
+ * map's first clear — used by the polling path for Discord notifications
+ * (other callers ignore the return value).
  */
 export function saveScores(
   beatmapId: number,
   scores: SoloScore[],
   opts?: { markFetched?: boolean }
-): void {
+): { bestChanged: boolean; firstClear: boolean; bestScoreId: number | null } {
   const db = getDb();
+  const before = db
+    .prepare(
+      "SELECT played, best_lazer_score_id FROM beatmap_user WHERE beatmap_id = ?"
+    )
+    .get(beatmapId) as
+    | { played: number; best_lazer_score_id: number | null }
+    | undefined;
   const maxCombo = (
     db.prepare("SELECT max_combo FROM beatmaps WHERE id = ?").get(beatmapId) as
       | { max_combo: number | null }
@@ -86,6 +97,17 @@ export function saveScores(
         "UPDATE beatmap_user SET country_checked_at = NULL WHERE beatmap_id = ?"
       ).run(beatmapId);
   });
+
+  const after = db
+    .prepare("SELECT best_lazer_score_id FROM beatmap_user WHERE beatmap_id = ?")
+    .get(beatmapId) as { best_lazer_score_id: number | null } | undefined;
+  const bestScoreId = after?.best_lazer_score_id ?? null;
+  return {
+    bestChanged:
+      bestScoreId != null && bestScoreId !== (before?.best_lazer_score_id ?? null),
+    firstClear: !(before?.played === 1),
+    bestScoreId,
+  };
 }
 
 /**
