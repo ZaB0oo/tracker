@@ -1,6 +1,12 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchClears, fetchDaily, fetchTimeline, type TimelinePoint } from "../api";
+import {
+  fetchClears,
+  fetchDaily,
+  fetchTimeline,
+  type ClearRow,
+  type TimelinePoint,
+} from "../api";
 import { fmtCompact, fmtDate, fmtNum } from "../format";
 import { GradeBadge } from "./GradeBadge";
 import { MapModal } from "./MapModal";
@@ -75,6 +81,7 @@ export function HeatmapPanel({ cutoffDay = null }: { cutoffDay?: string | null }
     refetchInterval: 5 * 60_000,
   });
   const [modalId, setModalId] = useState<number | null>(null);
+  const [ctx, setCtx] = useState<{ x: number; y: number; row: ClearRow } | null>(null);
   const [sortKey, setSortKey] = useState<"time" | "title" | "sr" | "grade">("time");
   const [sortDesc, setSortDesc] = useState(false);
   if (!data) return null;
@@ -276,7 +283,13 @@ export function HeatmapPanel({ cutoffDay = null }: { cutoffDay?: string | null }
                       <tr
                         key={r.beatmap_id}
                         title={`${r.artist} - ${r.title} [${r.version}] · ${(r.accuracy * 100).toFixed(2)}%`}
-                        onClick={() => setModalId(r.beatmap_id)}
+                        onDoubleClick={() =>
+                          window.open(`https://osu.ppy.sh/b/${r.beatmap_id}`, "_blank")
+                        }
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          setCtx({ x: e.clientX, y: e.clientY, row: r });
+                        }}
                       >
                         <td>
                           <GradeBadge grade={r.rank} width={24} />
@@ -302,6 +315,65 @@ export function HeatmapPanel({ cutoffDay = null }: { cutoffDay?: string | null }
           </div>
         )}
       </div>
+      {ctx && (
+        <>
+          <div
+            className="ctx-overlay"
+            onClick={() => setCtx(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setCtx(null);
+            }}
+          />
+          <div className="ctx-menu" style={{ left: ctx.x, top: ctx.y }}>
+            <div className="ctx-title">
+              {ctx.row.artist} – {ctx.row.title} [{ctx.row.version}]
+            </div>
+            <button
+              onClick={() => {
+                setModalId(ctx.row.beatmap_id);
+                setCtx(null);
+              }}
+            >
+              Map details
+            </button>
+            <button
+              onClick={() => {
+                window.open(`https://osu.ppy.sh/b/${ctx.row.beatmap_id}`, "_blank");
+                setCtx(null);
+              }}
+            >
+              Open on osu.ppy.sh
+            </button>
+            <button
+              onClick={() => {
+                window.location.href = `osu://b/${ctx.row.beatmap_id}`;
+                setCtx(null);
+              }}
+            >
+              Open in osu! (osu!direct)
+            </button>
+            <button
+              onClick={() => {
+                void navigator.clipboard.writeText(String(ctx.row.beatmap_id));
+                setCtx(null);
+              }}
+            >
+              Copy beatmap id
+            </button>
+            <button
+              onClick={() => {
+                void navigator.clipboard.writeText(
+                  `${ctx.row.artist} - ${ctx.row.title} [${ctx.row.version}]`
+                );
+                setCtx(null);
+              }}
+            >
+              Copy « artist - title [diff] »
+            </button>
+          </div>
+        </>
+      )}
       {modalId != null && (
         <MapModal beatmapId={modalId} onClose={() => setModalId(null)} />
       )}

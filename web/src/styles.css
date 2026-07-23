@@ -628,10 +628,6 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .heatmap-stats b { color: var(--fg); }
 .heatmap-stats b.accent { color: var(--accent); }
 .heatmap-stats .dim { opacity: 0.7; }
-/* Full-width layout: heatmap column + absolutely-positioned day card whose
-   height matches the heatmap column exactly (the maps list scrolls inside). */
-/* min-height gives the day card room (~10 visible table rows); the heatmap
-   column is vertically centered in it. */
 .heatmap-cols {
   position: relative; padding-right: 30%; min-height: 420px;
   display: flex; align-items: center;
@@ -649,9 +645,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 .hm-day-list {
   flex: 1 1 auto; min-height: 0; overflow-y: auto;
-  margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px;
+  margin-top: 10px; border-top: 1px solid var(--border);
 }
-.hm-day-list-head { color: var(--fg-dim); font-size: 12px; margin-bottom: 4px; }
+.hm-day-list-head { color: var(--fg-dim); font-size: 12px; padding: 8px 0 4px; }
 .hm-day-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
 .hm-day-table th {
   position: sticky; top: 0; background: var(--bg3); z-index: 1;

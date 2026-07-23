@@ -99,9 +99,10 @@ function buildFilters(
       params.globalTop = n;
     }
   }
-  // Missing maps of a metric: maps matching its MAP conditions that have no
-  // score matching its SCORE conditions (the inner alias `s` shadows the
-  // outer best-score join on purpose — scoreWhere targets the subquery rows).
+  // Missing maps of a metric: maps matching its MAP conditions whose BEST
+  // score does not match its SCORE conditions (leaderboard semantics, same
+  // rule as the metric evaluation; the inner alias `s` shadows the outer
+  // best-score join on purpose — scoreWhere targets the subquery row).
   if (q.metricMissing != null && q.metricMissing !== "") {
     const row = db
       .prepare("SELECT params FROM metrics WHERE id = ?")
@@ -111,7 +112,7 @@ function buildFilters(
       where.push(mapWhere(p.map));
       where.push(
         `NOT EXISTS (SELECT 1 FROM scores s
-           WHERE s.beatmap_id = b.id AND ${scoreWhere(p.score)})`
+           WHERE s.id = u.best_lazer_score_id AND ${scoreWhere(p.score)})`
       );
     }
   }

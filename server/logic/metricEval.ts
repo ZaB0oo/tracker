@@ -63,13 +63,19 @@ function bucketEvolution(
   });
 }
 
-/** Base FROM/JOIN + WHERE for a metric's conditions. */
-function baseFrom(p: MetricParams): string {
+/**
+ * Base FROM/JOIN + WHERE for a metric's conditions.
+ * `bestOnly` (count metrics): score conditions are evaluated against the
+ * map's BEST score only — leaderboard semantics: a lower score matching the
+ * conditions does not count when the best does not. The ranked-score replay
+ * needs every score (successive bests over time), so it opts out.
+ */
+function baseFrom(p: MetricParams, bestOnly: boolean): string {
   return `FROM scores s
     JOIN beatmaps b ON b.id = s.beatmap_id
     JOIN beatmapsets st ON st.id = b.beatmapset_id
     LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
-    WHERE ${mapWhere(p.map)} AND ${scoreWhere(p.score)}`;
+    WHERE ${bestOnly ? "s.id = u.best_lazer_score_id AND " : ""}${mapWhere(p.map)} AND ${scoreWhere(p.score)}`;
 }
 
 /** Total maps matching the map conditions (denominator for "total" mode). */
@@ -89,7 +95,7 @@ function mapTotal(p: MetricParams): number {
 /** Per-bucket completion (maps matched vs available) for a count metric. */
 function countByBucket(p: MetricParams): MetricResult["byBucket"] {
   const db = getDb();
-  const base = baseFrom(p);
+  const base = baseFrom(p, true);
   const dim = BUCKETS[p.breakdown ?? "sr"] ?? BUCKETS.sr;
   const matched = db
     .prepare(
@@ -119,15 +125,41 @@ function countByBucket(p: MetricParams): MetricResult["byBucket"] {
 
 function evalCount(p: MetricParams, gran: "month" | "day"): MetricResult {
   const db = getDb();
-  const base = baseFrom(p);
-  const dates = (
-    db
-      .prepare(`SELECT MIN(s.ended_at) AS at ${base} GROUP BY s.beatmap_id ORDER BY at`)
-      .all() as { at: string }[]
-  ).map((r) => r.at);
-  const points = dates.map((at, i) => ({ at, total: i + 1 }));
+  // Replay of successive bests: at any point in time a map counts iff its
+  // best score AT THAT TIME matched the conditions (leaderboard semantics —
+  // a map can leave the metric when a higher score with e.g. a worse grade
+  // takes over as best). The final state equals the best-only SQL count.
+  const rows = db
+    .prepare(
+      `SELECT s.beatmap_id AS bid, s.ended_at AS at,
+         COALESCE(s.classic_total_score, s.total_score) AS v,
+         (${scoreWhere(p.score)}) AS matches
+       FROM scores s
+       JOIN beatmaps b ON b.id = s.beatmap_id
+       JOIN beatmapsets st ON st.id = b.beatmapset_id
+       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
+       WHERE ${mapWhere(p.map)} AND s.passed = 1
+       ORDER BY s.ended_at`
+    )
+    .all() as { bid: number; at: string; v: number; matches: number }[];
+  const best = new Map<number, number>();
+  const inSet = new Set<number>();
+  let total = 0;
+  const points: { at: string; total: number }[] = [];
+  for (const r of rows) {
+    const prev = best.get(r.bid) ?? -1;
+    if (r.v <= prev) continue; // not a new best: never affects the LB state
+    best.set(r.bid, r.v);
+    const matches = r.matches === 1;
+    const was = inSet.has(r.bid);
+    if (matches === was) continue;
+    if (matches) inSet.add(r.bid);
+    else inSet.delete(r.bid);
+    total += matches ? 1 : -1;
+    points.push({ at: r.at, total });
+  }
   return {
-    count: dates.length,
+    count: total,
     total: mapTotal(p),
     step: p.step,
     milestones: thresholds(points, p.step),
@@ -139,7 +171,7 @@ function evalCount(p: MetricParams, gran: "month" | "day"): MetricResult {
 /** Ranked-score metric: cumulative sum of best classic score per map. */
 function evalRankedScore(p: MetricParams, gran: "month" | "day"): MetricResult {
   const db = getDb();
-  const base = baseFrom(p);
+  const base = baseFrom(p, false);
   const rows = db
     .prepare(
       `SELECT s.beatmap_id AS bid, s.ended_at AS at, ${RANKED_CLASSIC} AS v ${base} ORDER BY at`
@@ -199,7 +231,7 @@ export function previewMetric(p: MetricParams): {
   byBucket: { bucket: number | string; value: number; total: number }[];
 } {
   const db = getDb();
-  const base = baseFrom(p);
+  const base = baseFrom(p, p.kind !== "ranked_score");
   const count =
     p.kind === "ranked_score"
       ? (
