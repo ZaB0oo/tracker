@@ -483,7 +483,7 @@ export interface Settings {
   pollIntervalSeconds: number;
   countryRecheckHours: number;
   display: DisplayPrefs;
-  discord: { webhookSet: boolean; bests: boolean; country: boolean };
+  discord: { webhookSet: boolean; bests: boolean };
   oauth: { clientId: string; userId: number; secretSet: boolean };
   info: { port: number };
 }
@@ -505,7 +505,7 @@ export async function postSettings(payload: {
   pollIntervalSeconds?: number;
   countryRecheckHours?: number;
   display?: Partial<DisplayPrefs>;
-  discord?: { webhookUrl?: string; bests?: boolean; country?: boolean };
+  discord?: { webhookUrl?: string; bests?: boolean };
   clientId?: string | number;
   clientSecret?: string | number;
   userId?: string | number;

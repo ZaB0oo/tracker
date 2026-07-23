@@ -13,6 +13,7 @@ import { getDb, getState, setState } from "../db/db.js";
 import {
   getBeatmapsByIds,
   getCountryTop,
+  getModdedStarRating,
   getRecentScores,
   getStoredCountryCode,
   getUserBeatmapScores,
@@ -21,10 +22,20 @@ import {
 } from "../osu/api.js";
 import { markFetchedEmpty, saveScores, refreshBest } from "../logic/repo.js";
 import {
+  getDiscordSettings,
   notifyBests,
-  notifyCountryEvent,
   type BestEvent,
 } from "../notify/discord.js";
+
+/** score mods JSON (lazer format: [{acronym: "HD"}, …]) → acronym list */
+function parseModAcronyms(json: string): string[] {
+  try {
+    const arr = JSON.parse(json) as { acronym?: string }[];
+    return arr.map((m) => m.acronym ?? "").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
 import {
   enrichMaxCombo,
   importCatalogFromApi,
@@ -198,6 +209,31 @@ export async function pollRecentScores(): Promise<number> {
 
   const db = getDb();
 
+  // Snapshot BEFORE any catalog import below: which scores are new, and each
+  // map's played/best state. The full-set import of a brand-new map backfills
+  // its scores immediately — without this snapshot, the loop below would see
+  // nothing "fresh" on it and its best would never notify.
+  const exists = db.prepare("SELECT 1 FROM scores WHERE id = ?");
+  const preStateStmt = db.prepare(
+    "SELECT played, best_lazer_score_id AS best FROM beatmap_user WHERE beatmap_id = ?"
+  );
+  const freshByMap = new Map<number, import("../osu/types.js").SoloScore[]>();
+  const preState = new Map<
+    number,
+    { played: number; best: number | null } | undefined
+  >();
+  for (const [beatmapId, scores] of byBeatmap) {
+    const fresh = scores.filter((s) => !exists.get(s.id));
+    if (fresh.length === 0) continue;
+    freshByMap.set(beatmapId, fresh);
+    preState.set(
+      beatmapId,
+      preStateStmt.get(beatmapId) as
+        | { played: number; best: number | null }
+        | undefined
+    );
+  }
+
   // Maps absent from the catalog (just ranked, or catalog not imported yet):
   // we import the FULL MAPSET (all diffs, not just the played diff), with
   // backfill of any scores on the other diffs.
@@ -228,15 +264,15 @@ export async function pollRecentScores(): Promise<number> {
     }
   }
 
-  const exists = db.prepare("SELECT 1 FROM scores WHERE id = ?");
   const freshBeatmapIds: number[] = [];
   const bestEvents: BestEvent[] = [];
   const bestRow = db.prepare(
-    "SELECT rank, accuracy, fc_state, COALESCE(classic_total_score, total_score) AS score FROM scores WHERE id = ?"
+    `SELECT rank, accuracy, fc_state,
+            COALESCE(classic_total_score, total_score) AS score,
+            max_combo AS combo, pp, mods, statistics, ended_at
+     FROM scores WHERE id = ?`
   );
-  for (const [beatmapId, scores] of byBeatmap) {
-    const fresh = scores.filter((s) => !exists.get(s.id));
-    if (fresh.length === 0) continue;
+  for (const [beatmapId, fresh] of freshByMap) {
     newCount += fresh.length;
     // markFetched: false => the map stays in the backfill queue, which will
     // later fetch the FULL list (old bests included)
@@ -247,22 +283,41 @@ export async function pollRecentScores(): Promise<number> {
       () => `${mapLabel(beatmapId)} — ${fresh.length} new score(s)`
     );
     // Discord: only new BESTS (first clear or improvement), only via polling.
-    if (result.bestChanged && result.bestScoreId != null) {
-      const s = bestRow.get(result.bestScoreId) as
-        | { rank: string; accuracy: number; fc_state: number; score: number }
+    // Compared against the PRE-import snapshot, so a best on a map imported
+    // by this very tick (score saved during the set import) is seen too.
+    const pre = preState.get(beatmapId);
+    const bestId = result.bestScoreId;
+    if (bestId != null && bestId !== (pre?.best ?? null)) {
+      const s = bestRow.get(bestId) as
+        | {
+            rank: string;
+            accuracy: number;
+            fc_state: number;
+            score: number;
+            combo: number;
+            pp: number | null;
+            mods: string;
+            statistics: string;
+            ended_at: string;
+          }
         | undefined;
       if (s)
         bestEvents.push({
           beatmapId,
-          firstClear: result.firstClear,
+          firstClear: !(pre?.played === 1),
           grade: s.rank,
           accuracy: s.accuracy,
           fcState: s.fc_state,
           score: s.score,
+          combo: s.combo,
+          pp: s.pp,
+          endedAt: s.ended_at,
+          modsJson: s.mods,
+          statisticsJson: s.statistics,
+          moddedSr: null,
         });
     }
   }
-  notifyBests(bestEvents);
 
   // New score => IMMEDIATE country leaderboard check at high priority (without
   // it, the map would wait its turn behind the whole initial sweep).
@@ -290,6 +345,20 @@ export async function pollRecentScores(): Promise<number> {
       }
     }
   }
+  // SR with the play's mods for the notification (one request per best whose
+  // mods change difficulty) — only when the Discord webhook is actually on.
+  const discord = getDiscordSettings();
+  if (bestEvents.length > 0 && discord.webhookSet && discord.bests) {
+    // mods that change star rating (osu! DifficultyAdjustmentMods — HD counts
+    // since the 2026 reading rework)
+    const DIFF_MODS = new Set(["DT", "NC", "HT", "DC", "HR", "EZ", "FL", "HD", "TD"]);
+    for (const e of bestEvents) {
+      const acronyms = parseModAcronyms(e.modsJson).filter((a) => a !== "CL");
+      if (acronyms.some((a) => DIFF_MODS.has(a)))
+        e.moddedSr = await getModdedStarRating(e.beatmapId, acronyms, "high");
+    }
+  }
+  notifyBests(bestEvents);
   status.lastPollAt = new Date().toISOString();
   status.lastPollNewScores = newCount;
   setState("last_poll_at", status.lastPollAt);
@@ -558,13 +627,6 @@ export function applyCountryCheck(
       // real date of the score that took the #1 (mine or the sniper's)
       top?.ended_at ?? null,
       isFirst ? null : top?.user_id ?? null,
-      isFirst ? null : top?.user?.username ?? null
-    );
-    // Discord: gains (incl. regains) and snipes; the silent initial sweep
-    // never reaches this branch.
-    notifyCountryEvent(
-      beatmapId,
-      isFirst ? "gained" : "lost",
       isFirst ? null : top?.user?.username ?? null
     );
   }

@@ -13,7 +13,6 @@ export function AdvancedSettings({ onClose }: { onClose: () => void }) {
   const [wither, setWither] = useState<boolean | null>(null);
   const [webhookUrl, setWebhookUrl] = useState<string | null>(null); // null = unchanged
   const [dBests, setDBests] = useState<boolean | null>(null);
-  const [dCountry, setDCountry] = useState<boolean | null>(null);
   const [testMsg, setTestMsg] = useState<string | null>(null);
 
   const save = useMutation({
@@ -36,7 +35,6 @@ export function AdvancedSettings({ onClose }: { onClose: () => void }) {
   if (!data) return null;
   const curWither = wither ?? data.display.wither;
   const curBests = dBests ?? data.discord.bests;
-  const curCountry = dCountry ?? data.discord.country;
 
   return (
     <>
@@ -91,14 +89,6 @@ export function AdvancedSettings({ onClose }: { onClose: () => void }) {
           />
           <span>New bests (first clears and improvements, batched per poll)</span>
         </label>
-        <label className="adv-toggle">
-          <input
-            type="checkbox"
-            checked={curCountry}
-            onChange={(e) => setDCountry(e.target.checked)}
-          />
-          <span>Country #1 gained / sniped (with sniper name)</span>
-        </label>
         <div className="adv-toggle">
           <button disabled={test.isPending} onClick={() => test.mutate()}>
             {test.isPending ? "Sending…" : "Send a test message"}
@@ -118,7 +108,6 @@ export function AdvancedSettings({ onClose }: { onClose: () => void }) {
                     ? { webhookUrl }
                     : {}),
                   bests: curBests,
-                  country: curCountry,
                 },
               })
             }

@@ -61,15 +61,13 @@ settingsRouter.post("/settings", (req, res) => {
     pollIntervalSeconds?: unknown;
     countryRecheckHours?: unknown;
     display?: { wither?: unknown };
-    discord?: { webhookUrl?: unknown; bests?: unknown; country?: unknown };
+    discord?: { webhookUrl?: unknown; bests?: unknown };
   };
   if (body.discord != null) {
     const err = setDiscordSettings({
       webhookUrl:
         body.discord.webhookUrl == null ? null : String(body.discord.webhookUrl),
       bests: body.discord.bests == null ? undefined : Boolean(body.discord.bests),
-      country:
-        body.discord.country == null ? undefined : Boolean(body.discord.country),
     });
     if (err) return res.status(400).json({ ok: false, error: err });
   }

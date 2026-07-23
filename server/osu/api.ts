@@ -361,6 +361,40 @@ export async function getRecentScores(
   );
 }
 
+/**
+ * Star rating with specific mods (POST /beatmaps/{id}/attributes).
+ * null on failure — callers fall back to the nomod SR.
+ */
+export async function getModdedStarRating(
+  beatmapId: number,
+  modAcronyms: string[],
+  priority: Priority = "high"
+): Promise<number | null> {
+  try {
+    return await limiter.schedule(async () => {
+      const auth = await getToken();
+      const res = await netFetch(
+        `${config.apiBase}/beatmaps/${beatmapId}/attributes`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${auth}`,
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": config.userAgent,
+          },
+          body: JSON.stringify({ mods: modAcronyms, ruleset: "osu" }),
+        }
+      );
+      if (!res.ok) throw new Error(`attributes: HTTP ${res.status}`);
+      const j = (await res.json()) as { attributes?: { star_rating?: number } };
+      return j.attributes?.star_rating ?? null;
+    }, priority);
+  } catch {
+    return null;
+  }
+}
+
 /** Batch beatmap lookup (max 50 ids / request) — used for max_combo/SR enrichment. */
 export async function getBeatmapsByIds(
   ids: number[],
