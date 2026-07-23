@@ -13,8 +13,10 @@ import { getDb, getState, setState } from "../db/db.js";
 import {
   getBeatmapsByIds,
   getCountryTop,
+  getCountryTopScores,
   getModdedStarRating,
   getRecentScores,
+  getUserBeatmapPosition,
   getStoredCountryCode,
   getUserBeatmapScores,
   isUserConnected,
@@ -137,7 +139,16 @@ let deltaTimer: ReturnType<typeof setInterval> | null = null;
 let enrichCatchupRunning = false;
 let deltaRunning = false;
 
-export function getDaemonStatus(): DaemonStatus & { busy: string[] } {
+export function getDaemonStatus(): DaemonStatus & {
+  busy: string[];
+  sweeps: {
+    country: boolean;
+    global: boolean;
+    globalTracking: boolean;
+    globalChecked: number;
+    globalPending: number;
+  };
+} {
   const db = getDb();
   const total = (
     db.prepare("SELECT COUNT(*) c FROM beatmaps WHERE ruleset = 0").get() as {
@@ -167,8 +178,33 @@ export function getDaemonStatus(): DaemonStatus & { busy: string[] } {
     const cc = getStoredCountryCode();
     busy.push(`${cc ? `#1 ${cc}` : "country #1"} sweep`);
   }
+  if (globalRunning) busy.push("global tops sweep");
   if (deltaRunning) busy.push("new maps");
-  return { ...status, busy };
+  const globalChecked = (
+    db
+      .prepare(
+        "SELECT COUNT(*) c FROM beatmap_user WHERE played = 1 AND global_checked_at IS NOT NULL"
+      )
+      .get() as { c: number }
+  ).c;
+  const globalPending = (
+    db
+      .prepare(
+        "SELECT COUNT(*) c FROM beatmap_user WHERE played = 1 AND global_checked_at IS NULL"
+      )
+      .get() as { c: number }
+  ).c;
+  return {
+    ...status,
+    busy,
+    sweeps: {
+      country: countryRunning,
+      global: globalRunning,
+      globalTracking: isGlobalTrackingEnabled(),
+      globalChecked,
+      globalPending,
+    },
+  };
 }
 
 export function clearSyncErrors(): void {
@@ -315,6 +351,7 @@ export async function pollRecentScores(): Promise<number> {
           modsJson: s.mods,
           statisticsJson: s.statistics,
           moddedSr: null,
+          globalRank: null,
         });
     }
   }
@@ -327,8 +364,29 @@ export async function pollRecentScores(): Promise<number> {
     );
     for (const id of freshBeatmapIds) {
       try {
-        const top = await getCountryTop(id, "high");
+        // Read BEFORE applyCountryCheck stamps the new state: improving my own
+        // held #1 must not display the current runner-up as "sniped".
+        const wasFirst =
+          (
+            db
+              .prepare("SELECT country_first FROM beatmap_user WHERE beatmap_id = ?")
+              .get(id) as { country_first: number } | undefined
+          )?.country_first === 1;
+        const countryScores = await getCountryTopScores(id, "high");
+        const top = countryScores[0] ?? null;
         applyCountryCheck(id, top, true);
+        // Discord: mark the best as "country #1 at submit time" (display only,
+        // no country event notifications). The runner-up is the previous
+        // holder — the player this score just sniped.
+        if (top && top.user_id === config.osuUserId) {
+          const best = bestEvents.find((b) => b.beatmapId === id);
+          if (best) {
+            best.countryFirst = true;
+            best.snipedUsername = wasFirst
+              ? null
+              : countryScores[1]?.user?.username ?? null;
+          }
+        }
         // The leaderboard can lag behind a fresh submit: if I'm not on top
         // right now, don't trust the result. Leave the map in the sweep queue
         // (survives a restart: the periodic tick re-checks it within minutes)
@@ -356,7 +414,26 @@ export async function pollRecentScores(): Promise<number> {
       const acronyms = parseModAcronyms(e.modsJson).filter((a) => a !== "CL");
       if (acronyms.some((a) => DIFF_MODS.has(a)))
         e.moddedSr = await getModdedStarRating(e.beatmapId, acronyms, "high");
+      // global leaderboard position (shown when <= 100); also feeds the
+      // tracking columns so a notified best is immediately up to date there
+      try {
+        e.globalRank = await getUserBeatmapPosition(e.beatmapId, config.osuUserId, "high");
+        db.prepare(
+          "UPDATE beatmap_user SET global_rank = ?, global_checked_at = datetime('now') WHERE beatmap_id = ?"
+        ).run(e.globalRank, e.beatmapId);
+      } catch (err) {
+        logError(err, `position check map ${e.beatmapId}`);
+      }
     }
+  }
+  // Fresh scores re-enter the global sweep queue (zero API cost here: the
+  // sweep re-checks them on its next pass, catching maps the block above
+  // skipped because Discord is off).
+  if (isGlobalTrackingEnabled() && freshBeatmapIds.length > 0) {
+    const requeue = db.prepare(
+      "UPDATE beatmap_user SET global_checked_at = NULL WHERE beatmap_id = ? AND global_checked_at < datetime('now', '-1 minute')"
+    );
+    for (const id of freshBeatmapIds) requeue.run(id);
   }
   notifyBests(bestEvents);
   status.lastPollAt = new Date().toISOString();
@@ -514,6 +591,18 @@ export function startCatalogRefresh(): void {
           )
           .run(getCountryRecheckHours());
         void runCountrySweep();
+      }
+      // global tops: re-check held top-100 positions older than the delay,
+      // then resume the sweep (no-op when the queue is empty)
+      if (isGlobalTrackingEnabled()) {
+        getDb()
+          .prepare(
+            `UPDATE beatmap_user SET global_checked_at = NULL
+             WHERE global_rank IS NOT NULL AND global_rank <= 100
+               AND global_checked_at < datetime('now', '-' || ? || ' hours')`
+          )
+          .run(getGlobalRecheckHours());
+        void runGlobalSweep();
       }
       const last = getState("catalog_delta_at");
       if (last && Date.now() - Date.parse(last) < MIN_INTERVAL_MS) return;
@@ -707,6 +796,89 @@ export async function runCountrySweep(force = false): Promise<void> {
 
 export function pauseCountrySweep(): void {
   countryWanted = false;
+}
+
+// ---------- Global leaderboard sweep: my top 1/8/15/25/50/100 positions ----------
+
+let globalWanted = false;
+let globalRunning = false;
+
+export function isGlobalTrackingEnabled(): boolean {
+  return getState("global_tracking") === "1";
+}
+
+/** Delay (hours) before re-checking a held top-100 position. */
+export function getGlobalRecheckHours(): number {
+  const v = Number(getState("global_recheck_hours"));
+  return Number.isFinite(v) && v >= 1 ? Math.round(v) : 48;
+}
+
+/**
+ * Checks my global leaderboard position on each played, not-yet-checked map
+ * (global_checked_at NULL). Same architecture as the country sweep: resumable,
+ * low priority, deferred while the backfill runs. Uses the client-credentials
+ * API (no connected account required). Previously-ranked maps (re-checks) go
+ * first — losing a top spot matters more than discovering a new #4000.
+ */
+export async function runGlobalSweep(force = false): Promise<void> {
+  if (globalRunning) return;
+  if (!force && status.backfill.running) {
+    logActivity(
+      "global tops",
+      "sweep deferred until the backfill completes (shared rate limit)"
+    );
+    return;
+  }
+  globalRunning = true;
+  globalWanted = true;
+  try {
+    const db = getDb();
+    const nextBatch = db.prepare(
+      `SELECT u.beatmap_id AS id FROM beatmap_user u
+       JOIN beatmaps b ON b.id = u.beatmap_id
+       WHERE u.played = 1 AND u.global_checked_at IS NULL AND b.ruleset = 0
+       ORDER BY (u.global_rank IS NOT NULL) DESC, u.global_rank, u.beatmap_id
+       LIMIT 200`
+    );
+    const store = db.prepare(
+      "UPDATE beatmap_user SET global_rank = ?, global_checked_at = datetime('now') WHERE beatmap_id = ?"
+    );
+    let done = 0;
+    let failures = 0;
+    while (globalWanted) {
+      const ids = (nextBatch.all() as { id: number }[]).map((r) => r.id);
+      if (ids.length === 0) break;
+      for (const id of ids) {
+        if (!globalWanted) break;
+        try {
+          const pos = await getUserBeatmapPosition(id, config.osuUserId, "low");
+          store.run(pos, id);
+          done++;
+          failures = 0;
+          logActivity(
+            "global tops sweep",
+            () => `${mapLabel(id)} — ${pos != null ? `#${pos}` : "not on leaderboard"}`
+          );
+          if (done % 25 === 0)
+            status.message = `global tops sweep: ${done} maps checked...`;
+        } catch (e) {
+          logError(e, `global sweep map ${id}`);
+          if (++failures >= 10) {
+            // API down: stop, the periodic tick will resume the sweep
+            globalWanted = false;
+            break;
+          }
+        }
+      }
+    }
+    if (done > 0) console.log(`[sync] global tops sweep: ${done} maps checked`);
+  } finally {
+    globalRunning = false;
+  }
+}
+
+export function pauseGlobalSweep(): void {
+  globalWanted = false;
 }
 
 /**

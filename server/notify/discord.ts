@@ -283,6 +283,12 @@ export interface BestEvent {
   statisticsJson: string; // raw score statistics JSON
   /** SR with the play's mods (API attributes), null -> fall back to nomod SR */
   moddedSr: number | null;
+  /** my global leaderboard position on the map, shown when <= 100 */
+  globalRank: number | null;
+  /** the score was country #1 at submit time (no snipe tracking here) */
+  countryFirst?: boolean;
+  /** previous country #1 holder displaced by this score */
+  snipedUsername?: string | null;
 }
 
 function bestEmbed(e: BestEvent, author: Embed["author"] | undefined): Embed {
@@ -316,6 +322,13 @@ function bestEmbed(e: BestEvent, author: Embed["author"] | undefined): Embed {
     const stats = adjustedStats(m, mods);
     if (stats) lines.push(stats);
   }
+  const honors = [
+    e.globalRank != null && e.globalRank <= 100 ? `🌍 **Global Top #${e.globalRank}**` : "",
+    e.countryFirst
+      ? `🥇 **country #1**${e.snipedUsername ? ` (sniped **${e.snipedUsername}**)` : ""}`
+      : "",
+  ].filter(Boolean);
+  if (honors.length > 0) lines.push(honors.join(" · "));
 
   const embed: Embed = {
     title: `${e.firstClear ? "🆕" : "📈"} ${name}${srTxt}`.slice(0, 256),

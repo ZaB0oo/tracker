@@ -10,7 +10,11 @@ import {
   logoutUser,
   resetAuthTokens,
 } from "../osu/api.js";
-import { applyPollInterval, getCountryRecheckHours } from "../sync/daemon.js";
+import {
+  applyPollInterval,
+  getCountryRecheckHours,
+  getGlobalRecheckHours,
+} from "../sync/daemon.js";
 import { getDisplayPrefs, setDisplayPrefs } from "../prefs.js";
 import {
   getDiscordSettings,
@@ -44,6 +48,7 @@ settingsRouter.get("/settings", (_req, res) =>
     apiRpm: getCurrentRpm(),
     pollIntervalSeconds: getPollSeconds(),
     countryRecheckHours: getCountryRecheckHours(),
+    globalRecheckHours: getGlobalRecheckHours(),
     display: getDisplayPrefs(),
     discord: getDiscordSettings(),
     oauth: {
@@ -84,6 +89,15 @@ settingsRouter.post("/settings", (req, res) => {
         .status(400)
         .json({ ok: false, error: "invalid countryRecheckHours (1..720)" });
     setState("country_recheck_hours", String(Math.round(h)));
+  }
+  const grh = (body as { globalRecheckHours?: unknown }).globalRecheckHours;
+  if (grh != null) {
+    const h = Number(grh);
+    if (!Number.isFinite(h) || h < 1 || h > 720)
+      return res
+        .status(400)
+        .json({ ok: false, error: "invalid globalRecheckHours (1..720)" });
+    setState("global_recheck_hours", String(Math.round(h)));
   }
   if (body.apiRpm != null) {
     const r = Number(body.apiRpm);

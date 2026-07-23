@@ -68,11 +68,13 @@ function buildTableQuery(
   if (filters.statuses.length) p.set("statuses", filters.statuses.join(","));
   if (filters.mods) p.set("mods", filters.mods);
   if (filters.countryFirst) p.set("countryFirst", "1");
+  if (filters.globalTop) p.set("globalTop", filters.globalTop);
   if (filters.metricMissing) p.set("metricMissing", String(filters.metricMissing.id));
   if (filters.platform) p.set("platform", filters.platform);
   for (const k of [
     "srMin", "srMax", "arMin", "arMax", "odMin", "odMax",
-    "csMin", "csMax", "lenMin", "lenMax", "yearMin", "yearMax",
+    "csMin", "csMax", "lenMin", "lenMax",
+    "rankedFrom", "rankedTo", "playedFrom", "playedTo",
   ] as const) {
     if (filters[k] !== "") p.set(k, filters[k]);
   }
@@ -109,9 +111,11 @@ export interface ClearRow {
 
 export async function fetchClears(
   offset: number,
-  limit: number
+  limit: number,
+  day?: string
 ): Promise<{ rows: ClearRow[]; total: number }> {
-  const res = await fetch(`/api/clears?offset=${offset}&limit=${limit}`);
+  const dayQ = day ? `&day=${day}` : "";
+  const res = await fetch(`/api/clears?offset=${offset}&limit=${limit}${dayQ}`);
   if (!res.ok) throw new Error(`clears: HTTP ${res.status}`);
   return res.json();
 }
@@ -236,6 +240,8 @@ export async function postSync(
     | "delta-now"
     | "country-sweep"
     | "country-pause"
+    | "global-sweep"
+    | "global-pause"
     | "recompute"
     | "rebackfill"
     | "catalog-full?force=1"
@@ -482,6 +488,7 @@ export interface Settings {
   apiRpm: number;
   pollIntervalSeconds: number;
   countryRecheckHours: number;
+  globalRecheckHours: number;
   display: DisplayPrefs;
   discord: { webhookSet: boolean; bests: boolean };
   oauth: { clientId: string; userId: number; secretSet: boolean };
@@ -504,6 +511,7 @@ export async function postSettings(payload: {
   apiRpm?: number;
   pollIntervalSeconds?: number;
   countryRecheckHours?: number;
+  globalRecheckHours?: number;
   display?: Partial<DisplayPrefs>;
   discord?: { webhookUrl?: string; bests?: boolean };
   clientId?: string | number;

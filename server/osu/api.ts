@@ -265,6 +265,17 @@ export async function getCountryTop(
   beatmapId: number,
   priority: Priority = "low"
 ): Promise<import("./types.js").SoloScore | null> {
+  return (await getCountryTopScores(beatmapId, priority))[0] ?? null;
+}
+
+/**
+ * First two scores of a map's country leaderboard: when my fresh score is #1,
+ * the runner-up is the previous holder (the player I just sniped).
+ */
+export async function getCountryTopScores(
+  beatmapId: number,
+  priority: Priority = "low"
+): Promise<import("./types.js").SoloScore[]> {
   return limiter.schedule(async () => {
     const auth = await getUserToken();
     const res = await netFetch(
@@ -278,7 +289,7 @@ export async function getCountryTop(
         },
       }
     );
-    if (res.status === 404) return null;
+    if (res.status === 404) return [];
     if (res.status === 401) {
       userToken = null;
       throw new RetryableError("401, refreshing user token");
@@ -296,7 +307,7 @@ export async function getCountryTop(
     const json = (await res.json()) as {
       scores: import("./types.js").SoloScore[];
     };
-    return json.scores[0] ?? null;
+    return json.scores.slice(0, 2);
   }, priority);
 }
 
@@ -328,6 +339,28 @@ async function apiGet<T>(pathAndQuery: string, priority: Priority): Promise<T> {
     if (!res.ok) throw new Error(`HTTP ${res.status} on ${pathAndQuery}`);
     return (await res.json()) as T;
   }, priority);
+}
+
+/**
+ * My global leaderboard position on a map (GET /beatmaps/{id}/scores/users/{id}).
+ * null = genuinely not on the leaderboard (404 / no position); other errors
+ * are rethrown so callers never mistake an outage for "unranked".
+ */
+export async function getUserBeatmapPosition(
+  beatmapId: number,
+  userId: number,
+  priority: Priority = "high"
+): Promise<number | null> {
+  try {
+    const res = await apiGet<{ position?: number | null }>(
+      `/beatmaps/${beatmapId}/scores/users/${userId}?mode=osu`,
+      priority
+    );
+    return res.position ?? null;
+  } catch (e) {
+    if (e instanceof NotFoundError) return null;
+    throw e;
+  }
 }
 
 /** All my scores on a diff (top score per mods combo, history included). */

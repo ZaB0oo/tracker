@@ -78,6 +78,25 @@ statsRouter.get("/stats", (_req, res) => {
     LEFT JOIN scores s ON s.id = u.best_lazer_score_id
     WHERE b.ruleset = 0 AND b.status IN (1, 2, 4)`);
 
+  // Global tops counters (cumulative: top8 includes top1, etc.). All zeros
+  // until the global sweep has run at least once.
+  const globalTops = one<{
+    top1: number; top8: number; top15: number;
+    top25: number; top50: number; top100: number;
+    checked: number;
+  }>(`
+    SELECT
+      COALESCE(SUM(u.global_rank = 1), 0) top1,
+      COALESCE(SUM(u.global_rank <= 8), 0) top8,
+      COALESCE(SUM(u.global_rank <= 15), 0) top15,
+      COALESCE(SUM(u.global_rank <= 25), 0) top25,
+      COALESCE(SUM(u.global_rank <= 50), 0) top50,
+      COALESCE(SUM(u.global_rank <= 100), 0) top100,
+      COUNT(*) checked
+    FROM beatmap_user u
+    JOIN beatmaps b ON b.id = u.beatmap_id
+    WHERE b.ruleset = 0 AND b.status IN (1, 2, 4) AND u.global_rank IS NOT NULL`);
+
   // osu! leaderboard semantics: the map's grade/FC state = that of the score
   // that counts on the LB, i.e. the BEST by score (not the best grade).
   const grades = db
@@ -150,8 +169,8 @@ statsRouter.get("/stats", (_req, res) => {
   const byCombo = dist("b.max_combo / 250", 8); // buckets of 250, 2000+
 
   res.json({
-    totals, scoreSums: { ...scoreSums, ...missingSums }, grades, fc, bySr, byYear,
-    byAr, byOd, byHp, byCs, byLen, byCombo,
+    totals, scoreSums: { ...scoreSums, ...missingSums }, grades, fc, globalTops,
+    bySr, byYear, byAr, byOd, byHp, byCs, byLen, byCombo,
   });
 });
 
@@ -297,36 +316,21 @@ statsRouter.get("/timeline", (_req, res) => {
   const fcRanked = firstDates("s.passed = 1 AND s.fc_state <= 1 AND b.status IN (1, 2)");
   const fcLoved = firstDates("s.passed = 1 AND s.fc_state <= 1 AND b.status = 4");
 
-  // grade spread: per map, emit an event each time the HIGHEST achieved grade
-  // improves; daily counts move a map from its old tier to the new one
-  const gradeRows = db
-    .prepare(
-      `SELECT s.beatmap_id AS bid, s.ended_at AS at, s.rank AS rank
-       ${CATALOG} AND s.passed = 1 ORDER BY s.ended_at`
-    )
-    .all() as { bid: number; at: string; rank: string }[];
-  const tierOf = new Map(TIERS.map((t, i) => [t, i]));
-  const mapTier = new Map<number, number>();
-  const gradeEvents: { at: string; to: number; from: number | null }[] = [];
-  for (const r of gradeRows) {
-    const t = tierOf.get(r.rank);
-    if (t == null) continue;
-    const cur = mapTier.get(r.bid);
-    if (cur == null || t > cur) {
-      gradeEvents.push({ at: r.at, to: t, from: cur ?? null });
-      mapTier.set(r.bid, t);
-    }
-  }
-
-  // ranked classic: replay of successive bests
+  // ranked classic + grade spread: one replay of successive bests. The tier
+  // counted is the grade OF THE CURRENT BEST (classic) score — the same
+  // definition as the dashboard's Grades panel, so an SS later beaten by a
+  // higher-scoring S stops counting as SS from that moment on.
   const scoreRows = db
     .prepare(
-      `SELECT s.beatmap_id AS bid, s.ended_at AS at,
+      `SELECT s.beatmap_id AS bid, s.ended_at AS at, s.rank AS rank,
          COALESCE(s.classic_total_score, s.total_score) AS v
        ${CATALOG} AND s.passed = 1 ORDER BY s.ended_at`
     )
-    .all() as { bid: number; at: string; v: number }[];
+    .all() as { bid: number; at: string; rank: string; v: number }[];
+  const tierOf = new Map(TIERS.map((t, i) => [t, i]));
   const best = new Map<number, number>();
+  const mapTier = new Map<number, number>();
+  const gradeEvents: { at: string; to: number | null; from: number | null }[] = [];
   let rankedTotal = 0;
   const rankedPts: { at: string; total: number }[] = [];
   for (const r of scoreRows) {
@@ -335,6 +339,13 @@ statsRouter.get("/timeline", (_req, res) => {
     best.set(r.bid, r.v);
     rankedTotal += r.v - prev;
     rankedPts.push({ at: r.at, total: rankedTotal });
+    const to = tierOf.get(r.rank) ?? null;
+    const from = mapTier.get(r.bid) ?? null;
+    if (to !== from) {
+      gradeEvents.push({ at: r.at, to, from });
+      if (to == null) mapTier.delete(r.bid);
+      else mapTier.set(r.bid, to);
+    }
   }
 
   // country #1s: logged transitions + silent initial takes dated to my best
@@ -415,7 +426,7 @@ statsRouter.get("/timeline", (_req, res) => {
     const fl = advance(fcLoved, "fl", day);
     while (idx.g < gradeEvents.length && dayOf(gradeEvents[idx.g].at) <= day) {
       const e = gradeEvents[idx.g++];
-      grades[e.to]++;
+      if (e.to != null) grades[e.to]++;
       if (e.from != null) grades[e.from]--;
     }
     while (idx.r < rankedPts.length && dayOf(rankedPts[idx.r].at) <= day)

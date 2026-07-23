@@ -501,7 +501,28 @@ export function Dashboard() {
         </div>
         <div className="hero-stat">
           <h3>{firstPlaceLabel(country)}</h3>
-          <div className="big gold-text">{fmtNum(eff.country)}</div>
+          <div className="hero-mid gold-text">{fmtNum(eff.country)}</div>
+          {data.globalTops.checked > 0 && (
+            <>
+            <h3 className="hero-sub">Global tops</h3>
+            <div className={`global-tops${past ? " tm-dim" : ""}`}>
+              {(
+                [
+                  ["Top 1", data.globalTops.top1],
+                  ["Top 8", data.globalTops.top8],
+                  ["Top 15", data.globalTops.top15],
+                  ["Top 25", data.globalTops.top25],
+                  ["Top 50", data.globalTops.top50],
+                  ["Top 100", data.globalTops.top100],
+                ] as const
+              ).map(([label, v]) => (
+                <div key={label} className="grade-pill" title="Global leaderboard positions (cumulative)">
+                  <b className="gt-label">{label}</b> {fmtNum(v)}
+                </div>
+              ))}
+            </div>
+            </>
+          )}
           <small>out of {fmtNum(eff.played)} maps played</small>
         </div>
         <div className="hero-stat">

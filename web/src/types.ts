@@ -77,6 +77,7 @@ export interface MapDetail {
     country_first: number;
     country_checked_at: string | null;
     fetched_at: string | null;
+    global_rank: number | null;
   } | null;
   countryEvents: {
     event: string;
@@ -120,6 +121,11 @@ export interface Stats {
   };
   grades: { grade: string; c: number }[];
   fc: { fc_state: number; c: number }[];
+  globalTops: {
+    top1: number; top8: number; top15: number;
+    top25: number; top50: number; top100: number;
+    checked: number;
+  };
   bySr: { sr: number; total: number; played: number; country: number | null; fc: number | null }[];
   byYear: { year: string; total: number; played: number; country: number | null; fc: number | null }[];
   byAr: Bucket[];
@@ -161,6 +167,13 @@ export interface SyncStatus {
   queue: { high: number; low: number };
   errors: string[];
   activity: { at: string; source: string; text: string }[];
+  sweeps: {
+    country: boolean;
+    global: boolean;
+    globalTracking: boolean;
+    globalChecked: number;
+    globalPending: number;
+  };
 }
 
 export interface Filters {
@@ -172,6 +185,8 @@ export interface Filters {
   statuses: string[];
   mods: string;
   countryFirst: boolean;
+  /** "" = off, else max global rank ("1", "8", "15", "25", "50", "100") */
+  globalTop: string;
   metricMissing: { id: number; name: string } | null;
   platform: "" | "lazer" | "stable";
   srMin: string; srMax: string;
@@ -179,7 +194,9 @@ export interface Filters {
   odMin: string; odMax: string;
   csMin: string; csMax: string;
   lenMin: string; lenMax: string;
-  yearMin: string; yearMax: string;
+  /** full dates YYYY-MM-DD (empty = unbounded) */
+  rankedFrom: string; rankedTo: string;
+  playedFrom: string; playedTo: string;
 }
 
 export const DEFAULT_FILTERS: Filters = {
@@ -191,6 +208,7 @@ export const DEFAULT_FILTERS: Filters = {
   statuses: [],
   mods: "",
   countryFirst: false,
+  globalTop: "",
   metricMissing: null,
   platform: "",
   srMin: "", srMax: "",
@@ -198,7 +216,8 @@ export const DEFAULT_FILTERS: Filters = {
   odMin: "", odMax: "",
   csMin: "", csMax: "",
   lenMin: "", lenMax: "",
-  yearMin: "", yearMax: "",
+  rankedFrom: "", rankedTo: "",
+  playedFrom: "", playedTo: "",
 };
 
 export const STATUS_LABELS: Record<number, string> = {

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getDb } from "../db/db.js";
+import { getDb, setState } from "../db/db.js";
 import { isUserConnected } from "../osu/api.js";
 import {
   clearSyncErrors,
@@ -8,12 +8,14 @@ import {
   importSetById,
   pauseBackfill,
   pauseCountrySweep,
+  pauseGlobalSweep,
   pollRecentScores,
   recomputeAllBests,
   refreshCatalogDelta,
   resumeBackfill,
   runBigSetsRepair,
   runCountrySweep,
+  runGlobalSweep,
   runPipeline,
   verifyYearAndBackfill,
 } from "../sync/daemon.js";
@@ -28,6 +30,19 @@ syncRouter.post("/sync/country-sweep", (_req, res) => {
 });
 syncRouter.post("/sync/country-pause", (_req, res) => {
   pauseCountrySweep();
+  res.json({ ok: true });
+});
+
+// Global tops sweep (top 1/8/15/25/50/100 positions). Starting also enables
+// the periodic re-checks; pausing disables them (single toggle in the UI).
+syncRouter.post("/sync/global-sweep", (_req, res) => {
+  setState("global_tracking", "1");
+  void runGlobalSweep(true);
+  res.json({ ok: true, started: true });
+});
+syncRouter.post("/sync/global-pause", (_req, res) => {
+  setState("global_tracking", "0");
+  pauseGlobalSweep();
   res.json({ ok: true });
 });
 

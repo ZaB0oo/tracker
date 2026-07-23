@@ -177,11 +177,13 @@ h1 { font-size: 21px; margin: 0; }
 .seg button:last-child { border-radius: 0 6px 6px 0; }
 .search { flex: 1; min-width: 220px; }
 .mods-input { width: 120px; }
+.global-top-select { font-size: 12px; padding: 4px 24px 4px 8px; }
 .chips { display: flex; gap: 4px; }
 .chip { padding: 4px 11px; border-radius: 13px; }
 .ranges { gap: 14px; }
 .range { display: flex; align-items: center; gap: 4px; color: var(--fg-dim); }
 .range input { width: 62px; }
+.range-date input { width: 128px; color-scheme: dark; }
 .reset { color: var(--fg-dim); }
 
 /* Table */
@@ -626,8 +628,78 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .heatmap-stats b { color: var(--fg); }
 .heatmap-stats b.accent { color: var(--accent); }
 .heatmap-stats .dim { opacity: 0.7; }
+/* Full-width layout: heatmap column + absolutely-positioned day card whose
+   height matches the heatmap column exactly (the maps list scrolls inside). */
+/* min-height gives the day card room (~10 visible table rows); the heatmap
+   column is vertically centered in it. */
+.heatmap-cols {
+  position: relative; padding-right: 30%; min-height: 420px;
+  display: flex; align-items: center;
+}
+.heatmap-main { flex: 1; min-width: 0; }
 .heatmap-wrap { display: flex; justify-content: center; }
-.heatmap-svg { display: block; width: 100%; max-width: 1100px; }
+.heatmap-svg { display: block; width: 100%; }
+
+/* Day detail card (click a heatmap cell; defaults to today) */
+.hm-day {
+  position: absolute; top: 0; right: 0; bottom: 0; width: calc(30% - 18px);
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 12px; font-size: 13px;
+}
+.hm-day-list {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px;
+}
+.hm-day-list-head { color: var(--fg-dim); font-size: 12px; margin-bottom: 4px; }
+.hm-day-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+.hm-day-table th {
+  position: sticky; top: 0; background: var(--bg3); z-index: 1;
+  text-align: left; font-weight: 500; color: var(--fg-dim); cursor: pointer;
+  padding: 2px 4px; border-bottom: 1px solid var(--border); user-select: none;
+  white-space: nowrap;
+}
+.hm-day-table th:hover { color: var(--fg); }
+.hm-day-table th.on { color: var(--accent2); }
+.hm-day-table th:nth-child(1) { width: 30px; }
+.hm-day-table th:nth-child(3) { width: 34px; }
+.hm-day-table th:nth-child(4) { width: 44px; }
+.hm-day-table td { padding: 2px 4px; vertical-align: middle; }
+.hm-day-table tbody tr { cursor: pointer; }
+.hm-day-table tbody tr:hover .hm-day-map-name { color: var(--accent2); }
+.hm-day-table tbody tr:nth-child(2n) { background: rgba(255, 255, 255, 0.02); }
+@media (max-width: 900px) {
+  .heatmap-cols { padding-right: 0; min-height: 0; }
+  .hm-day { position: static; width: auto; margin-top: 12px; max-height: 460px; }
+}
+.hm-day-map-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hm-day-map-name i { color: var(--fg-dim); font-style: normal; }
+.hm-day-map-sr, .hm-day-map-time { color: var(--fg-dim); white-space: nowrap; }
+.hm-day-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.hm-day-today {
+  font-size: 11px; padding: 1px 8px; border-radius: 10px; cursor: pointer;
+  background: var(--bg2); border: 1px solid var(--border); color: var(--fg-dim);
+}
+.hm-day-today:hover { color: var(--fg); }
+.hm-day-empty { color: var(--fg-dim); }
+
+/* Global tops counters (hero, under the country #1 count) */
+.hero-mid { font-size: 22px; font-weight: 700; margin: 2px 0 4px; }
+.hero-sub { margin: 10px 0 4px; }
+.global-tops {
+  display: grid; grid-template-columns: repeat(3, auto);
+  justify-content: start; gap: 6px; margin: 4px 0 6px;
+}
+.global-tops .grade-pill { white-space: nowrap; }
+.gt-label { color: #ffd966; }
+.hm-day-summary {
+  display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 2px 0 4px;
+  color: var(--fg-dim); font-size: 12px;
+}
+.hm-day-summary b { color: var(--fg); font-size: 13px; }
+.hm-day-grades { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-top: 8px; }
+.hm-day-grade { display: inline-flex; align-items: center; gap: 4px; }
+.hm-day-grade .dim { color: var(--fg-dim); }
 
 /* Time machine slider bar */
 .tm-bar {

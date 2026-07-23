@@ -12,6 +12,37 @@ historyRouter.get("/clears", (req, res) => {
   const q = req.query as Record<string, string | undefined>;
   const limit = Math.min(Number(q.limit ?? 100), 500);
   const offset = Math.max(Number(q.offset ?? 0), 0);
+  // Optional day filter (heatmap day card): one row per map, the day's best
+  // (classic) play on it, oldest first.
+  const day = q.day && /^\d{4}-\d{2}-\d{2}$/.test(q.day) ? q.day : null;
+
+  if (day) {
+    const rows = db
+      .prepare(
+        `SELECT s.id, s.ended_at, s.rank, s.accuracy, s.total_score,
+          s.classic_total_score, s.mods, s.fc_state, s.pp,
+          s.beatmap_id, b.version, b.star_rating, st.artist, st.title
+         FROM scores s
+         JOIN beatmaps b ON b.id = s.beatmap_id
+         JOIN beatmapsets st ON st.id = b.beatmapset_id
+         WHERE date(s.ended_at) = @day AND s.id = (
+           SELECT s2.id FROM scores s2
+           WHERE s2.beatmap_id = s.beatmap_id AND date(s2.ended_at) = @day
+           ORDER BY COALESCE(s2.classic_total_score, s2.total_score) DESC
+           LIMIT 1)
+         ORDER BY s.ended_at
+         LIMIT @limit OFFSET @offset`
+      )
+      .all({ day, limit, offset });
+    const total = (
+      db
+        .prepare(
+          "SELECT COUNT(DISTINCT beatmap_id) c FROM scores WHERE date(ended_at) = ?"
+        )
+        .get(day) as { c: number }
+    ).c;
+    return res.json({ rows, total });
+  }
 
   const rows = db
     .prepare(

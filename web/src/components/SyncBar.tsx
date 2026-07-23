@@ -33,6 +33,11 @@ const actionLabels = (
   },
   "country-sweep": { start: `${lbl} sweep…`, done: () => `${lbl} sweep started (tracked in the bar)` },
   "country-pause": { start: "Pausing sweep…", done: () => `${lbl} sweep paused` },
+  "global-sweep": {
+    start: "Global tops sweep…",
+    done: () => "Global tops sweep started (tracked in the bar)",
+  },
+  "global-pause": { start: "Pausing sweep…", done: () => "Global tops sweep paused" },
   recompute: {
     start: "Recomputing…",
     done: (r) => `Recompute done: ${fmtNum(Number(r.recomputed ?? 0))} maps`,
@@ -82,6 +87,7 @@ export function SyncBar() {
   });
   const [pollInput, setPollInput] = useState<string | null>(null);
   const [countryRecheckInput, setCountryRecheckInput] = useState<string | null>(null);
+  const [globalRecheckInput, setGlobalRecheckInput] = useState<string | null>(null);
   const [clientIdInput, setClientIdInput] = useState<string | null>(null);
   const [secretInput, setSecretInput] = useState<string | null>(null);
   const [userIdInput, setUserIdInput] = useState<string | null>(null);
@@ -116,12 +122,14 @@ export function SyncBar() {
     const payload: {
       pollIntervalSeconds?: number;
       countryRecheckHours?: number;
+      globalRecheckHours?: number;
       clientId?: string;
       clientSecret?: string;
       userId?: string;
     } = {};
     if (pollInput != null) payload.pollIntervalSeconds = Number(pollInput);
     if (countryRecheckInput != null) payload.countryRecheckHours = Number(countryRecheckInput);
+    if (globalRecheckInput != null) payload.globalRecheckHours = Number(globalRecheckInput);
     if (clientIdInput != null && clientIdInput !== "")
       payload.clientId = clientIdInput;
     if (secretInput != null && secretInput !== "")
@@ -136,6 +144,7 @@ export function SyncBar() {
       await postSettings(payload);
       setPollInput(null);
       setCountryRecheckInput(null);
+      setGlobalRecheckInput(null);
       setClientIdInput(null);
       setSecretInput(null);
       setUserIdInput(null);
@@ -345,16 +354,39 @@ export function SyncBar() {
               >
                 Catch up on new maps
               </button>
-              <button
-                onClick={() => act("country-sweep")}
-                disabled={!connected}
-                title="Start/resume checking country leaderboards (resumable)"
-              >
-                Start/resume {lbl} sweep
-              </button>
-              <button onClick={() => act("country-pause")} disabled={!connected}>
-                Pause {lbl} sweep
-              </button>
+              {s?.sweeps?.country ? (
+                <button onClick={() => act("country-pause")} disabled={!connected}>
+                  Pause {lbl} sweep
+                </button>
+              ) : (
+                <button
+                  onClick={() => act("country-sweep")}
+                  disabled={!connected}
+                  title="Start/resume checking country leaderboards (resumable)"
+                >
+                  Start/resume {lbl} sweep
+                </button>
+              )}
+              {s?.sweeps?.globalTracking || s?.sweeps?.global ? (
+                <button
+                  onClick={() => act("global-pause")}
+                  title="Pause the sweep and disable the periodic re-checks"
+                >
+                  Pause global tops sweep
+                  {s?.sweeps
+                    ? ` (${fmtNum(s.sweeps.globalChecked)}/${fmtNum(
+                        s.sweeps.globalChecked + s.sweeps.globalPending
+                      )})`
+                    : ""}
+                </button>
+              ) : (
+                <button
+                  onClick={() => act("global-sweep")}
+                  title="Track your global top 1/8/15/25/50/100 positions (1 request per played map, resumable; held tops are re-checked periodically)"
+                >
+                  Start/resume global tops sweep
+                </button>
+              )}
 
               </details>
               <details className="menu-group">
@@ -385,6 +417,20 @@ export function SyncBar() {
                   step={1}
                   value={countryRecheckInput ?? String(settings?.countryRecheckHours ?? "")}
                   onChange={(e) => setCountryRecheckInput(e.target.value)}
+                />
+              </div>
+              <div
+                className="menu-setting"
+                title="Age at which a held global top-100 position is re-checked. It runs on the next background tick (every 6 h max), only while global tops tracking is enabled."
+              >
+                <span>Re-check global tops (h)</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={720}
+                  step={1}
+                  value={globalRecheckInput ?? String(settings?.globalRecheckHours ?? "")}
+                  onChange={(e) => setGlobalRecheckInput(e.target.value)}
                 />
               </div>
               <button

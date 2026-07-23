@@ -36,6 +36,22 @@ function Range({
   );
 }
 
+/** Year-month-day range in two native date inputs (empty = unbounded). */
+function DateRange({
+  label, from, to, onFrom, onTo,
+}: {
+  label: string; from: string; to: string;
+  onFrom: (v: string) => void; onTo: (v: string) => void;
+}) {
+  return (
+    <label className="range range-date">
+      <span>{label}</span>
+      <input type="date" value={from} onChange={(e) => onFrom(e.target.value)} />
+      <input type="date" value={to} onChange={(e) => onTo(e.target.value)} />
+    </label>
+  );
+}
+
 export function FilterBar({
   filters,
   onChange,
@@ -106,6 +122,12 @@ export function FilterBar({
     badges.push({ key: "mods", label: `Mods: ${local.mods}`, clear: () => set("mods", "") });
   if (local.countryFirst)
     badges.push({ key: "fr", label: firstPlaceLabel(country), clear: () => set("countryFirst", false) });
+  if (local.globalTop)
+    badges.push({
+      key: "globalTop",
+      label: local.globalTop === "1" ? "Global #1" : `Global top ${local.globalTop}`,
+      clear: () => set("globalTop", ""),
+    });
   if (local.metricMissing)
     badges.push({
       key: "metric",
@@ -138,7 +160,8 @@ export function FilterBar({
   rangeBadge("od", "OD", "odMin", "odMax");
   rangeBadge("cs", "CS", "csMin", "csMax");
   rangeBadge("len", "Length", "lenMin", "lenMax");
-  rangeBadge("year", "Year", "yearMin", "yearMax");
+  rangeBadge("ranked", "Ranked", "rankedFrom", "rankedTo");
+  rangeBadge("playedDate", "Played", "playedFrom", "playedTo");
 
   return (
     <div className="filterbar">
@@ -305,6 +328,20 @@ export function FilterBar({
               {firstPlaceLabel(country)}
             </button>
           </div>
+          <select
+            className="global-top-select"
+            title="Only maps where my global leaderboard position is within the top N (requires the global tops sweep)"
+            value={local.globalTop}
+            onChange={(e) => set("globalTop", e.target.value)}
+          >
+            <option value="">Global top: any</option>
+            <option value="1">Global #1</option>
+            <option value="8">Global top 8</option>
+            <option value="15">Global top 15</option>
+            <option value="25">Global top 25</option>
+            <option value="50">Global top 50</option>
+            <option value="100">Global top 100</option>
+          </select>
           <input
             className="mods-input"
             placeholder="Mods (HD,DT)"
@@ -321,7 +358,8 @@ export function FilterBar({
             <Range label="OD" min={local.odMin} max={local.odMax} onMin={(v) => set("odMin", v)} onMax={(v) => set("odMax", v)} />
             <Range label="CS" min={local.csMin} max={local.csMax} onMin={(v) => set("csMin", v)} onMax={(v) => set("csMax", v)} />
             <Range label="Length (s)" min={local.lenMin} max={local.lenMax} onMin={(v) => set("lenMin", v)} onMax={(v) => set("lenMax", v)} step="1" />
-            <Range label="Rank year" min={local.yearMin} max={local.yearMax} onMin={(v) => set("yearMin", v)} onMax={(v) => set("yearMax", v)} step="1" lo={2007} hi={new Date().getFullYear()} />
+            <DateRange label="Ranked" from={local.rankedFrom} to={local.rankedTo} onFrom={(v) => set("rankedFrom", v)} onTo={(v) => set("rankedTo", v)} />
+            <DateRange label="Played" from={local.playedFrom} to={local.playedTo} onFrom={(v) => set("playedFrom", v)} onTo={(v) => set("playedTo", v)} />
           </div>
         </div>
       </div>

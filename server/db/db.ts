@@ -98,6 +98,11 @@ function migrate(d: DatabaseSync): void {
     if (!buCols2.some((c) => c.name === col))
       d.exec(`ALTER TABLE beatmap_user ADD COLUMN ${col} INTEGER`);
   }
+  // Global leaderboard position tracking (top 1/8/15/25/50/100 counters).
+  if (!buCols2.some((c) => c.name === "global_rank"))
+    d.exec("ALTER TABLE beatmap_user ADD COLUMN global_rank INTEGER");
+  if (!buCols2.some((c) => c.name === "global_checked_at"))
+    d.exec("ALTER TABLE beatmap_user ADD COLUMN global_checked_at TEXT");
 
   seedDefaultMetrics(d);
   // Startup repair: the immediate country check after a new score can race

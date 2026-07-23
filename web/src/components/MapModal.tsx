@@ -94,6 +94,9 @@ export function MapModal({
                   <MedalIcon width={13} /> {firstPlaceLabel(country)}
                 </span>
               ) : null}
+              {data.user?.global_rank != null && data.user.global_rank <= 100 ? (
+                <span className="mm-stat mm-gold">Global #{data.user.global_rank}</span>
+              ) : null}
               {data.user?.any_fc ? (
                 <span className="mm-stat mm-green">FC ✓</span>
               ) : null}

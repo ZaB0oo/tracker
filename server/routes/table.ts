@@ -90,6 +90,15 @@ function buildFilters(
     }
   }
   if (q.countryFirst === "1") where.push("u.country_first = 1");
+  // Global top filter: my position on the map's global leaderboard <= N
+  // (populated by the global tops sweep).
+  if (q.globalTop != null && q.globalTop !== "") {
+    const n = Number(q.globalTop);
+    if (Number.isInteger(n) && n >= 1 && n <= 100) {
+      where.push("u.global_rank <= @globalTop");
+      params.globalTop = n;
+    }
+  }
   // Missing maps of a metric: maps matching its MAP conditions that have no
   // score matching its SCORE conditions (the inner alias `s` shadows the
   // outer best-score join on purpose — scoreWhere targets the subquery rows).
@@ -128,6 +137,19 @@ function buildFilters(
   num("bpmMin", "b.bpm", ">="); num("bpmMax", "b.bpm", "<=");
   num("yearMin", "CAST(strftime('%Y', st.ranked_date) AS INTEGER)", ">=");
   num("yearMax", "CAST(strftime('%Y', st.ranked_date) AS INTEGER)", "<=");
+  // Full-date ranges (YYYY-MM-DD). Played dates target the best score, so a
+  // played-date filter implicitly restricts to played maps.
+  const date = (name: string, sql: string, cmp: string) => {
+    const v = q[name];
+    if (v && /^\d{4}-\d{2}-\d{2}$/.test(v)) {
+      where.push(`${sql} ${cmp} @${name}`);
+      params[name] = v;
+    }
+  };
+  date("rankedFrom", "date(st.ranked_date)", ">=");
+  date("rankedTo", "date(st.ranked_date)", "<=");
+  date("playedFrom", "date(s.ended_at)", ">=");
+  date("playedTo", "date(s.ended_at)", "<=");
   num("accMin", "s.accuracy * 100", ">="); num("accMax", "s.accuracy * 100", "<=");
   num("missingMin", missingSql, ">=");
   return { where, params };
@@ -237,7 +259,8 @@ tableRouter.get("/map/:id", (req, res) => {
   const user =
     db
       .prepare(
-        `SELECT played, any_fc, country_first, country_checked_at, fetched_at
+        `SELECT played, any_fc, country_first, country_checked_at, fetched_at,
+           global_rank
          FROM beatmap_user WHERE beatmap_id = ?`
       )
       .get(id) ?? null;
