@@ -226,7 +226,15 @@ const enrichProgress = (done: number, total: number) => {
 
 // ---------- Polling (high priority) ----------
 
+// Out-of-scope plays (graveyard/WIP maps) are not stored, so the same recent
+// scores would look "fresh" on every poll for 24 h: remember them for the
+// session to log once and stop re-attempting set imports.
+const outOfScopeScoreIds = new Set<number>();
+const unimportableMapIds = new Set<number>();
+
 export async function pollRecentScores(): Promise<number> {
+  if (outOfScopeScoreIds.size > 10_000) outOfScopeScoreIds.clear();
+  if (unimportableMapIds.size > 10_000) unimportableMapIds.clear();
   let offset = 0;
   let newCount = 0;
   const byBeatmap = new Map<number, import("../osu/types.js").SoloScore[]>();
@@ -259,7 +267,9 @@ export async function pollRecentScores(): Promise<number> {
     { played: number; best: number | null } | undefined
   >();
   for (const [beatmapId, scores] of byBeatmap) {
-    const fresh = scores.filter((s) => !exists.get(s.id));
+    const fresh = scores.filter(
+      (s) => !exists.get(s.id) && !outOfScopeScoreIds.has(s.id)
+    );
     if (fresh.length === 0) continue;
     freshByMap.set(beatmapId, fresh);
     preState.set(
@@ -274,7 +284,9 @@ export async function pollRecentScores(): Promise<number> {
   // we import the FULL MAPSET (all diffs, not just the played diff), with
   // backfill of any scores on the other diffs.
   const knownMap = db.prepare("SELECT 1 FROM beatmaps WHERE id = ?");
-  const unknown = [...byBeatmap.keys()].filter((id) => !knownMap.get(id));
+  const unknown = [...byBeatmap.keys()].filter(
+    (id) => !knownMap.get(id) && !unimportableMapIds.has(id)
+  );
   if (unknown.length > 0) {
     const setIds = new Set<number>();
     const needLookup: number[] = [];
@@ -308,16 +320,31 @@ export async function pollRecentScores(): Promise<number> {
             max_combo AS combo, pp, mods, statistics, ended_at
      FROM scores WHERE id = ?`
   );
+  const statusStmt = db.prepare("SELECT status FROM beatmaps WHERE id = ?");
   for (const [beatmapId, fresh] of freshByMap) {
+    // Graveyard/WIP/qualified plays are NOT stored at all: osu! wipes them
+    // when the map gets ranked/loved (you must replay it), so storing them
+    // would create phantom clears the day the status flips.
+    const st = (statusStmt.get(beatmapId) as { status: number } | undefined)?.status;
+    if (!(st === 1 || st === 2 || st === 4)) {
+      // remember them: logged once, then silent for the session
+      for (const s of fresh) outOfScopeScoreIds.add(s.id);
+      if (st == null) unimportableMapIds.add(beatmapId);
+      logActivity(
+        "poll",
+        () => `${mapLabel(beatmapId)} — ${fresh.length} score(s) on an unranked map (ignored)`
+      );
+      continue;
+    }
     newCount += fresh.length;
     // markFetched: false => the map stays in the backfill queue, which will
     // later fetch the FULL list (old bests included)
     const result = saveScores(beatmapId, fresh, { markFetched: false });
-    freshBeatmapIds.push(beatmapId);
     logActivity(
       "poll",
       () => `${mapLabel(beatmapId)} — ${fresh.length} new score(s)`
     );
+    freshBeatmapIds.push(beatmapId);
     // Discord: only new BESTS (first clear or improvement), only via polling.
     // Compared against the PRE-import snapshot, so a best on a map imported
     // by this very tick (score saved during the set import) is seen too.

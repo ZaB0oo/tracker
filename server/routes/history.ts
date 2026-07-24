@@ -25,7 +25,7 @@ historyRouter.get("/clears", (req, res) => {
          FROM scores s
          JOIN beatmaps b ON b.id = s.beatmap_id
          JOIN beatmapsets st ON st.id = b.beatmapset_id
-         WHERE date(s.ended_at) = @day AND s.id = (
+         WHERE b.status IN (1, 2, 4) AND date(s.ended_at) = @day AND s.id = (
            SELECT s2.id FROM scores s2
            WHERE s2.beatmap_id = s.beatmap_id AND date(s2.ended_at) = @day
            ORDER BY COALESCE(s2.classic_total_score, s2.total_score) DESC
@@ -37,7 +37,9 @@ historyRouter.get("/clears", (req, res) => {
     const total = (
       db
         .prepare(
-          "SELECT COUNT(DISTINCT beatmap_id) c FROM scores WHERE date(ended_at) = ?"
+          `SELECT COUNT(DISTINCT s.beatmap_id) c FROM scores s
+           JOIN beatmaps b ON b.id = s.beatmap_id
+           WHERE b.status IN (1, 2, 4) AND date(s.ended_at) = ?`
         )
         .get(day) as { c: number }
     ).c;
@@ -52,11 +54,20 @@ historyRouter.get("/clears", (req, res) => {
        FROM scores s
        JOIN beatmaps b ON b.id = s.beatmap_id
        JOIN beatmapsets st ON st.id = b.beatmapset_id
+       WHERE b.status IN (1, 2, 4)
        ORDER BY s.ended_at DESC, s.id DESC
        LIMIT ? OFFSET ?`
     )
     .all(limit, offset);
-  const total = (db.prepare("SELECT COUNT(*) c FROM scores").get() as { c: number }).c;
+  const total = (
+    db
+      .prepare(
+        `SELECT COUNT(*) c FROM scores s
+         JOIN beatmaps b ON b.id = s.beatmap_id
+         WHERE b.status IN (1, 2, 4)`
+      )
+      .get() as { c: number }
+  ).c;
   res.json({ rows, total });
 });
 

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { deleteMetric, fetchMetrics, type Metric, type MetricBreakdown } from "../api";
-import { fmtCompact, fmtDate, fmtNum } from "../format";
+import { displayGrade, fmtCompact, fmtDate, fmtNum } from "../format";
 import { EvoChart } from "./EvoChart";
 import { MissingIcon } from "./Icons";
 import { MetricBuilder } from "./MetricBuilder";
@@ -26,6 +26,60 @@ function bucketLabel(dim: MetricBreakdown, bucket: number | string): string {
     default:
       return n >= 10 ? "10" : `${n}–${n + 1}`;
   }
+}
+
+/** One-line human summary of a metric's conditions (shown under its name). */
+function describeParams(p: Metric["params"]): string {
+  const parts: string[] = [];
+  const rng = (
+    min: number | null | undefined,
+    max: number | null | undefined,
+    label: string,
+    unit = ""
+  ) => {
+    if (min == null && max == null) return;
+    if (min != null && max != null) parts.push(`${label} ${min}–${max}${unit}`);
+    else if (min != null) parts.push(`${label} ≥ ${min}${unit}`);
+    else parts.push(`${label} ≤ ${max}${unit}`);
+  };
+
+  const s = p.score;
+  if (s.fc === "any") parts.push("FC");
+  if (s.fc === "pfc") parts.push("PFC");
+  if (s.minGrade) parts.push(`${displayGrade(s.minGrade)}+`);
+  rng(s.acc?.min, s.acc?.max, "acc", "%");
+  if (s.minClassic) parts.push(`classic ≥ ${fmtCompact(s.minClassic)}`);
+  if (s.minScore) parts.push(`std ≥ ${fmtCompact(s.minScore)}`);
+  if (s.requiredMods?.length) parts.push(`+${s.requiredMods.join("")}`);
+  if (s.allowedMods)
+    parts.push(s.allowedMods.length ? `only ${s.allowedMods.join("/")}` : "nomod");
+  const counts: [keyof typeof s.counts, string][] = [
+    ["n100", "100s"], ["n50", "50s"], ["nMiss", "misses"],
+    ["nSliderEnd", "slider ends"], ["imperfections", "imperfections"],
+  ];
+  for (const [key, label] of counts) rng(s.counts[key]?.min, s.counts[key]?.max, label);
+
+  const m = p.map;
+  rng(m.srMin, m.srMax, "", "★");
+  rng(m.yearMin, m.yearMax, "year");
+  rng(m.lenMin, m.lenMax, "length", "s");
+  rng(m.arMin, m.arMax, "AR");
+  rng(m.odMin, m.odMax, "OD");
+  rng(m.csMin, m.csMax, "CS");
+  rng(m.hpMin, m.hpMax, "HP");
+  rng(m.comboMin, m.comboMax, "combo");
+  rng(m.bpmMin, m.bpmMax, "BPM");
+  if (m.statuses.length && m.statuses.length < 3) {
+    const labels: Record<number, string> = { 1: "ranked", 2: "approved", 4: "loved" };
+    parts.push(m.statuses.map((v) => labels[v] ?? v).join("/"));
+  }
+  if (m.country1) parts.push("country #1");
+  rng(m.globalTopMin, m.globalTopMax, "global rank");
+  if (m.query?.trim()) parts.push(`“${m.query.trim()}”`);
+  if (m.ids?.length) parts.push(`${fmtNum(m.ids.length)}-map pool`);
+
+  if (p.kind === "ranked_score") parts.unshift("ranked score");
+  return parts.join(" · ") || "all clears";
 }
 
 function MetricCard({
@@ -97,6 +151,9 @@ function MetricCard({
         >
           ✕
         </button>
+      </div>
+      <div className="metric-conds" title={describeParams(m.params)}>
+        {describeParams(m.params)}
       </div>
 
       <div className="goal-bar metric-bar">

@@ -53,7 +53,6 @@ CREATE TABLE IF NOT EXISTS scores (
   max_combo INTEGER NOT NULL,
   total_score INTEGER NOT NULL,       -- lazer standardised
   classic_total_score INTEGER,        -- "classic" lazer display (monotone vs standardised)
-  legacy_total_score INTEGER,         -- ScoreV1 conversion (NULL for native lazer scores)
   pp REAL,
   is_perfect_combo INTEGER NOT NULL DEFAULT 0,
   legacy_perfect INTEGER,
@@ -81,8 +80,7 @@ CREATE TABLE IF NOT EXISTS beatmap_user (
   missing_lazer INTEGER,
   missing_classic INTEGER,
   missing_wither INTEGER,
-  best_lazer_score_id INTEGER REFERENCES scores(id),
-  best_legacy_score_id INTEGER REFERENCES scores(id)
+  best_lazer_score_id INTEGER REFERENCES scores(id)
 );
 CREATE INDEX IF NOT EXISTS idx_bu_played ON beatmap_user(played);
 CREATE INDEX IF NOT EXISTS idx_bu_fetched ON beatmap_user(fetched_at);

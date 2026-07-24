@@ -572,6 +572,10 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 @media (max-width: 1100px) { .metrics-grid { grid-template-columns: 1fr; } }
 .metric-card { margin: 0; }
+.metric-conds {
+  color: var(--fg-dim); font-size: 11px; margin: -4px 0 8px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .metric-head { display: flex; align-items: center; gap: 10px; }
 .metric-head h3 { margin: 0; flex: 1; }
 .metric-btn {

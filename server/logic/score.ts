@@ -56,14 +56,3 @@ export function computeFcState(
   return FC_NO_MISS;
 }
 
-/**
- * Best score per metric. We keep TWO bests per map:
- * - "lazer" best  : max(total_score)        (current standardised system)
- * - "legacy" best : max(legacy_total_score) (historical ScoreV1 ranked score)
- * A native lazer score has no legacy_total_score: for the legacy metric we
- * fall back to total_score (that's what the site does in legacy mode =
- * converted values; the point is to stay consistent and documented).
- */
-export function legacyMetric(s: Pick<SoloScore, "total_score" | "legacy_total_score">): number {
-  return s.legacy_total_score ?? s.total_score;
-}

@@ -519,14 +519,14 @@ export function SyncBar() {
                 onClick={() => {
                   if (
                     window.confirm(
-                      "Re-check ALL global positions (any depth, ~25h for 90k maps, resumable). The periodic rotation only refreshes held top-100s — use this to refresh everything else. Start?"
+                      "Re-check ALL global positions (any depth, resumable). The periodic rotation only refreshes held top-100s — use this to refresh everything else. Start?"
                     )
                   )
                     void act("global-recheck-all");
                 }}
                 title="Re-queue every played map for a global position check"
               >
-                Re-check all global tops (~25h)
+                Re-check all global tops
               </button>
               <button
                 onClick={() => {

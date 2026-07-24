@@ -19,7 +19,6 @@ function score(partial: Partial<SoloScore>): SoloScore {
     accuracy: 0.99,
     max_combo: 100,
     total_score: 900_000,
-    legacy_total_score: null,
     pp: null,
     is_perfect_combo: false,
     passed: true,

@@ -16,7 +16,6 @@ export interface SoloScore {
   accuracy: number;
   max_combo: number;
   total_score: number; // lazer standardised
-  legacy_total_score: number | null; // converted ScoreV1 (stable scores)
   classic_total_score?: number;
   pp: number | null;
   is_perfect_combo: boolean;

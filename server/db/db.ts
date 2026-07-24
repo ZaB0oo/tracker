@@ -104,6 +104,42 @@ function migrate(d: DatabaseSync): void {
   if (!buCols2.some((c) => c.name === "global_checked_at"))
     d.exec("ALTER TABLE beatmap_user ADD COLUMN global_checked_at TEXT");
 
+  // Legacy (ScoreV1) leftovers removed: legacy_total_score fed a best pointer
+  // nothing ever read. The raw API payloads keep the value if ever needed.
+  const scCols = d.prepare("PRAGMA table_info(scores)").all() as { name: string }[];
+  if (scCols.some((c) => c.name === "legacy_total_score"))
+    d.exec("ALTER TABLE scores DROP COLUMN legacy_total_score");
+  // best_legacy_score_id sits in a FOREIGN KEY clause: SQLite cannot DROP it
+  // directly, the table is rebuilt without it (one-time, fast).
+  if (buCols2.some((c) => c.name === "best_legacy_score_id")) {
+    d.exec(`
+      CREATE TABLE beatmap_user_new (
+        beatmap_id INTEGER PRIMARY KEY REFERENCES beatmaps(id),
+        fetched_at TEXT,
+        played INTEGER NOT NULL DEFAULT 0,
+        any_fc INTEGER NOT NULL DEFAULT 0,
+        country_first INTEGER NOT NULL DEFAULT 0,
+        country_checked_at TEXT,
+        missing_lazer INTEGER,
+        missing_classic INTEGER,
+        missing_wither INTEGER,
+        best_lazer_score_id INTEGER REFERENCES scores(id),
+        global_rank INTEGER,
+        global_checked_at TEXT
+      );
+      INSERT INTO beatmap_user_new
+        SELECT beatmap_id, fetched_at, played, any_fc, country_first,
+               country_checked_at, missing_lazer, missing_classic,
+               missing_wither, best_lazer_score_id, global_rank,
+               global_checked_at
+        FROM beatmap_user;
+      DROP TABLE beatmap_user;
+      ALTER TABLE beatmap_user_new RENAME TO beatmap_user;
+      CREATE INDEX IF NOT EXISTS idx_bu_played ON beatmap_user(played);
+      CREATE INDEX IF NOT EXISTS idx_bu_fetched ON beatmap_user(fetched_at);
+    `);
+  }
+
   seedDefaultMetrics(d);
   // Startup repair: the immediate country check after a new score can race
   // osu!'s leaderboard update and stamp a false "not #1" (and the deferred

@@ -24,6 +24,15 @@ if (fs.existsSync(webDist)) {
 
 getDb(); // creates the schema on first launch
 
+// Startup repair: drop stored scores osu! does not honor (played while the
+// map had no leaderboard) and recompute the affected bests. No-op when clean.
+import { cleanupPreLeaderboardScores } from "./logic/repo.js";
+const cleaned = cleanupPreLeaderboardScores();
+if (cleaned.deleted > 0)
+  console.log(
+    `[db] cleanup: ${cleaned.deleted} pre-leaderboard score(s) removed on ${cleaned.maps} map(s)`
+  );
+
 // OAuth settings saved from the UI (take priority over .env)
 import { getState } from "./db/db.js";
 import { applyOAuthOverrides } from "./config.js";
