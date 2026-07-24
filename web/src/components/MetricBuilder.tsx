@@ -41,6 +41,7 @@ const MAP_FIELDS: { min: keyof MetricParams["map"]; max: keyof MetricParams["map
   { min: "hpMin", max: "hpMax", label: "HP", step: 0.1 },
   { min: "comboMin", max: "comboMax", label: "Max combo", step: 1 },
   { min: "bpmMin", max: "bpmMax", label: "BPM", step: 1 },
+  { min: "globalTopMin", max: "globalTopMax", label: "My global rank", step: 1 },
 ];
 const STATUSES = [
   { v: 1, label: "Ranked" },

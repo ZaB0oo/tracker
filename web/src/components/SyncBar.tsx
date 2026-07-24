@@ -38,6 +38,10 @@ const actionLabels = (
     done: () => "Global tops sweep started (tracked in the bar)",
   },
   "global-pause": { start: "Pausing sweep…", done: () => "Global tops sweep paused" },
+  "global-recheck-all": {
+    start: "Re-queuing all global positions…",
+    done: (r) => `${fmtNum(Number(r.requeued ?? 0))} maps re-queued (tracked in the bar)`,
+  },
   recompute: {
     start: "Recomputing…",
     done: (r) => `Recompute done: ${fmtNum(Number(r.recomputed ?? 0))} maps`,
@@ -510,6 +514,19 @@ export function SyncBar() {
                 title="Recompute bests for all scores"
               >
                 Recompute bests
+              </button>
+              <button
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      "Re-check ALL global positions (any depth, ~25h for 90k maps, resumable). The periodic rotation only refreshes held top-100s — use this to refresh everything else. Start?"
+                    )
+                  )
+                    void act("global-recheck-all");
+                }}
+                title="Re-queue every played map for a global position check"
+              >
+                Re-check all global tops (~25h)
               </button>
               <button
                 onClick={() => {

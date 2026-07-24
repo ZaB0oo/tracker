@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { fetchTable } from "../api";
+import { firstPlaceLabel, useCountryCode } from "../country";
 import { GradeBadge } from "./GradeBadge";
 import { MedalIcon } from "./Icons";
 import { FC_LABELS, STATUS_LABELS, type Filters, type TableRow } from "../types";
@@ -112,6 +113,12 @@ const COLUMNS: Col[] = [
     id: "country_first", label: "#1", width: 40,
     render: (r) => (r.country_first ? <MedalIcon width={15} /> : ""),
   },
+  {
+    id: "global_rank", label: "Global", width: 80, sortable: true,
+    render: (r) => (r.global_rank == null ? "—" : `#${fmtInt(r.global_rank)}`),
+    className: (r) =>
+      r.global_rank != null && r.global_rank <= 100 ? "global-rank-top" : "",
+  },
   { id: "pp", label: "pp", width: 45, sortable: true, render: (r) => (r.pp == null ? "—" : Math.round(r.pp)) },
   { id: "ended_at", label: "Played on", width: 90, sortable: true, render: (r) => fmtDate(r.ended_at) },
   {
@@ -160,9 +167,18 @@ export function ScoreTable({
       return next;
     });
   };
+  const country = useCountryCode();
+  // static columns, except the #1 label which carries the country code
+  const columns = useMemo(
+    () =>
+      COLUMNS.map((c) =>
+        c.id === "country_first" ? { ...c, label: firstPlaceLabel(country) } : c
+      ),
+    [country]
+  );
   const visibleCols = useMemo(
-    () => COLUMNS.filter((c) => !hidden.includes(c.id)),
-    [hidden]
+    () => columns.filter((c) => !hidden.includes(c.id)),
+    [columns, hidden]
   );
   const [ctx, setCtx] = useState<{ x: number; y: number; row: TableRow } | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
@@ -231,7 +247,7 @@ export function ScoreTable({
             <>
               <div className="menu-overlay" onClick={() => setPickerOpen(false)} />
               <div className="colpicker-menu">
-                {COLUMNS.map((c) => (
+                {columns.map((c) => (
                   <label key={c.id}>
                     <input
                       type="checkbox"

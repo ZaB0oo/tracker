@@ -1,6 +1,6 @@
 # osu! Completionist Tracker
 
-Local, single-user web app that tracks your best score on **every ranked/approved/loved difficulty** of osu! standard — with advanced sorting/filters, a completion dashboard, custom metrics with milestones and evolution charts, country #1 tracking, a stream overlay for OBS, and near real-time pickup of new scores.
+Local, single-user web app that tracks your best score on **every ranked/approved/loved difficulty** of osu! standard — with advanced sorting/filters, a completion dashboard, custom metrics with milestones and evolution charts, country #1 and global tops tracking, a stream overlay for OBS, and near real-time pickup of new scores.
 
 ![Dashboard](docs/dashboard.png)
 
@@ -17,14 +17,16 @@ Local, single-user web app that tracks your best score on **every ranked/approve
 
 ## Features
 
-- **Maps table**: your best on all ~150k std ranked/approved/loved diffs, SQL-side sort/filters (grade, FC state, star rating, AR/OD/CS/HP, length, rank year, mods, free text…), presets, virtualized rendering.
+- **Maps table**: your best on all ~150k std ranked/approved/loved diffs, SQL-side sort/filters (grade, FC state, star rating, AR/OD/CS/HP, length, ranked/played date ranges, mods, global rank, free text…), presets, virtualized rendering.
 - **Realistic missing score**: an auto-calibrated skill curve (median of your bests per 0.1★, isotonic regression) predicts what *you* can realistically score on each map — not the theoretical max.
-- **Custom metrics**: build your own counters (e.g. "FCs with HD on 4★+ maps from 2015"), each with progress bar, per-star-rating completion, milestone dates and an evolution chart. Defaults: Clears, Full combos, Ranked score.
+- **Custom metrics**: build your own counters (e.g. "FCs with HD on 4★+ maps from 2015", "global top 8s in 6★+"), each with progress bar, per-bucket completion in the dimension of your choice (star rating, year, length, combo, AR/OD/CS/HP), milestone dates and an evolution chart. Conditions are evaluated against each map's **best score** (leaderboard semantics), with an honest history replay. Default metrics: Clears, Full combos, Ranked score.
 - **Country #1 tracking**: which of your scores are #1 on your country's leaderboard, gained/lost history with sniper names, automatic re-checks. (Requires osu!supporter + connecting your account.)
-- **Dashboard**: completion by status/star rating/year, grade and FC distributions, skill curve, score sums (lazer / classic / optional witherscore).
-- **History**: full clear log and country #1 event log side by side.
-- **Collection export**: turn any filter (including a metric's missing maps) into an osu! collection — download the `.db`, or import it directly into osu!lazer with one click (optional, via [LazerCollectionImporter](https://github.com/ZaB0oo/LazerCollectionImporter) and `LAZER_IMPORTER_PATH`; note that lazer itself ignores drag & drop of collection files).
-- **Heatmap & streaks**: GitHub-style clears-per-day calendar with current/record streaks and best day.
+- **Global tops tracking**: your exact position on every played map's global leaderboard — top 1/8/15/25/50/100 counters on the dashboard, sortable Maps column and range filter, metric condition. Resumable sweep, instant check of every new best, periodic re-checks of held top-100s.
+- **Discord notifications**: optional webhook posting your new bests as rich embeds — modded star rating, rate-adjusted map stats, hit counts, pp, cover art, global rank when top 100 and country #1 (with the sniped player's name).
+- **Dashboard**: completion by status/star rating/year, grade and FC distributions, skill curve, score sums (lazer / classic / optional [witherscore](https://github.com/ppy/osu/discussions/38224)).
+- **History**: full clear log and country #1 event log.
+- **Collection export**: turn any filter (including a metric's missing maps) into an osu! collection — download the `.db`, or import it directly into osu!lazer with one click (optional, via [LazerCollectionImporter](https://github.com/ZaB0oo/LazerCollectionImporter) and `LAZER_IMPORTER_PATH`).
+- **Heatmap & streaks**: GitHub-style clears-per-day calendar with current/record streaks and best day, plus a day detail card (click any day): clears/FC/ranked score gained, grade changes, and a sortable table of the maps played that day.
 - **Time machine**: a date slider on the dashboard replaying your account state (clears, FCs, ranked score, country #1s) at any past day — instant, fully client-side.
 - **Stream overlay**: transparent browser source for OBS with live session gains.
 - **Polite syncing**: 60 req/min max against the osu! API, resumable backfill, automatic daily catch-up of newly ranked/loved maps.
@@ -58,7 +60,7 @@ OAuth credentials can also be entered later in the UI (settings menu) — they a
 In the UI, click **"Start initial sync"** (or `curl -X POST http://localhost:3727/api/sync/start`). Three phases, all visible in the status bar:
 
 1. **Catalog**: full enumeration of ranked/approved/loved std maps via `/beatmapsets/search`. The osu!web search caps at ~10,000 results per query, so enumeration is **split by rank year**. Cursors are persisted per slice (resumable). Expect ~30–60 min. **DMCA/delisted maps** (removed from search but still ranked) are invisible to enumeration: once it finishes, the app automatically imports, by direct lookup, every set from the shipped `server/db/seed-sets.json` reference list (~39k known sets, delisted included) that is still missing — a fresh install converges to the full catalog on its own. Manual tools also exist: `POST /api/sync/verify-year/<year>` and `POST /api/sync/import-set/<id>`; maintainers can regenerate the reference list from a complete DB with `npm run export-seed`.
-2. **Enrichment**: `GET /beatmaps?ids[]=` in batches of 50 for **max_combo** and up-to-date star ratings. ~50 min for the whole game.
+2. **Enrichment**: `GET /beatmaps?ids[]=` in batches of 50 for **max_combo**, up-to-date star ratings, object counts (circles/sliders/spinners — used by the classic score formula) and the `.osu` **MD5 checksum** (used by the collection export). ~50 min for the whole game.
 3. **Backfill**: `GET /beatmaps/{id}/scores/users/{id}/all` for every diff. **~40 h at 60 req/min** for ~150k diffs. Resumable at any time (pause/resume in the UI, or just kill the process: only unchecked maps are redone). Maps with no score are marked "never played".
 
 While all this runs, **polling** is already active: every 2 min (configurable), your scores from the last 24 h are fetched at top priority.
@@ -67,19 +69,33 @@ While all this runs, **polling** is already active: every 2 min (configurable), 
 
 Automatic, three mechanisms:
 
-1. **Daily delta**: ~once a day, a scan of `/beatmapsets/search` sorted by rank date stops as soon as a full page is already known — a handful of requests per day. New diffs are enriched then backfilled immediately. Manual trigger: `POST /api/sync/delta-now`.
-2. **Via polling**: if you play a map missing from the catalog (just ranked), it is fetched at high priority and added along with your score.
+1. **Daily delta**: ~once a day, a scan of `/beatmapsets/search` sorted by rank date stops as soon as a full page is already known. New diffs are enriched then backfilled immediately. Manual trigger: `POST /api/sync/delta-now`.
+2. **Via polling**: if you play a map missing from the catalog, it is fetched at high priority and added along with your score.
 3. **Status changes** (e.g. graveyard → loved) are picked up by the delta and by the "Full catalog re-scan" (Maintenance menu), which also refreshes star ratings and DMCA flags.
 
 ## Country #1 tracking
 
-Connect your osu! account from the sync bar (**supporter required** — country leaderboards are a supporter feature). The app then:
+Connect your osu! account from the sync bar (**supporter required**, country leaderboards are a supporter feature). The app then:
 
-- sweeps the country leaderboard of every played map (resumable, ~several hours for large libraries);
-- re-checks each new score immediately after you set it;
-- re-checks held #1s periodically (default every 48 h, configurable) to detect snipes, and logs gained/lost events with the sniper's name.
+- sweeps the country leaderboard of every played map (1 request/map, resumable).
+- re-checks each new score immediately after you set it.
+- re-checks held #1s periodically (default every 48 h, "Re-check #1 country (h)" in settings) to detect snipes, and logs gained/lost events with the sniper's name.
 
 The country is whatever your osu! profile says.
+
+## Global tops tracking
+
+Start it from the sync menu (**"Start/resume global tops sweep"** — a single button toggles start/pause). The app then:
+
+- sweeps every played map for your exact global leaderboard position (1 request/map, resumable, low priority, deferred while the backfill runs; works without a connected account).
+- checks the position of **every new best immediately**.
+- re-checks held top-100 positions periodically (default every 48 h, "Re-check global tops (h)" in settings) to catch overtakes.
+
+Positions are exact whatever their value (#4523 included); only the periodic re-checks are limited to held top-100s. To refresh everything else on demand, use **"Re-check all global tops"** in the Maintenance menu (re-queues every played map, ~25 h, resumable). Counters (top 1/8/15/25/50/100) appear on the dashboard once the sweep has run.
+
+## Discord notifications
+
+Settings menu → Advanced settings: paste a channel **webhook URL** and every new best (first clears and improvements, batched per poll) is posted as a rich embed — star rating with your mods, rate-adjusted BPM/length/CS/AR/OD/HP, hit counts, pp, mapset cover, your global rank when top 100 and country #1 at submit time with the sniped player's name. A "Send a test message" button validates the setup. The URL lives in the local DB only; sending is fire-and-forget and never blocks the sync.
 
 ## Rate limiting (osu!api terms of use)
 
@@ -128,7 +144,8 @@ server/
   logic/metricEval.ts  # metric evaluation + versioned cache
   logic/repo.ts        # score upserts + best pointers
   sync/catalog.ts      # API catalog enumeration + enrichment
-  sync/daemon.ts       # pipeline, resumable backfill, polling, country sweeps
+  sync/daemon.ts       # pipeline, resumable backfill, polling, country/global sweeps
+  notify/discord.ts    # webhook notifications (rich embeds, queue, retry)
   routes.ts            # router aggregator
   routes/*.ts          # one module per domain (table, stats, metrics, sync…)
 web/                   # React + Vite + TanStack Query/Table/Virtual
@@ -147,9 +164,10 @@ npm test    # rate limiter + FC/best logic
 - Legacy (ScoreV1) max score is not computed — it depends on map geometry and would require parsing `.osu` files.
 - Polling only sees the **last 24 hours** (limit of the `recent` endpoint) and ignores fails. If the app was off longer while you played, use "Poll now" + optionally a re-backfill.
 - Country leaderboards require **osu!supporter**; without a connected account, country #1 features stay dormant.
+- The initial global tops sweep takes ~25 h for ~90k played maps (shared 60 req/min budget); positions outside the held top-100s only refresh when you set a new best on the map or via "Re-check all global tops" in the Maintenance menu.
 - `node:sqlite` prints an `ExperimentalWarning` at startup: harmless.
 - One ruleset (osu! standard) for now; the schema is ready for the others (`ruleset` everywhere).
 
 ## Credits
 
-This project was **entirely coded by AI** — [Claude](https://claude.com) (Anthropic), directed and tested by [ZaB0oo](https://github.com/ZaB0oo): every feature, fix and design decision was specified, reviewed and validated against a real completionist database (~90k played maps, ~150k tracked).
+This project was **entirely coded by AI** — [Claude](https://claude.com) (Anthropic), directed and tested by [ZaBoo](https://osu.ppy.sh/users/13344661): every feature, fix and design decision was specified, reviewed and validated against a real completionist/scorefarmer database (~90k played maps).

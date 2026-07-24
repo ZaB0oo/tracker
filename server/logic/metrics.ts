@@ -38,6 +38,9 @@ export interface MetricMapConds {
   bpmMin: number | null; bpmMax: number | null;
   statuses: number[]; // subset of [1,2,4]; empty = all
   country1: boolean; // only maps where I hold the country #1
+  /** my global leaderboard position range (needs the global tops sweep) */
+  globalTopMin?: number | null;
+  globalTopMax?: number | null;
   ids?: number[] | null; // explicit beatmap ids (custom map pool); null = all
   /** free text over artist / title / mapper / diff name / source / tags */
   query?: string | null;
@@ -116,8 +119,9 @@ export function scoreWhere(c: MetricScoreConds): string {
 
 /**
  * SQL conditions on the map (aliases `b`, `st`, `u`).
- * `ignoreCountry1` drops the country-#1 filter — used for the per-star-rating
- * denominator, so a #1 metric shows "my #1s / all maps in the range".
+ * `ignoreCountry1` drops the achievement-based filters (country #1, global
+ * top) — used for the per-bucket denominator, so such metrics show
+ * "my tops / all maps in the range".
  */
 export function mapWhere(
   c: MetricMapConds,
@@ -141,6 +145,12 @@ export function mapWhere(
   r("b.bpm", c.bpmMin, c.bpmMax);
   if (c.country1 && !opts.ignoreCountry1)
     w.push("COALESCE(u.country_first, 0) = 1");
+  if (!opts.ignoreCountry1) {
+    if (num(c.globalTopMin) != null)
+      w.push(`u.global_rank >= ${num(c.globalTopMin)}`);
+    if (num(c.globalTopMax) != null)
+      w.push(`u.global_rank <= ${num(c.globalTopMax)}`);
+  }
   if (typeof c.query === "string" && c.query.trim() !== "") {
     const like = `'%${c.query.trim().replaceAll("'", "''")}%'`;
     w.push(
@@ -180,6 +190,7 @@ export const DEFAULT_MAP_CONDS: MetricMapConds = {
   lenMin: null, lenMax: null, arMin: null, arMax: null,
   odMin: null, odMax: null, csMin: null, csMax: null,
   hpMin: null, hpMax: null, comboMin: null, comboMax: null,
-  bpmMin: null, bpmMax: null, statuses: [], country1: false, ids: null,
+  bpmMin: null, bpmMax: null, statuses: [], country1: false,
+  globalTopMin: null, globalTopMax: null, ids: null,
   query: null,
 };

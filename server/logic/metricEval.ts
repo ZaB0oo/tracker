@@ -78,7 +78,12 @@ function baseFrom(p: MetricParams, bestOnly: boolean): string {
     WHERE ${bestOnly ? "s.id = u.best_lazer_score_id AND " : ""}${mapWhere(p.map)} AND ${scoreWhere(p.score)}`;
 }
 
-/** Total maps matching the map conditions (denominator for "total" mode). */
+/**
+ * Total maps matching the map conditions (denominator for "total" mode).
+ * Achievement-based conditions (country #1, global top) are ignored here —
+ * same rule as the per-bucket denominators, so a "global top 8" metric reads
+ * "my top 8s / every map in the range" instead of a meaningless 100%.
+ */
 function mapTotal(p: MetricParams): number {
   return (
     getDb()
@@ -86,7 +91,7 @@ function mapTotal(p: MetricParams): number {
         `SELECT COUNT(*) c FROM beatmaps b
          JOIN beatmapsets st ON st.id = b.beatmapset_id
          LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
-         WHERE ${mapWhere(p.map)}`
+         WHERE ${mapWhere(p.map, { ignoreCountry1: true })}`
       )
       .get() as { c: number }
   ).c;

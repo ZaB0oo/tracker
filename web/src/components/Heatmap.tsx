@@ -261,10 +261,10 @@ export function HeatmapPanel({ cutoffDay = null }: { cutoffDay?: string | null }
                     <tr>
                       {(
                         [
-                          ["grade", "G"],
-                          ["title", "map"],
+                          ["grade", "Grade"],
+                          ["title", "Map"],
                           ["sr", "★"],
-                          ["time", "time"],
+                          ["time", "Time"],
                         ] as const
                       ).map(([key, label]) => (
                         <th

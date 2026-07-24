@@ -68,12 +68,12 @@ function buildTableQuery(
   if (filters.statuses.length) p.set("statuses", filters.statuses.join(","));
   if (filters.mods) p.set("mods", filters.mods);
   if (filters.countryFirst) p.set("countryFirst", "1");
-  if (filters.globalTop) p.set("globalTop", filters.globalTop);
   if (filters.metricMissing) p.set("metricMissing", String(filters.metricMissing.id));
   if (filters.platform) p.set("platform", filters.platform);
   for (const k of [
     "srMin", "srMax", "arMin", "arMax", "odMin", "odMax",
     "csMin", "csMax", "lenMin", "lenMax",
+    "globalTopMin", "globalTopMax",
     "rankedFrom", "rankedTo", "playedFrom", "playedTo",
   ] as const) {
     if (filters[k] !== "") p.set(k, filters[k]);
@@ -242,6 +242,7 @@ export async function postSync(
     | "country-pause"
     | "global-sweep"
     | "global-pause"
+    | "global-recheck-all"
     | "recompute"
     | "rebackfill"
     | "catalog-full?force=1"
@@ -361,6 +362,9 @@ export interface MetricMapConds {
   bpmMin: number | null; bpmMax: number | null;
   statuses: number[];
   country1: boolean;
+  /** my global leaderboard position range (needs the global tops sweep) */
+  globalTopMin?: number | null;
+  globalTopMax?: number | null;
   ids?: number[] | null;
   query?: string | null;
 }
@@ -471,7 +475,8 @@ export const DEFAULT_METRIC_PARAMS: MetricParams = {
     lenMin: null, lenMax: null, arMin: null, arMax: null,
     odMin: null, odMax: null, csMin: null, csMax: null,
     hpMin: null, hpMax: null, comboMin: null, comboMax: null,
-    bpmMin: null, bpmMax: null, statuses: [], country1: false, ids: null,
+    bpmMin: null, bpmMax: null, statuses: [], country1: false,
+    globalTopMin: null, globalTopMax: null, ids: null,
     query: null,
   },
   breakdown: "sr",

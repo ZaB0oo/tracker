@@ -122,12 +122,6 @@ export function FilterBar({
     badges.push({ key: "mods", label: `Mods: ${local.mods}`, clear: () => set("mods", "") });
   if (local.countryFirst)
     badges.push({ key: "fr", label: firstPlaceLabel(country), clear: () => set("countryFirst", false) });
-  if (local.globalTop)
-    badges.push({
-      key: "globalTop",
-      label: local.globalTop === "1" ? "Global #1" : `Global top ${local.globalTop}`,
-      clear: () => set("globalTop", ""),
-    });
   if (local.metricMissing)
     badges.push({
       key: "metric",
@@ -160,6 +154,7 @@ export function FilterBar({
   rangeBadge("od", "OD", "odMin", "odMax");
   rangeBadge("cs", "CS", "csMin", "csMax");
   rangeBadge("len", "Length", "lenMin", "lenMax");
+  rangeBadge("globalTop", "Global top", "globalTopMin", "globalTopMax");
   rangeBadge("ranked", "Ranked", "rankedFrom", "rankedTo");
   rangeBadge("playedDate", "Played", "playedFrom", "playedTo");
 
@@ -328,20 +323,15 @@ export function FilterBar({
               {firstPlaceLabel(country)}
             </button>
           </div>
-          <select
-            className="global-top-select"
-            title="Only maps where my global leaderboard position is within the top N (requires the global tops sweep)"
-            value={local.globalTop}
-            onChange={(e) => set("globalTop", e.target.value)}
-          >
-            <option value="">Global top: any</option>
-            <option value="1">Global #1</option>
-            <option value="8">Global top 8</option>
-            <option value="15">Global top 15</option>
-            <option value="25">Global top 25</option>
-            <option value="50">Global top 50</option>
-            <option value="100">Global top 100</option>
-          </select>
+          <Range
+            label="Global top"
+            min={local.globalTopMin}
+            max={local.globalTopMax}
+            onMin={(v) => set("globalTopMin", v)}
+            onMax={(v) => set("globalTopMax", v)}
+            step="1"
+            lo={1}
+          />
           <input
             className="mods-input"
             placeholder="Mods (HD,DT)"

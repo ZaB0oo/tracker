@@ -403,37 +403,37 @@ export async function pollRecentScores(): Promise<number> {
       }
     }
   }
-  // SR with the play's mods for the notification (one request per best whose
-  // mods change difficulty) — only when the Discord webhook is actually on.
+  // Per-best enrichment:
+  // - global leaderboard position: IMMEDIATE check for every new best (like
+  //   the country one, and regardless of the sweep/tracking state) — the
+  //   global tops stay current and the notification shows the rank when <= 100;
+  // - SR with the play's mods (Discord display only).
   const discord = getDiscordSettings();
-  if (bestEvents.length > 0 && discord.webhookSet && discord.bests) {
+  const discordOn = discord.webhookSet && discord.bests;
+  if (bestEvents.length > 0) {
     // mods that change star rating (osu! DifficultyAdjustmentMods — HD counts
     // since the 2026 reading rework)
     const DIFF_MODS = new Set(["DT", "NC", "HT", "DC", "HR", "EZ", "FL", "HD", "TD"]);
+    const storeRank = db.prepare(
+      "UPDATE beatmap_user SET global_rank = ?, global_checked_at = datetime('now') WHERE beatmap_id = ?"
+    );
     for (const e of bestEvents) {
-      const acronyms = parseModAcronyms(e.modsJson).filter((a) => a !== "CL");
-      if (acronyms.some((a) => DIFF_MODS.has(a)))
-        e.moddedSr = await getModdedStarRating(e.beatmapId, acronyms, "high");
-      // global leaderboard position (shown when <= 100); also feeds the
-      // tracking columns so a notified best is immediately up to date there
+      if (discordOn) {
+        const acronyms = parseModAcronyms(e.modsJson).filter((a) => a !== "CL");
+        if (acronyms.some((a) => DIFF_MODS.has(a)))
+          e.moddedSr = await getModdedStarRating(e.beatmapId, acronyms, "high");
+      }
       try {
         e.globalRank = await getUserBeatmapPosition(e.beatmapId, config.osuUserId, "high");
-        db.prepare(
-          "UPDATE beatmap_user SET global_rank = ?, global_checked_at = datetime('now') WHERE beatmap_id = ?"
-        ).run(e.globalRank, e.beatmapId);
+        storeRank.run(e.globalRank, e.beatmapId);
       } catch (err) {
+        // failed check: back into the sweep queue, it will retry
         logError(err, `position check map ${e.beatmapId}`);
+        db.prepare(
+          "UPDATE beatmap_user SET global_checked_at = NULL WHERE beatmap_id = ?"
+        ).run(e.beatmapId);
       }
     }
-  }
-  // Fresh scores re-enter the global sweep queue (zero API cost here: the
-  // sweep re-checks them on its next pass, catching maps the block above
-  // skipped because Discord is off).
-  if (isGlobalTrackingEnabled() && freshBeatmapIds.length > 0) {
-    const requeue = db.prepare(
-      "UPDATE beatmap_user SET global_checked_at = NULL WHERE beatmap_id = ? AND global_checked_at < datetime('now', '-1 minute')"
-    );
-    for (const id of freshBeatmapIds) requeue.run(id);
   }
   notifyBests(bestEvents);
   status.lastPollAt = new Date().toISOString();

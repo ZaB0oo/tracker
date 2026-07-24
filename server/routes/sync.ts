@@ -46,6 +46,18 @@ syncRouter.post("/sync/global-pause", (_req, res) => {
   res.json({ ok: true });
 });
 
+// Manual full re-check of ALL global positions (any depth, not just the
+// top-100 rotation): every played map goes back into the sweep queue
+// (~25 h for ~90k maps, resumable). Also (re)enables the tracking.
+syncRouter.post("/sync/global-recheck-all", (_req, res) => {
+  const n = getDb()
+    .prepare("UPDATE beatmap_user SET global_checked_at = NULL WHERE played = 1")
+    .run().changes;
+  setState("global_tracking", "1");
+  void runGlobalSweep(true);
+  res.json({ ok: true, requeued: Number(n) });
+});
+
 // Full score re-scan: puts every map back to "to check" (no existing score
 // is lost, ~40h). Use it if the app stayed off for > 24h while you played.
 syncRouter.post("/sync/rebackfill", (_req, res) => {

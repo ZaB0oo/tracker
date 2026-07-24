@@ -43,6 +43,7 @@ const SORT_COLUMNS: Record<string, string> = {
   bpm: "b.bpm",
   max_combo: "b.max_combo",
   score_combo: "s.max_combo",
+  global_rank: "u.global_rank",
 };
 
 /**
@@ -90,15 +91,10 @@ function buildFilters(
     }
   }
   if (q.countryFirst === "1") where.push("u.country_first = 1");
-  // Global top filter: my position on the map's global leaderboard <= N
-  // (populated by the global tops sweep).
-  if (q.globalTop != null && q.globalTop !== "") {
-    const n = Number(q.globalTop);
-    if (Number.isInteger(n) && n >= 1 && n <= 100) {
-      where.push("u.global_rank <= @globalTop");
-      params.globalTop = n;
-    }
-  }
+  // Global top filter: my exact position on the map's global leaderboard
+  // (populated by the global tops sweep; any bound excludes unranked maps).
+  num("globalTopMin", "u.global_rank", ">=");
+  num("globalTopMax", "u.global_rank", "<=");
   // Missing maps of a metric: maps matching its MAP conditions whose BEST
   // score does not match its SCORE conditions (leaderboard semantics, same
   // rule as the metric evaluation; the inner alias `s` shadows the outer
@@ -220,7 +216,8 @@ tableRouter.get("/table", (req, res) => {
              ELSE -1 END AS grade_order,
         COALESCE(u.played, 0) AS played,
         COALESCE(u.any_fc, 0) AS any_fc,
-        COALESCE(u.country_first, 0) AS country_first
+        COALESCE(u.country_first, 0) AS country_first,
+        u.global_rank
       ${baseSql}
       ORDER BY ${sortParts.join(", ")}
       LIMIT @limit OFFSET @offset`

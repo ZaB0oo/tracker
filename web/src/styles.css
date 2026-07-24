@@ -177,7 +177,7 @@ h1 { font-size: 21px; margin: 0; }
 .seg button:last-child { border-radius: 0 6px 6px 0; }
 .search { flex: 1; min-width: 220px; }
 .mods-input { width: 120px; }
-.global-top-select { font-size: 12px; padding: 4px 24px 4px 8px; }
+.global-rank-top { color: #ffd966; }
 .chips { display: flex; gap: 4px; }
 .chip { padding: 4px 11px; border-radius: 13px; }
 .ranges { gap: 14px; }
@@ -355,10 +355,12 @@ h1 { font-size: 21px; margin: 0; }
 }
 
 /* Dashboard hero + collapsible panels */
-.hero { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
-.hero-bars { flex: 2; min-width: 340px; }
-.hero-stat { flex: 1; min-width: 170px; }
-.hero-grades { min-width: 230px; }
+.hero { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+/* completion bars capped so the stats (esp. global tops) keep room; each
+   hero block can shrink and wraps to its own line on narrow screens */
+.hero-bars { flex: 1.4 1 340px; min-width: 300px; max-width: 640px; }
+.hero-stat { flex: 1 1 190px; min-width: 0; }
+.hero-grades { flex: 1 1 230px; min-width: 230px; }
 .gold-text { color: var(--yellow); }
 
 /* Toasts (user feedback on actions) */
@@ -657,7 +659,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 .hm-day-table th:hover { color: var(--fg); }
 .hm-day-table th.on { color: var(--accent2); }
-.hm-day-table th:nth-child(1) { width: 30px; }
+.hm-day-table th:nth-child(1) { width: 38px; }
 .hm-day-table th:nth-child(3) { width: 34px; }
 .hm-day-table th:nth-child(4) { width: 44px; }
 .hm-day-table td { padding: 2px 4px; vertical-align: middle; }
@@ -687,6 +689,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   justify-content: start; gap: 6px; margin: 4px 0 6px;
 }
 .global-tops .grade-pill { white-space: nowrap; }
+/* the whole block wraps to its own line rather than squishing the 2x3 grid */
+.hero-country { min-width: fit-content; }
 .gt-label { color: #ffd966; }
 .hm-day-summary {
   display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 2px 0 4px;

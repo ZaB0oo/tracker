@@ -33,6 +33,7 @@ export interface TableRow {
   played: number;
   any_fc: number;
   country_first: number;
+  global_rank: number | null;
 }
 
 export interface MapDetail {
@@ -185,8 +186,8 @@ export interface Filters {
   statuses: string[];
   mods: string;
   countryFirst: boolean;
-  /** "" = off, else max global rank ("1", "8", "15", "25", "50", "100") */
-  globalTop: string;
+  /** my global leaderboard position range (empty = unbounded) */
+  globalTopMin: string; globalTopMax: string;
   metricMissing: { id: number; name: string } | null;
   platform: "" | "lazer" | "stable";
   srMin: string; srMax: string;
@@ -208,7 +209,7 @@ export const DEFAULT_FILTERS: Filters = {
   statuses: [],
   mods: "",
   countryFirst: false,
-  globalTop: "",
+  globalTopMin: "", globalTopMax: "",
   metricMissing: null,
   platform: "",
   srMin: "", srMax: "",

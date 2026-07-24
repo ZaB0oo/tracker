@@ -499,7 +499,7 @@ export function Dashboard() {
             />
           </div>
         </div>
-        <div className="hero-stat">
+        <div className="hero-stat hero-country">
           <h3>{firstPlaceLabel(country)}</h3>
           <div className="hero-mid gold-text">{fmtNum(eff.country)}</div>
           {data.globalTops.checked > 0 && (
