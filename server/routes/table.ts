@@ -297,7 +297,13 @@ function osuString(s: string): Buffer {
 export async function buildCollectionDb(
   q: Record<string, string | undefined>
 ): Promise<
-  | { buffer: Buffer; name: string; mapCount: number }
+  | {
+      buffer: Buffer;
+      name: string;
+      mapCount: number;
+      /** md5 -> beatmap id, lets the lazer importer remap outdated local maps */
+      md5ToId: Record<string, number>;
+    }
   | { error: string; status: number }
 > {
   ensureMissingFresh();
@@ -354,7 +360,9 @@ export async function buildCollectionDb(
   const count = Buffer.alloc(4);
   count.writeInt32LE(md5s.length, 0);
   const buffer = Buffer.concat([header, osuString(name), count, ...md5s.map(osuString)]);
-  return { buffer, name, mapCount: md5s.length };
+  const md5ToId: Record<string, number> = {};
+  for (const [id, md5] of md5ById) md5ToId[md5.toLowerCase()] = id;
+  return { buffer, name, mapCount: md5s.length, md5ToId };
 }
 
 /**

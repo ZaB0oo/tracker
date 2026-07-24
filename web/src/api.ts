@@ -199,6 +199,10 @@ export interface LazerImportResult {
   updated: number;
   hashes: number;
   invalid: number;
+  /** hashes swapped for the locally-installed version of the same beatmap */
+  remapped: number;
+  /** maps not installed in lazer (kept; appear once downloaded) */
+  notInstalled: number;
 }
 
 /** Whether direct import into osu!lazer is configured on the server. */

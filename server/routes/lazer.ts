@@ -63,15 +63,19 @@ lazerRouter.post("/lazer-import", async (req, res) => {
 
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lazer-import-"));
   const file = path.join(dir, "collection.db");
+  const idsFile = path.join(dir, "ids.json");
   try {
     await fs.writeFile(file, built.buffer);
+    // md5 -> beatmap id sidecar: the importer remaps hashes of outdated local
+    // maps to the hash of the version actually installed in lazer.
+    await fs.writeFile(idsFile, JSON.stringify(built.md5ToId));
 
     // --yes: non-interactive; no --force: the importer still refuses while
     // osu! is running, and that message is surfaced to the UI below.
     const out = await new Promise<{ ok: boolean; output: string }>((resolve) => {
       execFile(
         exe,
-        [file, "--yes"],
+        [file, "--ids", idsFile, "--yes"],
         { timeout: 120_000, windowsHide: true },
         (err, stdout, stderr) =>
           resolve({ ok: err == null, output: `${stdout}\n${stderr}` })
@@ -79,7 +83,7 @@ lazerRouter.post("/lazer-import", async (req, res) => {
     });
 
     const m = out.output.match(
-      /RESULT created=(\d+) updated=(\d+) hashes=(\d+) invalid=(\d+)/
+      /RESULT created=(\d+) updated=(\d+) hashes=(\d+) invalid=(\d+)(?: remapped=(\d+) notinstalled=(\d+))?/
     );
     if (!out.ok || !m) {
       const tail = out.output
@@ -100,6 +104,8 @@ lazerRouter.post("/lazer-import", async (req, res) => {
       updated: Number(m[2]),
       hashes: Number(m[3]),
       invalid: Number(m[4]),
+      remapped: m[5] != null ? Number(m[5]) : 0,
+      notInstalled: m[6] != null ? Number(m[6]) : 0,
     });
   } finally {
     await fs.rm(dir, { recursive: true, force: true });

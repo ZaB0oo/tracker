@@ -219,6 +219,12 @@ export function FilterBar({
                     `Imported into osu!lazer:\n` +
                       `  ${r.created} collection(s) created, ${r.updated} updated\n` +
                       `  ${r.hashes} map(s) added (of ${r.mapCount} matching)` +
+                      (r.remapped
+                        ? `\n  ${r.remapped} remapped to your installed (outdated) versions`
+                        : "") +
+                      (r.notInstalled
+                        ? `\n  ${r.notInstalled} map(s) not installed in lazer (will appear once downloaded)`
+                        : "") +
                       (r.invalid ? `\n  ${r.invalid} invalid hash(es) skipped` : "")
                   )
                 )
