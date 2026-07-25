@@ -236,8 +236,11 @@ function GlobalList({ filter }: { filter: "" | "gained" | "lost" }) {
               </span>
             </span>
             <span className="fr-event-by">
-              {e.old_rank != null ? `#${fmtNum(e.old_rank)}` : "—"} →{" "}
-              {e.new_rank != null ? `#${fmtNum(e.new_rank)}` : "—"}
+              {e.old_rank == null
+                ? e.new_rank != null
+                  ? `#${fmtNum(e.new_rank)}`
+                  : "—"
+                : `#${fmtNum(e.old_rank)} → ${e.new_rank != null ? `#${fmtNum(e.new_rank)}` : "—"}`}
             </span>
           </div>
         );
