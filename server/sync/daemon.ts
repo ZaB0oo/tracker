@@ -549,10 +549,8 @@ export function startPolling(): void {
     // no credentials yet (first launch, UI settings not filled): stay quiet
     // instead of spamming an error every interval
     if (!config.hasCredentials) return;
-    // catalog import in progress: nothing else runs (the poll would race the
-    // enumeration on set imports and steal its budget; scores from the 24 h
-    // window are caught up right after)
-    if (catalogRunning || status.phase === "catalog") return;
+    // NB: polling keeps running during the catalog import on purpose — new
+    // scores must never be missed; it is high-priority and cheap.
     void pollRecentScores().catch((e) =>
       logError(e, "poll of recent scores (will retry on the next tick)")
     );
