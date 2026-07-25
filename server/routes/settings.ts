@@ -38,6 +38,14 @@ settingsRouter.get("/export-db", (_req, res) => {
   });
 });
 
+function safe<T>(get: () => T, fallback: T): T {
+  try {
+    return get();
+  } catch {
+    return fallback;
+  }
+}
+
 function getPollSeconds(): number {
   const v = Number(getState("poll_interval_seconds"));
   return Number.isFinite(v) && v >= 10 ? v : config.pollIntervalSeconds;
@@ -51,10 +59,12 @@ settingsRouter.get("/settings", (_req, res) =>
     globalRecheckHours: getGlobalRecheckHours(),
     display: getDisplayPrefs(),
     discord: getDiscordSettings(),
+    // safe accessors: on a first launch without .env the getters throw —
+    // the settings UI is precisely where the values get filled in
     oauth: {
-      clientId: config.osuClientId,
-      userId: config.osuUserId,
-      secretSet: Boolean(config.osuClientSecret),
+      clientId: safe(() => config.osuClientId, ""),
+      userId: safe(() => config.osuUserId, 0),
+      secretSet: safe(() => Boolean(config.osuClientSecret), false),
     },
     info: { port: config.port },
   })

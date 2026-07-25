@@ -44,13 +44,25 @@ applyOAuthOverrides({
 
 const server = app.listen(config.port, () => {
   console.log(`[server] http://localhost:${config.port}`);
-  console.log(`[server] user osu!: ${config.osuUserId}, rate limit: ${config.apiRpm} req/min`);
+  if (config.hasCredentials) {
+    console.log(
+      `[server] user osu!: ${config.osuUserId}, rate limit: ${config.apiRpm} req/min`
+    );
+    console.log(
+      `[sync] polling every ${config.pollIntervalSeconds}s. ` +
+        `Start the initial sync from the UI or: curl -X POST http://localhost:${config.port}/api/sync/start`
+    );
+  } else {
+    // First launch without .env: the server must still boot so the UI can be
+    // used to enter the credentials (Settings menu). Sync stays dormant.
+    console.log(
+      `[server] no osu! credentials yet — open http://localhost:${config.port} ` +
+        `and fill them in the Settings menu (or copy .env.example to .env). ` +
+        `Syncing starts as soon as they are set.`
+    );
+  }
   startPolling();
   startCatalogRefresh();
-  console.log(
-    `[sync] polling every ${config.pollIntervalSeconds}s. ` +
-      `Start the initial sync from the UI or: curl -X POST http://localhost:${config.port}/api/sync/start`
-  );
 });
 
 server.on("error", (e: NodeJS.ErrnoException) => {

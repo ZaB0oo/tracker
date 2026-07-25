@@ -41,6 +41,14 @@ export const config = {
   get osuUserId(): number {
     return userIdOverride ?? Number(required("OSU_USER_ID"));
   },
+  /** True once client id/secret + user id are available (.env or UI settings). */
+  get hasCredentials(): boolean {
+    try {
+      return Boolean(this.osuClientId && this.osuClientSecret && this.osuUserId);
+    } catch {
+      return false;
+    }
+  },
   port: Number(process.env.PORT ?? 3727),
   // Optional: absolute path to LazerCollectionImporter.exe. When set (and the
   // file exists), the UI offers direct import of collections into osu!lazer.

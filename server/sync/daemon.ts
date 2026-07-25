@@ -511,10 +511,14 @@ export function getCountryRecheckHours(): number {
 
 export function startPolling(): void {
   if (pollTimer) return;
-  const tick = () =>
+  const tick = () => {
+    // no credentials yet (first launch, UI settings not filled): stay quiet
+    // instead of spamming an error every interval
+    if (!config.hasCredentials) return;
     void pollRecentScores().catch((e) =>
       logError(e, "poll of recent scores (will retry on the next tick)")
     );
+  };
   tick();
   pollTimer = setInterval(tick, getPollMs());
 }
@@ -610,6 +614,7 @@ export function startCatalogRefresh(): void {
   if (deltaTimer) return;
   const MIN_INTERVAL_MS = 20 * 3600 * 1000; // at most ~1x/day, even if we restart often
   const tick = async () => {
+    if (!config.hasCredentials) return; // first launch: nothing to do yet
     try {
       await ensureCatalogComplete(); // catches up an incomplete catalog, whatever happens
       // DMCA/delisted sets are invisible to the search enumeration: once it is
