@@ -170,6 +170,8 @@ export interface SyncStatus {
   activity: { at: string; source: string; text: string }[];
   sweeps: {
     country: boolean;
+    countryChecked: number;
+    countryPending: number;
     global: boolean;
     globalTracking: boolean;
     globalChecked: number;

@@ -361,6 +361,11 @@ export function SyncBar() {
               {s?.sweeps?.country ? (
                 <button onClick={() => act("country-pause")} disabled={!connected}>
                   Pause {lbl} sweep
+                  {s?.sweeps
+                    ? ` (${fmtNum(s.sweeps.countryChecked)}/${fmtNum(
+                        s.sweeps.countryChecked + s.sweeps.countryPending
+                      )})`
+                    : ""}
                 </button>
               ) : (
                 <button

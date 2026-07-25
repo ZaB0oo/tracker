@@ -143,6 +143,8 @@ export function getDaemonStatus(): DaemonStatus & {
   busy: string[];
   sweeps: {
     country: boolean;
+    countryChecked: number;
+    countryPending: number;
     global: boolean;
     globalTracking: boolean;
     globalChecked: number;
@@ -180,20 +182,43 @@ export function getDaemonStatus(): DaemonStatus & {
   }
   if (globalRunning) busy.push("global tops sweep");
   if (deltaRunning) busy.push("new maps");
-  const globalChecked = (
-    db
-      .prepare(
-        "SELECT COUNT(*) c FROM beatmap_user WHERE played = 1 AND global_checked_at IS NOT NULL"
-      )
-      .get() as { c: number }
-  ).c;
-  const globalPending = (
-    db
-      .prepare(
-        "SELECT COUNT(*) c FROM beatmap_user WHERE played = 1 AND global_checked_at IS NULL"
-      )
-      .get() as { c: number }
-  ).c;
+  // Same scope as the sweep queues (catalog maps only): a stray beatmap_user
+  // row outside ranked/approved/loved must not inflate the totals.
+  const sweepCount = (cond: string) =>
+    (
+      db
+        .prepare(
+          `SELECT COUNT(*) c FROM beatmap_user u
+           JOIN beatmaps b ON b.id = u.beatmap_id
+           WHERE u.played = 1 AND b.ruleset = 0 AND b.status IN (1, 2, 4)
+             AND ${cond}`
+        )
+        .get() as { c: number }
+    ).c;
+  // In steady state only the held tops cycle (periodic re-checks), so the
+  // button progress uses that scope: country #1s / global top-100s. When the
+  // pending queue clearly exceeds it (initial sweep, "re-check all"), the
+  // full played-maps scope is shown instead. Small overshoots (fresh-score
+  // invalidations) don't flip the display.
+  const BIG_SWEEP = 100;
+  const progress = (checkedAtCol: string, scope: string) => {
+    const pendingAll = sweepCount(`u.${checkedAtCol} IS NULL`);
+    const pendingScoped = sweepCount(`u.${checkedAtCol} IS NULL AND ${scope}`);
+    if (pendingAll - pendingScoped > BIG_SWEEP)
+      return {
+        checked: sweepCount(`u.${checkedAtCol} IS NOT NULL`),
+        pending: pendingAll,
+      };
+    return {
+      checked: sweepCount(`u.${checkedAtCol} IS NOT NULL AND ${scope}`),
+      pending: pendingScoped,
+    };
+  };
+  const country = progress("country_checked_at", "u.country_first = 1");
+  const global = progress(
+    "global_checked_at",
+    "u.global_rank IS NOT NULL AND u.global_rank <= 100"
+  );
   return {
     ...status,
     busy,
@@ -201,8 +226,10 @@ export function getDaemonStatus(): DaemonStatus & {
       country: countryRunning,
       global: globalRunning,
       globalTracking: isGlobalTrackingEnabled(),
-      globalChecked,
-      globalPending,
+      globalChecked: global.checked,
+      globalPending: global.pending,
+      countryChecked: country.checked,
+      countryPending: country.pending,
     },
   };
 }
