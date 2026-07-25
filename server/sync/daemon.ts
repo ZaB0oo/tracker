@@ -559,6 +559,8 @@ export async function ensureCatalogComplete(force = false): Promise<number> {
   const before = count();
   if (before === 0) return 0;
   if (!force && before >= MIN_EXPECTED_STD_DIFFS) return 0;
+  // the pipeline (or a previous call) is already importing: don't run twice
+  if (catalogRunning || status.phase === "catalog") return 0;
 
   catalogRunning = true;
   try {
@@ -1078,11 +1080,23 @@ export async function runPipeline(opts?: { skipCatalog?: boolean }) {
 
     if (!opts?.skipCatalog && (!hasCatalog || !getState("catalog_imported_at"))) {
       status.phase = "catalog";
-      status.message = "Importing beatmap catalog from the osu! API...";
-      await importCatalogFromApi((m) => {
-        status.message = m;
-        logActivity("catalog", m);
-      });
+      // Mutual exclusion with the background completion (periodic tick): two
+      // concurrent enumerations would duplicate the work and burn API budget.
+      while (catalogRunning) {
+        status.message =
+          "Catalog import already running in the background — waiting for it...";
+        await new Promise((r) => setTimeout(r, 5000));
+      }
+      catalogRunning = true;
+      try {
+        status.message = "Importing beatmap catalog from the osu! API...";
+        await importCatalogFromApi((m) => {
+          status.message = m;
+          logActivity("catalog", m);
+        });
+      } finally {
+        catalogRunning = false;
+      }
     }
 
     status.phase = "enrich";
