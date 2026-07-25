@@ -95,7 +95,7 @@ Positions are exact whatever their value (#4523 included); only the periodic re-
 
 ## Discord notifications
 
-Settings menu → Advanced settings: paste a channel **webhook URL** and every new best (first clears and improvements, batched per poll) is posted as a rich embed — star rating with your mods, rate-adjusted BPM/length/CS/AR/OD/HP, hit counts, pp, mapset cover, your global rank when top 100 and country #1 at submit time with the sniped player's name. A "Send a test message" button validates the setup. The URL lives in the local DB only; sending is fire-and-forget and never blocks the sync.
+Settings menu: paste a channel **webhook URL** and every new best (first clears and improvements, batched per poll) is posted as a rich embed — star rating with your mods, rate-adjusted BPM/length/CS/AR/OD/HP, hit counts, pp, mapset cover, your global rank when top 100 and country #1 at submit time with the sniped player's name. A "Send a test message" button validates the setup. The URL lives in the local DB only; sending is fire-and-forget and never blocks the sync.
 
 ## Rate limiting (osu!api terms of use)
 
@@ -126,7 +126,7 @@ D → SSH, with **silvers** (SH/SSH = HD/FL) counted separately. The API returns
   - **Classic**: official lazer formula `classic = (n_objects² × 32.57 + 100000) × standardised / 1,000,000` (n_objects = circles + sliders + spinners) → theoretical max per map = `n_objects² × 32.57 + 100000`. Missing = skill-curve prediction minus your best, floored at 0.
   - **Standardised**: same, in standardised units. Spinner bonus ignored (< 0.1%).
   - Unplayed map = full prediction missing. The displayed % is relative to the map's prediction.
-- **Witherscore** (optional, Advanced settings): implements the community proposal [ppy/osu#38224](https://github.com/ppy/osu/discussions/38224) as an alternative ranked-score display.
+- **Witherscore** (optional, settings): implements the community proposal [ppy/osu#38224](https://github.com/ppy/osu/discussions/38224) as an alternative ranked-score display.
 
 ## Project structure
 

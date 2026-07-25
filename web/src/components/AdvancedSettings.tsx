@@ -1,31 +1,88 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchSettings, postDiscordTest, postSettings } from "../api";
+import { firstPlaceLabel, useCountryCode } from "../country";
+
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="set-field" title={hint}>
+      <span>{label}</span>
+      {children}
+    </label>
+  );
+}
 
 /**
- * Advanced settings modal: display options only. Completion, FC counts and
- * everything else are driven by the built-in "any full combo" rule and by the
- * custom metrics you create in the Metrics tab.
+ * Settings modal: sync intervals, osu! OAuth credentials, Discord
+ * notifications and display options — one Save button for everything.
  */
-export function AdvancedSettings({ onClose }: { onClose: () => void }) {
+export function AdvancedSettings({
+  onClose,
+  notify,
+}: {
+  onClose: () => void;
+  notify?: (msg: string) => void;
+}) {
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ["settings"], queryFn: fetchSettings });
-  const [wither, setWither] = useState<boolean | null>(null);
-  const [webhookUrl, setWebhookUrl] = useState<string | null>(null); // null = unchanged
+  const country = useCountryCode();
+  const lbl = firstPlaceLabel(country);
+
+  // null = untouched (keep current value)
+  const [poll, setPoll] = useState<string | null>(null);
+  const [countryH, setCountryH] = useState<string | null>(null);
+  const [globalH, setGlobalH] = useState<string | null>(null);
+  const [clientId, setClientId] = useState<string | null>(null);
+  const [secret, setSecret] = useState("");
+  const [userId, setUserId] = useState<string | null>(null);
+  const [webhookUrl, setWebhookUrl] = useState<string | null>(null);
   const [dBests, setDBests] = useState<boolean | null>(null);
+  const [wither, setWither] = useState<boolean | null>(null);
   const [testMsg, setTestMsg] = useState<string | null>(null);
 
   const save = useMutation({
-    mutationFn: postSettings,
-    onSuccess: () => {
+    mutationFn: async () => {
+      const payload: Parameters<typeof postSettings>[0] = {
+        display: { wither: wither ?? data!.display.wither },
+        discord: {
+          ...(webhookUrl != null && webhookUrl !== "" ? { webhookUrl } : {}),
+          bests: dBests ?? data!.discord.bests,
+        },
+      };
+      if (poll != null) payload.pollIntervalSeconds = Number(poll);
+      if (countryH != null) payload.countryRecheckHours = Number(countryH);
+      if (globalH != null) payload.globalRecheckHours = Number(globalH);
+      if (clientId != null && clientId !== "") payload.clientId = clientId;
+      if (secret !== "") payload.clientSecret = secret;
+      if (userId != null && userId !== "") payload.userId = userId;
+      await postSettings(payload);
+      return Boolean(payload.clientId || payload.clientSecret || payload.userId);
+    },
+    onSuccess: (oauthTouched) => {
       void qc.invalidateQueries();
+      notify?.(
+        oauthTouched
+          ? "Settings saved — OAuth changed: reconnect your osu! account if needed"
+          : "Settings saved (applied immediately)"
+      );
       onClose();
     },
+    onError: (e: Error) => setTestMsg(e.message),
   });
+
   const test = useMutation({
     mutationFn: async () => {
       // save the URL first so the test uses what's in the input
-      if (webhookUrl != null) await postSettings({ discord: { webhookUrl } });
+      if (webhookUrl != null && webhookUrl !== "")
+        await postSettings({ discord: { webhookUrl } });
       await postDiscordTest();
     },
     onSuccess: () => setTestMsg("Test message sent ✓"),
@@ -33,25 +90,133 @@ export function AdvancedSettings({ onClose }: { onClose: () => void }) {
   });
 
   if (!data) return null;
-  const curWither = wither ?? data.display.wither;
-  const curBests = dBests ?? data.discord.bests;
+  const port = data.info?.port ?? 3727;
 
   return (
     <>
       <div className="menu-overlay modal-overlay" onClick={onClose} />
-      <div className="adv-modal">
+      <div className="adv-modal settings-modal">
         <div className="adv-head">
-          <h2>Advanced settings</h2>
-          <button className="mm-close" onClick={onClose}>
-            ✕
+          <h2>Settings</h2>
+          <button className="mm-close" onClick={onClose}>✕</button>
+        </div>
+
+        <h3>Synchronization</h3>
+        <div className="set-grid">
+          <Field
+            label="Score polling (s)"
+            hint="How often your recent scores are fetched (10 to 3600 s)"
+          >
+            <input
+              type="number" min={10} max={3600} step={10}
+              value={poll ?? String(data.pollIntervalSeconds)}
+              onChange={(e) => setPoll(e.target.value)}
+            />
+          </Field>
+          <Field
+            label={`Re-check ${lbl} (h)`}
+            hint="Age at which a held country #1 is re-checked (snipe detection). Runs on the next background tick (every 6 h max)."
+          >
+            <input
+              type="number" min={1} max={720} step={1}
+              value={countryH ?? String(data.countryRecheckHours)}
+              onChange={(e) => setCountryH(e.target.value)}
+            />
+          </Field>
+          <Field
+            label="Re-check global tops (h)"
+            hint="Age at which a held global top-100 position is re-checked. Runs on the next background tick, only while global tops tracking is enabled."
+          >
+            <input
+              type="number" min={1} max={720} step={1}
+              value={globalH ?? String(data.globalRecheckHours)}
+              onChange={(e) => setGlobalH(e.target.value)}
+            />
+          </Field>
+        </div>
+
+        <h3>osu! API (OAuth)</h3>
+        <p className="set-note">
+          Create an OAuth application in{" "}
+          <a href="https://osu.ppy.sh/home/account/edit#oauth" target="_blank" rel="noreferrer">
+            your osu! account settings
+          </a>{" "}
+          (OAuth section → New OAuth application) with this callback URL:
+          <code>http://localhost:{port}/api/auth/callback</code>
+          then paste its Client ID and secret below, plus your{" "}
+          <a href="https://osu.ppy.sh/home/account/edit" target="_blank" rel="noreferrer">
+            user id
+          </a>{" "}
+          (the number in your profile URL). Stored in the local database only.
+        </p>
+        <div className="set-grid">
+          <Field label="Client ID">
+            <input
+              type="text"
+              value={clientId ?? String(data.oauth.clientId ?? "")}
+              onChange={(e) => setClientId(e.target.value)}
+            />
+          </Field>
+          <Field label="Client secret" hint="Leave blank to keep it unchanged">
+            <input
+              type="password"
+              placeholder={data.oauth.secretSet ? "••••••••  (unchanged)" : "required"}
+              value={secret}
+              onChange={(e) => setSecret(e.target.value)}
+              autoComplete="off"
+            />
+          </Field>
+          <Field
+            label="osu! user id"
+            hint="⚠ Changing the user id on an existing DB mixes up scores: start from a blank DB in that case"
+          >
+            <input
+              type="text"
+              value={userId ?? String(data.oauth.userId || "")}
+              onChange={(e) => setUserId(e.target.value)}
+            />
+          </Field>
+        </div>
+
+        <h3>Discord notifications</h3>
+        <div className="set-grid set-grid-wide">
+          <Field
+            label="Webhook URL"
+            hint="Channel settings → Integrations → Webhooks. Stored in the local database only."
+          >
+            <input
+              type="password"
+              placeholder={
+                data.discord.webhookSet
+                  ? "webhook configured ✓ (paste to replace, empty to keep)"
+                  : "https://discord.com/api/webhooks/…"
+              }
+              value={webhookUrl ?? ""}
+              onChange={(e) => setWebhookUrl(e.target.value)}
+              autoComplete="off"
+            />
+          </Field>
+        </div>
+        <label className="adv-toggle">
+          <input
+            type="checkbox"
+            checked={dBests ?? data.discord.bests}
+            onChange={(e) => setDBests(e.target.checked)}
+          />
+          <span>Notify new bests (first clears and improvements, batched per poll)</span>
+        </label>
+        <div className="adv-toggle">
+          <button disabled={test.isPending} onClick={() => test.mutate()}>
+            {test.isPending ? "Sending…" : "Send a test message"}
           </button>
+          {testMsg && <span> {testMsg}</span>}
         </div>
 
         <h3>Display</h3>
         <label className="adv-toggle">
           <input
             type="checkbox"
-            checked={curWither}
+            checked={wither ?? data.display.wither}
             onChange={(e) => setWither(e.target.checked)}
           />
           <span>
@@ -66,53 +231,13 @@ export function AdvancedSettings({ onClose }: { onClose: () => void }) {
           </span>
         </label>
 
-        <h3>Discord notifications</h3>
-        <label className="adv-toggle">
-          <input
-            type="password"
-            className="adv-input"
-            placeholder={
-              data.discord.webhookSet
-                ? "webhook configured ✓ (paste to replace, empty to keep)"
-                : "https://discord.com/api/webhooks/…"
-            }
-            value={webhookUrl ?? ""}
-            onChange={(e) => setWebhookUrl(e.target.value)}
-            autoComplete="off"
-          />
-        </label>
-        <label className="adv-toggle">
-          <input
-            type="checkbox"
-            checked={curBests}
-            onChange={(e) => setDBests(e.target.checked)}
-          />
-          <span>New bests (first clears and improvements, batched per poll)</span>
-        </label>
-        <div className="adv-toggle">
-          <button disabled={test.isPending} onClick={() => test.mutate()}>
-            {test.isPending ? "Sending…" : "Send a test message"}
-          </button>
-          {testMsg && <span> {testMsg}</span>}
-        </div>
-
         <div className="adv-actions">
           <button
             className="primary"
             disabled={save.isPending}
-            onClick={() =>
-              save.mutate({
-                display: { wither: curWither },
-                discord: {
-                  ...(webhookUrl != null && webhookUrl !== ""
-                    ? { webhookUrl }
-                    : {}),
-                  bests: curBests,
-                },
-              })
-            }
+            onClick={() => save.mutate()}
           >
-            {save.isPending ? "Saving…" : "Save"}
+            {save.isPending ? "Saving…" : "Save settings"}
           </button>
           <button onClick={onClose}>Cancel</button>
         </div>

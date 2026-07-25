@@ -2,11 +2,9 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchAuthStatus,
-  fetchSettings,
   fetchSyncStatus,
   postClearErrors,
   postLogout,
-  postSettings,
   postSync,
 } from "../api";
 import { AdvancedSettings } from "./AdvancedSettings";
@@ -85,16 +83,6 @@ export function SyncBar() {
     queryFn: fetchAuthStatus,
     refetchInterval: 60_000,
   });
-  const { data: settings } = useQuery({
-    queryKey: ["settings"],
-    queryFn: fetchSettings,
-  });
-  const [pollInput, setPollInput] = useState<string | null>(null);
-  const [countryRecheckInput, setCountryRecheckInput] = useState<string | null>(null);
-  const [globalRecheckInput, setGlobalRecheckInput] = useState<string | null>(null);
-  const [clientIdInput, setClientIdInput] = useState<string | null>(null);
-  const [secretInput, setSecretInput] = useState<string | null>(null);
-  const [userIdInput, setUserIdInput] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [overlayOpen, setOverlayOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -120,48 +108,6 @@ export function SyncBar() {
       toast(`Failed: ${String(e)}`);
     }
     void qc.invalidateQueries({ queryKey: ["sync"] });
-  };
-
-  const saveSettings = async () => {
-    const payload: {
-      pollIntervalSeconds?: number;
-      countryRecheckHours?: number;
-      globalRecheckHours?: number;
-      clientId?: string;
-      clientSecret?: string;
-      userId?: string;
-    } = {};
-    if (pollInput != null) payload.pollIntervalSeconds = Number(pollInput);
-    if (countryRecheckInput != null) payload.countryRecheckHours = Number(countryRecheckInput);
-    if (globalRecheckInput != null) payload.globalRecheckHours = Number(globalRecheckInput);
-    if (clientIdInput != null && clientIdInput !== "")
-      payload.clientId = clientIdInput;
-    if (secretInput != null && secretInput !== "")
-      payload.clientSecret = secretInput;
-    if (userIdInput != null && userIdInput !== "") payload.userId = userIdInput;
-    if (Object.keys(payload).length === 0) return;
-    const oauthTouched =
-      payload.clientId != null ||
-      payload.clientSecret != null ||
-      payload.userId != null;
-    try {
-      await postSettings(payload);
-      setPollInput(null);
-      setCountryRecheckInput(null);
-      setGlobalRecheckInput(null);
-      setClientIdInput(null);
-      setSecretInput(null);
-      setUserIdInput(null);
-      setMenuOpen(false);
-      toast(
-        oauthTouched
-          ? "Settings saved — OAuth changed: reconnect your osu! account if needed"
-          : "Settings saved (applied immediately)"
-      );
-      void qc.invalidateQueries();
-    } catch (e) {
-      toast(`Setting rejected: ${String(e)}`);
-    }
   };
 
   // message freshness: hidden if stale and nothing is running
@@ -346,6 +292,15 @@ export function SyncBar() {
               >
                 Share card (PNG)
               </button>
+              <button
+                onClick={() => {
+                  setMenuOpen(false);
+                  setAdvancedOpen(true);
+                }}
+                title="Polling & re-check intervals, osu! OAuth credentials, Discord notifications, display options"
+              >
+                ⚙ Settings…
+              </button>
 
               <details className="menu-group" open>
               <summary className="menu-section">Synchronization</summary>
@@ -401,128 +356,6 @@ export function SyncBar() {
                   Start/resume global tops sweep
                 </button>
               )}
-
-              </details>
-              <details className="menu-group">
-              <summary className="menu-section">Settings</summary>
-              <div
-                className="menu-setting"
-                title="How often your new scores are fetched (10 to 3600 s)"
-              >
-                <span>Score polling (s)</span>
-                <input
-                  type="number"
-                  min={10}
-                  max={3600}
-                  step={10}
-                  value={pollInput ?? String(settings?.pollIntervalSeconds ?? "")}
-                  onChange={(e) => setPollInput(e.target.value)}
-                />
-              </div>
-              <div
-                className="menu-setting"
-                title="Age at which a held country #1 is re-checked (snipe check). It runs on the next background tick (every 6 h max)."
-              >
-                <span>Re-check {lbl} (h)</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={720}
-                  step={1}
-                  value={countryRecheckInput ?? String(settings?.countryRecheckHours ?? "")}
-                  onChange={(e) => setCountryRecheckInput(e.target.value)}
-                />
-              </div>
-              <div
-                className="menu-setting"
-                title="Age at which a held global top-100 position is re-checked. It runs on the next background tick (every 6 h max), only while global tops tracking is enabled."
-              >
-                <span>Re-check global tops (h)</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={720}
-                  step={1}
-                  value={globalRecheckInput ?? String(settings?.globalRecheckHours ?? "")}
-                  onChange={(e) => setGlobalRecheckInput(e.target.value)}
-                />
-              </div>
-              <button
-                onClick={() => {
-                  setMenuOpen(false);
-                  setAdvancedOpen(true);
-                }}
-                title="Display options"
-              >
-                Advanced settings…
-              </button>
-              <button className="primary" onClick={saveSettings}>
-                Save settings
-              </button>
-
-              </details>
-              <details className="menu-group">
-              <summary className="menu-section">OAuth osu!</summary>
-              <div className="menu-note">
-                Create an OAuth application on{" "}
-                <a
-                  href="https://osu.ppy.sh/home/account/edit#oauth"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  your osu! account settings
-                </a>{" "}
-                (section OAuth → New OAuth application) with this callback URL:
-                <code>
-                  http://localhost:{settings?.info?.port ?? 3727}/api/auth/callback
-                </code>
-                then paste its Client ID / secret below, plus your{" "}
-                <a
-                  href="https://osu.ppy.sh/home/account/edit"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  user id
-                </a>{" "}
-                (the number in your profile URL).
-              </div>
-              <div className="menu-setting" title="Client ID of your osu! application">
-                <span>Client ID</span>
-                <input
-                  type="text"
-                  value={clientIdInput ?? String(settings?.oauth?.clientId ?? "")}
-                  onChange={(e) => setClientIdInput(e.target.value)}
-                />
-              </div>
-              <div
-                className="menu-setting"
-                title="Client secret — leave blank to keep it unchanged"
-              >
-                <span>Client secret</span>
-                <input
-                  type="password"
-                  placeholder={settings?.oauth?.secretSet ? "••••• (unchanged)" : "required"}
-                  value={secretInput ?? ""}
-                  onChange={(e) => setSecretInput(e.target.value)}
-                />
-              </div>
-              <div
-                className="menu-setting"
-                title="⚠ Changing the user id on an existing DB mixes up scores: start from a blank DB in that case"
-              >
-                <span>osu! User ID</span>
-                <input
-                  type="text"
-                  value={userIdInput ?? String(settings?.oauth?.userId ?? "")}
-                  onChange={(e) => setUserIdInput(e.target.value)}
-                />
-              </div>
-              <button className="primary" onClick={saveSettings}>
-                Save settings
-              </button>
-              <div className="menu-setting">
-                <span className="menu-info">port {settings?.info?.port ?? "…"}</span>
-              </div>
 
               </details>
               <details className="menu-group">
@@ -600,7 +433,7 @@ export function SyncBar() {
         ))}
       </div>
       {advancedOpen && (
-        <AdvancedSettings onClose={() => setAdvancedOpen(false)} />
+        <AdvancedSettings onClose={() => setAdvancedOpen(false)} notify={toast} />
       )}
       {overlayOpen && <OverlayConfig onClose={() => setOverlayOpen(false)} />}
       {shareOpen && <ShareCard onClose={() => setShareOpen(false)} />}
