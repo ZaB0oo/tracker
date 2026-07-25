@@ -511,7 +511,7 @@ export async function pollRecentScores(): Promise<number> {
       }
       try {
         e.globalRank = await getUserBeatmapPosition(e.beatmapId, config.osuUserId, "high");
-        applyGlobalCheck(e.beatmapId, e.globalRank);
+        applyGlobalCheck(e.beatmapId, e.globalRank, true);
         // the leaderboard may not include the fresh score yet: confirm later
         scheduleGlobalConfirm(e.beatmapId);
       } catch (err) {
@@ -936,23 +936,35 @@ function globalTier(rank: number | null): number | null {
 /**
  * Stores a global position check and logs a history event when the map
  * changes TIER (top 1/8/15/25/50/100) — rank moves inside a tier are not
- * events. First-ever checks (initial sweep) set the state silently.
+ * events. First-ever checks stay silent (initial sweep) unless
+ * `recordInitial` is set (immediate check after a NEW score: entering a tier
+ * on a never-checked map is a real gain, same rule as the country checks).
  */
-export function applyGlobalCheck(beatmapId: number, pos: number | null): void {
+export function applyGlobalCheck(
+  beatmapId: number,
+  pos: number | null,
+  recordInitial = false
+): void {
   const db = getDb();
   const prev = db
     .prepare(
-      "SELECT global_rank, global_checked_at FROM beatmap_user WHERE beatmap_id = ?"
+      "SELECT global_rank, global_checked_at, global_seen FROM beatmap_user WHERE beatmap_id = ?"
     )
     .get(beatmapId) as
-    | { global_rank: number | null; global_checked_at: string | null }
+    | {
+        global_rank: number | null;
+        global_checked_at: string | null;
+        global_seen: number;
+      }
     | undefined;
   const prevRank = prev?.global_rank ?? null;
-  // "known" = a previous check happened (a kept rank survives re-queues)
-  const wasKnown = prevRank != null || prev?.global_checked_at != null;
+  // "known" = a previous check happened — global_seen survives the re-queues
+  // that reset global_checked_at, so re-check transitions are always logged
+  const wasKnown =
+    prevRank != null || prev?.global_checked_at != null || prev?.global_seen === 1;
   const oldTier = globalTier(prevRank);
   const newTier = globalTier(pos);
-  if (wasKnown && oldTier !== newTier) {
+  if ((wasKnown || recordInitial) && oldTier !== newTier) {
     db.prepare(
       "INSERT INTO global_events (beatmap_id, at, old_rank, new_rank) VALUES (?, datetime('now'), ?, ?)"
     ).run(beatmapId, prevRank, pos);
@@ -965,7 +977,7 @@ export function applyGlobalCheck(beatmapId: number, pos: number | null): void {
     );
   }
   db.prepare(
-    "UPDATE beatmap_user SET global_rank = ?, global_checked_at = datetime('now') WHERE beatmap_id = ?"
+    "UPDATE beatmap_user SET global_rank = ?, global_checked_at = datetime('now'), global_seen = 1 WHERE beatmap_id = ?"
   ).run(pos, beatmapId);
 }
 
@@ -981,7 +993,7 @@ function scheduleGlobalConfirm(beatmapId: number): void {
   const t = setTimeout(() => {
     if (!config.hasCredentials) return;
     getUserBeatmapPosition(beatmapId, config.osuUserId, "high")
-      .then((pos) => applyGlobalCheck(beatmapId, pos))
+      .then((pos) => applyGlobalCheck(beatmapId, pos, true))
       .catch((e) => logError(e, `deferred global check map ${beatmapId}`));
   }, GLOBAL_CONFIRM_DELAY_MS);
   t.unref(); // never keeps the process alive

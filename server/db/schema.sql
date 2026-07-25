@@ -80,7 +80,10 @@ CREATE TABLE IF NOT EXISTS beatmap_user (
   missing_lazer INTEGER,
   missing_classic INTEGER,
   missing_wither INTEGER,
-  best_lazer_score_id INTEGER REFERENCES scores(id)
+  best_lazer_score_id INTEGER REFERENCES scores(id),
+  global_rank INTEGER,                -- my global leaderboard position
+  global_checked_at TEXT,             -- last position check (NULL = queued)
+  global_seen INTEGER NOT NULL DEFAULT 0 -- ever position-checked (survives re-queues)
 );
 CREATE INDEX IF NOT EXISTS idx_bu_played ON beatmap_user(played);
 CREATE INDEX IF NOT EXISTS idx_bu_fetched ON beatmap_user(fetched_at);

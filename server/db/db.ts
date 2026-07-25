@@ -109,6 +109,17 @@ function migrate(d: DatabaseSync): void {
   const scCols = d.prepare("PRAGMA table_info(scores)").all() as { name: string }[];
   if (scCols.some((c) => c.name === "legacy_total_score"))
     d.exec("ALTER TABLE scores DROP COLUMN legacy_total_score");
+  // "ever checked" flag: distinguishes a re-queued map (global_checked_at
+  // reset to NULL) from a never-checked one, so tier transitions found on
+  // re-checks are logged while the initial sweep stays silent.
+  if (!buCols2.some((c) => c.name === "global_seen"))
+    d.exec(
+      "ALTER TABLE beatmap_user ADD COLUMN global_seen INTEGER NOT NULL DEFAULT 0"
+    );
+  // backfill the flag for rows checked before the column existed
+  d.exec(
+    "UPDATE beatmap_user SET global_seen = 1 WHERE global_seen = 0 AND (global_checked_at IS NOT NULL OR global_rank IS NOT NULL)"
+  );
   // best_legacy_score_id sits in a FOREIGN KEY clause: SQLite cannot DROP it
   // directly, the table is rebuilt without it (one-time, fast).
   if (buCols2.some((c) => c.name === "best_legacy_score_id")) {
@@ -125,13 +136,14 @@ function migrate(d: DatabaseSync): void {
         missing_wither INTEGER,
         best_lazer_score_id INTEGER REFERENCES scores(id),
         global_rank INTEGER,
-        global_checked_at TEXT
+        global_checked_at TEXT,
+        global_seen INTEGER NOT NULL DEFAULT 0
       );
       INSERT INTO beatmap_user_new
         SELECT beatmap_id, fetched_at, played, any_fc, country_first,
                country_checked_at, missing_lazer, missing_classic,
                missing_wither, best_lazer_score_id, global_rank,
-               global_checked_at
+               global_checked_at, global_seen
         FROM beatmap_user;
       DROP TABLE beatmap_user;
       ALTER TABLE beatmap_user_new RENAME TO beatmap_user;
