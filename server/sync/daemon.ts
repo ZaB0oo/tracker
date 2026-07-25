@@ -138,6 +138,7 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
 let deltaTimer: ReturnType<typeof setInterval> | null = null;
 let enrichCatchupRunning = false;
 let deltaRunning = false;
+let catalogRunning = false;
 
 export function getDaemonStatus(): DaemonStatus & {
   busy: string[];
@@ -173,8 +174,9 @@ export function getDaemonStatus(): DaemonStatus & {
 
   // What is running RIGHT NOW (the old "phase" only covered the pipeline)
   const busy: string[] = [];
-  if (status.phase === "catalog") busy.push("catalog import");
-  if (status.phase === "enrich") busy.push("enrichment");
+  if (status.phase === "catalog" || catalogRunning) busy.push("catalog import");
+  if (status.phase === "enrich" || enrichCatchupRunning) busy.push("enrichment");
+  if (seedRunning) busy.push("known-sets import");
   if (status.backfill.running) busy.push("backfill");
   if (countryRunning) {
     const cc = getStoredCountryCode();
@@ -219,8 +221,13 @@ export function getDaemonStatus(): DaemonStatus & {
     "global_checked_at",
     "u.global_rank IS NOT NULL AND u.global_rank <= 100"
   );
+  // "error" only reflects a past pipeline failure: once the error list is
+  // cleared (UI button), stop displaying it forever.
+  const phase =
+    status.phase === "error" && status.errors.length === 0 ? "idle" : status.phase;
   return {
     ...status,
+    phase,
     busy,
     sweeps: {
       country: countryRunning,
@@ -553,6 +560,19 @@ export async function ensureCatalogComplete(force = false): Promise<number> {
   if (before === 0) return 0;
   if (!force && before >= MIN_EXPECTED_STD_DIFFS) return 0;
 
+  catalogRunning = true;
+  try {
+    return await ensureCatalogCompleteInner(force, before, count);
+  } finally {
+    catalogRunning = false;
+  }
+}
+
+async function ensureCatalogCompleteInner(
+  force: boolean,
+  before: number,
+  count: () => number
+): Promise<number> {
   status.message = `Incomplete catalog (${before} diffs, ~150k expected) — completing via the API...`;
   console.log(`[sync] ${status.message}`);
   // without force: resumes unfinished yearly slices (resumable);
