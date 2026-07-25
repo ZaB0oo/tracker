@@ -113,3 +113,15 @@ CREATE TABLE IF NOT EXISTS country_events (
 );
 CREATE INDEX IF NOT EXISTS idx_country_events_at ON country_events(at);
 
+-- global tops history: one row per TIER transition (top 1/8/15/25/50/100)
+-- detected by the position checks (immediate check on new bests + periodic
+-- re-checks). The initial sweep sets the state silently.
+CREATE TABLE IF NOT EXISTS global_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  beatmap_id INTEGER NOT NULL,
+  at TEXT NOT NULL,                   -- detection date (UTC)
+  old_rank INTEGER,                   -- NULL = was not on the leaderboard
+  new_rank INTEGER                    -- NULL = dropped off the leaderboard
+);
+CREATE INDEX IF NOT EXISTS idx_global_events_at ON global_events(at);
+

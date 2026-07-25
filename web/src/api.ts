@@ -332,6 +332,30 @@ export async function fetchCountryHistory(
   return res.json();
 }
 
+export interface GlobalEvent {
+  id: number;
+  at: string;
+  old_rank: number | null;
+  new_rank: number | null;
+  beatmap_id: number;
+  version: string;
+  star_rating: number | null;
+  artist: string;
+  title: string;
+}
+
+export async function fetchGlobalHistory(
+  offset: number,
+  limit: number,
+  event?: "gained" | "lost"
+): Promise<{ rows: GlobalEvent[]; total: number }> {
+  const p = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+  if (event) p.set("event", event);
+  const res = await fetch(`/api/global-history?${p.toString()}`);
+  if (!res.ok) throw new Error(`global-history: HTTP ${res.status}`);
+  return res.json();
+}
+
 // ---------- Custom metrics ----------
 
 export interface Range {

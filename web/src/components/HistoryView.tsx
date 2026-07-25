@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { fetchClears, fetchCountryHistory } from "../api";
+import { fetchClears, fetchCountryHistory, fetchGlobalHistory } from "../api";
 import { firstPlaceLabel, useCountryCode } from "../country";
 import { displayGrade, fmtDateTime, fmtNum } from "../format";
 import { GradeBadge } from "./GradeBadge";
@@ -169,8 +169,95 @@ function CountryList({ filter }: { filter: "" | "gained" | "lost" }) {
   );
 }
 
+/** Global tops tier transitions (top 1/8/15/25/50/100). */
+function GlobalList({ filter }: { filter: "" | "gained" | "lost" }) {
+  const query = useInfiniteQuery({
+    queryKey: ["global-history", filter],
+    queryFn: ({ pageParam }) =>
+      fetchGlobalHistory(pageParam, PAGE, filter || undefined),
+    initialPageParam: 0,
+    getNextPageParam: (last, all) => {
+      const loaded = all.reduce((n, p) => n + p.rows.length, 0);
+      return loaded < last.total ? loaded : undefined;
+    },
+    refetchInterval: 60_000,
+  });
+  const rows = query.data?.pages.flatMap((p) => p.rows) ?? [];
+
+  if (query.isLoading) return <p className="goal-note">Loading...</p>;
+  if (rows.length === 0)
+    return (
+      <p className="goal-note">
+        No event yet. Tier changes (top 1/8/15/25/50/100) are logged as position
+        checks happen (new best → immediate check, held top-100s → periodic
+        re-check). The initial sweep sets the state without filling the history.
+      </p>
+    );
+
+  const tierOf = (r: number | null) =>
+    r == null ? null : [1, 8, 15, 25, 50, 100].find((t) => r <= t) ?? null;
+
+  return (
+    <>
+      <div className="hist-header">
+        <span className="fr-event-date">Date</span>
+        <span className="fr-event-badge">Event</span>
+        <span className="fr-event-map">Map</span>
+        <span className="fr-event-by">Rank</span>
+      </div>
+      {rows.map((e, i) => {
+        const gained =
+          e.new_rank != null && (e.old_rank == null || e.new_rank < e.old_rank);
+        const tier = tierOf(gained ? e.new_rank : e.old_rank);
+        return (
+          <div
+            key={e.id}
+            className={`fr-event fr-event-${gained ? "gained" : "lost"}${i % 2 ? " row-alt" : ""}`}
+            onDoubleClick={() =>
+              window.open(`https://osu.ppy.sh/b/${e.beatmap_id}`, "_blank")
+            }
+            title="Double-click: open the map on osu.ppy.sh"
+          >
+            <span className="fr-event-date">{fmtDate(e.at)}</span>
+            <span className={`fr-event-badge ${gained ? "gained" : "lost"}`}>
+              {gained
+                ? tier === 1
+                  ? "#1"
+                  : `TOP ${tier}`
+                : tier != null
+                  ? `OUT TOP ${tier}`
+                  : "LOST"}
+            </span>
+            <span className="fr-event-map">
+              {e.artist} – {e.title}{" "}
+              <span className="fr-event-diff">[{e.version}]</span>{" "}
+              <span className="fr-event-sr">
+                {e.star_rating != null ? `${e.star_rating.toFixed(2)}★` : ""}
+              </span>
+            </span>
+            <span className="fr-event-by">
+              {e.old_rank != null ? `#${fmtNum(e.old_rank)}` : "—"} →{" "}
+              {e.new_rank != null ? `#${fmtNum(e.new_rank)}` : "—"}
+            </span>
+          </div>
+        );
+      })}
+      {query.hasNextPage && (
+        <button
+          style={{ marginTop: 10 }}
+          onClick={() => void query.fetchNextPage()}
+          disabled={query.isFetchingNextPage}
+        >
+          Load more
+        </button>
+      )}
+    </>
+  );
+}
+
 export function HistoryView() {
   const country = useCountryCode();
+  const [src, setSrc] = useState<"country" | "global">("country");
   const [frFilter, setFrFilter] = useState<"" | "gained" | "lost">("");
 
   return (
@@ -182,7 +269,20 @@ export function HistoryView() {
         </div>
         <div className="panel history-panel">
           <div className="hist-col-head">
-            <h3>{firstPlaceLabel(country)} history</h3>
+            <div className="seg">
+              <button
+                className={src === "country" ? "active" : ""}
+                onClick={() => setSrc("country")}
+              >
+                {firstPlaceLabel(country)}
+              </button>
+              <button
+                className={src === "global" ? "active" : ""}
+                onClick={() => setSrc("global")}
+              >
+                Global tops
+              </button>
+            </div>
             <div className="seg">
               <button className={frFilter === "" ? "active" : ""} onClick={() => setFrFilter("")}>
                 All
@@ -195,7 +295,11 @@ export function HistoryView() {
               </button>
             </div>
           </div>
-          <CountryList filter={frFilter} />
+          {src === "country" ? (
+            <CountryList filter={frFilter} />
+          ) : (
+            <GlobalList filter={frFilter} />
+          )}
         </div>
       </div>
     </div>

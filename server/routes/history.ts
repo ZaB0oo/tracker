@@ -102,3 +102,41 @@ historyRouter.get("/country-history", (req, res) => {
   ).c;
   res.json({ rows, total });
 });
+
+/**
+ * GET /api/global-history — global tops tier transitions (top 1/8/15/25/50/100).
+ * Params: event=gained|lost (optional), offset, limit.
+ * gained = entered a better tier (new rank smaller, or was outside before).
+ */
+historyRouter.get("/global-history", (req, res) => {
+  const db = getDb();
+  const q = req.query as Record<string, string | undefined>;
+  const GAINED = "(e.new_rank IS NOT NULL AND (e.old_rank IS NULL OR e.new_rank < e.old_rank))";
+  const where =
+    q.event === "gained"
+      ? `WHERE ${GAINED}`
+      : q.event === "lost"
+        ? `WHERE NOT ${GAINED}`
+        : "";
+  const limit = Math.min(Number(q.limit ?? 100), 500);
+  const offset = Math.max(Number(q.offset ?? 0), 0);
+
+  const rows = db
+    .prepare(
+      `SELECT e.id, e.at, e.old_rank, e.new_rank,
+        e.beatmap_id, b.version, b.star_rating, st.artist, st.title
+       FROM global_events e
+       JOIN beatmaps b ON b.id = e.beatmap_id
+       JOIN beatmapsets st ON st.id = b.beatmapset_id
+       ${where}
+       ORDER BY e.at DESC, e.id DESC
+       LIMIT ? OFFSET ?`
+    )
+    .all(limit, offset);
+  const total = (
+    db.prepare(`SELECT COUNT(*) c FROM global_events e ${where}`).get() as {
+      c: number;
+    }
+  ).c;
+  res.json({ rows, total });
+});

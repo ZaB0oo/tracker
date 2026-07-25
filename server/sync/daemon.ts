@@ -475,9 +475,6 @@ export async function pollRecentScores(): Promise<number> {
     // mods that change star rating (osu! DifficultyAdjustmentMods — HD counts
     // since the 2026 reading rework)
     const DIFF_MODS = new Set(["DT", "NC", "HT", "DC", "HR", "EZ", "FL", "HD", "TD"]);
-    const storeRank = db.prepare(
-      "UPDATE beatmap_user SET global_rank = ?, global_checked_at = datetime('now') WHERE beatmap_id = ?"
-    );
     for (const e of bestEvents) {
       if (discordOn) {
         const acronyms = parseModAcronyms(e.modsJson).filter((a) => a !== "CL");
@@ -486,7 +483,9 @@ export async function pollRecentScores(): Promise<number> {
       }
       try {
         e.globalRank = await getUserBeatmapPosition(e.beatmapId, config.osuUserId, "high");
-        storeRank.run(e.globalRank, e.beatmapId);
+        applyGlobalCheck(e.beatmapId, e.globalRank);
+        // the leaderboard may not include the fresh score yet: confirm later
+        scheduleGlobalConfirm(e.beatmapId);
       } catch (err) {
         // failed check: back into the sweep queue, it will retry
         logError(err, `position check map ${e.beatmapId}`);
@@ -682,13 +681,25 @@ export function startCatalogRefresh(): void {
       // global tops: re-check held top-100 positions older than the delay,
       // then resume the sweep (no-op when the queue is empty)
       if (isGlobalTrackingEnabled()) {
-        getDb()
+        const gdb = getDb();
+        gdb
           .prepare(
             `UPDATE beatmap_user SET global_checked_at = NULL
              WHERE global_rank IS NOT NULL AND global_rank <= 100
                AND global_checked_at < datetime('now', '-' || ? || ' hours')`
           )
           .run(getGlobalRecheckHours());
+        // Repair pass (mirrors the country one): a position stamped within
+        // 15 min of one of my recent scores may predate the leaderboard
+        // update — and the deferred-confirm timer does not survive a restart.
+        gdb.exec(
+          `UPDATE beatmap_user SET global_checked_at = NULL
+           WHERE global_checked_at IS NOT NULL AND EXISTS (
+             SELECT 1 FROM scores s
+             WHERE s.beatmap_id = beatmap_user.beatmap_id
+               AND datetime(s.ended_at) >= datetime('now', '-2 days')
+               AND datetime(beatmap_user.global_checked_at) <= datetime(s.ended_at, '+15 minutes'))`
+        );
         void runGlobalSweep();
       }
       const last = getState("catalog_delta_at");
@@ -755,7 +766,7 @@ export async function confirmRecentCountryChecks(): Promise<void> {
         () =>
           `${mapLabel(id)} — fresh-score recheck: ${
             top && top.user_id === config.osuUserId ? "#1 ✓" : "not #1"
-          }`
+          } (${getStoredCountryCode() ?? "country"})`
       );
     } catch (e) {
       logError(e, `fresh-score country check map ${id}`);
@@ -860,7 +871,7 @@ export async function runCountrySweep(force = false): Promise<void> {
                   : top
                     ? `#1: ${top.user?.username ?? "?"}`
                     : "no country score"
-              }`
+              } (${cc ?? "country"})`
           );
           if (done % 25 === 0)
             status.message = `${cc ? `#1 ${cc}` : "country #1"} sweep: ${done} maps checked...`;
@@ -892,6 +903,69 @@ let globalRunning = false;
 
 export function isGlobalTrackingEnabled(): boolean {
   return getState("global_tracking") === "1";
+}
+
+const GLOBAL_TIERS = [1, 8, 15, 25, 50, 100];
+
+/** Smallest tracked tier containing the rank (8 for #5), null beyond top 100. */
+function globalTier(rank: number | null): number | null {
+  if (rank == null) return null;
+  for (const t of GLOBAL_TIERS) if (rank <= t) return t;
+  return null;
+}
+
+/**
+ * Stores a global position check and logs a history event when the map
+ * changes TIER (top 1/8/15/25/50/100) — rank moves inside a tier are not
+ * events. First-ever checks (initial sweep) set the state silently.
+ */
+export function applyGlobalCheck(beatmapId: number, pos: number | null): void {
+  const db = getDb();
+  const prev = db
+    .prepare(
+      "SELECT global_rank, global_checked_at FROM beatmap_user WHERE beatmap_id = ?"
+    )
+    .get(beatmapId) as
+    | { global_rank: number | null; global_checked_at: string | null }
+    | undefined;
+  const prevRank = prev?.global_rank ?? null;
+  // "known" = a previous check happened (a kept rank survives re-queues)
+  const wasKnown = prevRank != null || prev?.global_checked_at != null;
+  const oldTier = globalTier(prevRank);
+  const newTier = globalTier(pos);
+  if (wasKnown && oldTier !== newTier) {
+    db.prepare(
+      "INSERT INTO global_events (beatmap_id, at, old_rank, new_rank) VALUES (?, datetime('now'), ?, ?)"
+    ).run(beatmapId, prevRank, pos);
+    logActivity(
+      "global tops",
+      () =>
+        `${mapLabel(beatmapId)} — ${oldTier ? `top ${oldTier}` : "outside top 100"} → ${
+          newTier ? `top ${newTier}` : "outside top 100"
+        } (${prevRank != null ? `#${prevRank}` : "—"} → ${pos != null ? `#${pos}` : "—"}) (global)`
+    );
+  }
+  db.prepare(
+    "UPDATE beatmap_user SET global_rank = ?, global_checked_at = datetime('now') WHERE beatmap_id = ?"
+  ).run(pos, beatmapId);
+}
+
+/**
+ * Deferred confirmation after a new best: like the country leaderboard, the
+ * global one can lag behind a fresh submit — the immediate check may return
+ * the OLD position (or none) and, when it lands outside the top 100, nothing
+ * would ever re-check it. One re-check a few minutes later catches it.
+ */
+const GLOBAL_CONFIRM_DELAY_MS = 3 * 60_000;
+
+function scheduleGlobalConfirm(beatmapId: number): void {
+  const t = setTimeout(() => {
+    if (!config.hasCredentials) return;
+    getUserBeatmapPosition(beatmapId, config.osuUserId, "high")
+      .then((pos) => applyGlobalCheck(beatmapId, pos))
+      .catch((e) => logError(e, `deferred global check map ${beatmapId}`));
+  }, GLOBAL_CONFIRM_DELAY_MS);
+  t.unref(); // never keeps the process alive
 }
 
 /** Delay (hours) before re-checking a held top-100 position. */
@@ -927,9 +1001,6 @@ export async function runGlobalSweep(force = false): Promise<void> {
        ORDER BY (u.global_rank IS NOT NULL) DESC, u.global_rank, u.beatmap_id
        LIMIT 200`
     );
-    const store = db.prepare(
-      "UPDATE beatmap_user SET global_rank = ?, global_checked_at = datetime('now') WHERE beatmap_id = ?"
-    );
     let done = 0;
     let failures = 0;
     while (globalWanted) {
@@ -939,12 +1010,12 @@ export async function runGlobalSweep(force = false): Promise<void> {
         if (!globalWanted) break;
         try {
           const pos = await getUserBeatmapPosition(id, config.osuUserId, "low");
-          store.run(pos, id);
+          applyGlobalCheck(id, pos);
           done++;
           failures = 0;
           logActivity(
             "global tops sweep",
-            () => `${mapLabel(id)} — ${pos != null ? `#${pos}` : "not on leaderboard"}`
+            () => `${mapLabel(id)} — ${pos != null ? `#${pos}` : "not on leaderboard"} (global)`
           );
           if (done % 25 === 0)
             status.message = `global tops sweep: ${done} maps checked...`;
