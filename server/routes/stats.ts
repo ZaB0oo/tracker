@@ -5,6 +5,7 @@ import {
   N_OBJ,
   computeSkillCurve,
   ensureMissingFresh,
+  scoresVersion,
   witherSql,
 } from "../logic/scoreSql.js";
 
@@ -75,7 +76,6 @@ statsRouter.get("/stats", (_req, res) => {
       COALESCE(SUM(u.missing_wither), 0) missingWither
     FROM beatmaps b
     LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
-    LEFT JOIN scores s ON s.id = u.best_lazer_score_id
     WHERE b.ruleset = 0 AND b.status IN (1, 2, 4)`);
 
   // Global tops counters (cumulative: top8 includes top1, etc.). All zeros
@@ -292,10 +292,7 @@ const TIERS = ["D", "C", "B", "A", "S", "SH", "X", "XH"];
 
 statsRouter.get("/timeline", (_req, res) => {
   const db = getDb();
-  const v = db
-    .prepare("SELECT COUNT(*) c, COALESCE(MAX(id), 0) m FROM scores")
-    .get() as { c: number; m: number };
-  const version = `${v.c}-${v.m}`;
+  const version = scoresVersion();
   if (timelineCache && timelineCache.version === version)
     return res.json(timelineCache.payload);
 
@@ -550,10 +547,7 @@ function buildSnapshotIndex(db: ReturnType<typeof getDb>): NonNullable<typeof sn
   for (const r of held)
     if (!country.has(r.bid)) country.set(r.bid, [[r.at.slice(0, 10), 1]]);
 
-  const v = db
-    .prepare("SELECT COUNT(*) c, COALESCE(MAX(id), 0) m FROM scores")
-    .get() as { c: number; m: number };
-  return { version: `${v.c}-${v.m}`, maps, country, mapIds };
+  return { version: scoresVersion(), maps, country, mapIds };
 }
 
 statsRouter.get("/snapshot", (req, res) => {
@@ -561,10 +555,7 @@ statsRouter.get("/snapshot", (req, res) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day))
     return res.status(400).json({ ok: false, error: "day=YYYY-MM-DD required" });
   const db = getDb();
-  const v = db
-    .prepare("SELECT COUNT(*) c, COALESCE(MAX(id), 0) m FROM scores")
-    .get() as { c: number; m: number };
-  if (!snapCache || snapCache.version !== `${v.c}-${v.m}`)
+  if (!snapCache || snapCache.version !== scoresVersion())
     snapCache = buildSnapshotIndex(db);
 
   type Agg = { total: number; played: number; fc: number; country: number };

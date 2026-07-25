@@ -75,8 +75,12 @@ settingsRouter.post("/settings", (req, res) => {
     apiRpm?: unknown;
     pollIntervalSeconds?: unknown;
     countryRecheckHours?: unknown;
+    globalRecheckHours?: unknown;
     display?: { wither?: unknown };
     discord?: { webhookUrl?: unknown; bests?: unknown };
+    clientId?: unknown;
+    clientSecret?: unknown;
+    userId?: unknown;
   };
   if (body.discord != null) {
     const err = setDiscordSettings({
@@ -100,9 +104,8 @@ settingsRouter.post("/settings", (req, res) => {
         .json({ ok: false, error: "invalid countryRecheckHours (1..720)" });
     setState("country_recheck_hours", String(Math.round(h)));
   }
-  const grh = (body as { globalRecheckHours?: unknown }).globalRecheckHours;
-  if (grh != null) {
-    const h = Number(grh);
+  if (body.globalRecheckHours != null) {
+    const h = Number(body.globalRecheckHours);
     if (!Number.isFinite(h) || h < 1 || h > 720)
       return res
         .status(400)
@@ -128,18 +131,17 @@ settingsRouter.post("/settings", (req, res) => {
     applyPollInterval();
   }
   // OAuth settings (osu! client + user id) — persisted and applied on the fly.
-  const oauthBody = body as { clientId?: unknown; clientSecret?: unknown; userId?: unknown };
   let oauthChanged = false;
-  if (oauthBody.clientId != null && String(oauthBody.clientId).trim() !== "") {
-    setState("oauth_client_id", String(oauthBody.clientId).trim());
+  if (body.clientId != null && String(body.clientId).trim() !== "") {
+    setState("oauth_client_id", String(body.clientId).trim());
     oauthChanged = true;
   }
-  if (oauthBody.clientSecret != null && String(oauthBody.clientSecret).trim() !== "") {
-    setState("oauth_client_secret", String(oauthBody.clientSecret).trim());
+  if (body.clientSecret != null && String(body.clientSecret).trim() !== "") {
+    setState("oauth_client_secret", String(body.clientSecret).trim());
     oauthChanged = true;
   }
-  if (oauthBody.userId != null && String(oauthBody.userId).trim() !== "") {
-    const u = Number(oauthBody.userId);
+  if (body.userId != null && String(body.userId).trim() !== "") {
+    const u = Number(body.userId);
     if (!Number.isFinite(u) || u <= 0)
       return res.status(400).json({ ok: false, error: "invalid userId" });
     setState("oauth_user_id", String(Math.round(u)));

@@ -239,15 +239,32 @@ export async function fetchUserProfile(): Promise<{
   }, "high");
 }
 
-/** Country code of the connected account, read from the stored profile. */
-export function getStoredCountryCode(): string | null {
-  const raw = getState("user_profile");
-  if (!raw) return null;
+/** Stored user_profile JSON — the fields the app reads from it. */
+export interface StoredProfile {
+  username?: string;
+  avatar_url?: string;
+  cover_url?: string;
+  country_code?: string;
+  stats?: {
+    pp?: number;
+    global_rank?: number | null;
+    country_rank?: number | null;
+    join_date?: string;
+  };
+}
+
+/** Profile of the connected account (null if absent or malformed). */
+export function getStoredProfile(): StoredProfile | null {
   try {
-    return (JSON.parse(raw) as { country_code?: string }).country_code || null;
+    return JSON.parse(getState("user_profile") || "null") as StoredProfile | null;
   } catch {
     return null;
   }
+}
+
+/** Country code of the connected account, read from the stored profile. */
+export function getStoredCountryCode(): string | null {
+  return getStoredProfile()?.country_code || null;
 }
 
 /** Log out of the account: forgets refresh token and profile. */

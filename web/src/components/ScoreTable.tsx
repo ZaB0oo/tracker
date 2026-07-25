@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { fetchTable } from "../api";
+import { displayGrade } from "../format";
 import { firstPlaceLabel, useCountryCode } from "../country";
 import { GradeBadge } from "./GradeBadge";
 import { MedalIcon } from "./Icons";
@@ -25,8 +26,7 @@ const fmtInt = (n: number | null | undefined) =>
 const fmtLen = (s: number | null) =>
   s == null ? "—" : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 const fmtDate = (d: string | null) => (d ? d.slice(0, 10) : "—");
-const grade = (g: string | null) =>
-  g === "X" ? "SS" : g === "XH" ? "SSH" : g ?? "—";
+const grade = (g: string | null) => (g == null ? "—" : displayGrade(g));
 
 /** Visible detail of the custom rate (DT/NC/HT/DC: speed_change, WU/WD: final_rate). */
 function modLabel(m: { acronym: string; settings?: Record<string, unknown> }): string {

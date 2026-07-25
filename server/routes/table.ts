@@ -174,7 +174,6 @@ tableRouter.get("/table", (req, res) => {
 
   const { where, params } = buildFilters(db, q, missingSql);
 
-
   const sortParts: string[] = [];
   for (const part of (q.sort ?? "missing:desc").split(",")) {
     const [col, dir] = part.split(":");

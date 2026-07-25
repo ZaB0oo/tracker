@@ -31,13 +31,11 @@ const TOTAL_ITEMS = [
 function Section({
   title,
   children,
-  defaultOpen = false,
 }: {
   title: React.ReactNode;
   children: React.ReactNode;
-  defaultOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [open, setOpen] = useState(false);
   return (
     <div className="mb-section">
       <button className="mb-section-head" onClick={() => setOpen((o) => !o)}>

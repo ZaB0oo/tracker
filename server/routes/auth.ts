@@ -1,11 +1,13 @@
 import { Router } from "express";
-import { getState, setState } from "../db/db.js";
+import { setState } from "../db/db.js";
 import {
   exchangeAuthCode,
   fetchUserProfile,
   getAuthorizeUrl,
+  getStoredProfile,
   isUserConnected,
   logoutUser,
+  type StoredProfile,
 } from "../osu/api.js";
 import { runCountrySweep } from "../sync/daemon.js";
 
@@ -40,27 +42,15 @@ let profileFetchInFlight = false;
 
 authRouter.get("/auth/status", (_req, res) => {
   const connected = isUserConnected();
-  let profile:
-    | {
-        username: string;
-        avatar_url: string;
-        cover_url?: string;
-        country_code?: string;
-        stats?: unknown;
-      }
-    | null = null;
+  let profile: StoredProfile | null = null;
   if (connected) {
-    try {
-      profile = JSON.parse(getState("user_profile") || "null");
-    } catch {
-      profile = null;
-    }
+    profile = getStoredProfile();
     // refetch if missing, or cached by an older version (fields added since)
     const stale =
       !profile ||
       !profile.country_code ||
       profile.cover_url == null ||
-      (profile.stats as { join_date?: string } | undefined)?.join_date == null;
+      profile.stats?.join_date == null;
     if (stale && !profileFetchInFlight) {
       profileFetchInFlight = true;
       void fetchUserProfile()
@@ -106,12 +96,7 @@ async function toDataUrl(url: string | undefined): Promise<string | null> {
 authRouter.get("/profile-images", async (_req, res) => {
   if (imgCache && Date.now() - imgCache.at < 10 * 60_000)
     return res.json(imgCache.data);
-  let profile: { avatar_url?: string; cover_url?: string } | null = null;
-  try {
-    profile = JSON.parse(getState("user_profile") || "null");
-  } catch {
-    /* no profile */
-  }
+  const profile = getStoredProfile();
   const [avatar, cover] = await Promise.all([
     toDataUrl(profile?.avatar_url),
     toDataUrl(profile?.cover_url),

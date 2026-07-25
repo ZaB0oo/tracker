@@ -61,13 +61,18 @@ function witherMissingSql(): string {
 
 let missingStamp = "";
 
-export function ensureMissingFresh(): void {
-  const db = getDb();
-  const v = db
+/** Cache key over the scores table: any insert bumps count and/or max id. */
+export function scoresVersion(): string {
+  const v = getDb()
     .prepare("SELECT COUNT(*) c, COALESCE(MAX(id), 0) m FROM scores")
     .get() as { c: number; m: number };
+  return `${v.c}-${v.m}`;
+}
+
+export function ensureMissingFresh(): void {
+  const db = getDb();
   const curve = computeSkillCurve(); // refreshes its own 10-min cache if needed
-  const stamp = `${v.c}-${v.m}-${curve.until}`;
+  const stamp = `${scoresVersion()}-${curve.until}`;
   if (stamp === missingStamp) return;
 
   // every catalog map needs a row to carry its missing value (unplayed = full

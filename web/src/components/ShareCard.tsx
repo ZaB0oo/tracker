@@ -5,6 +5,7 @@ import { useCountryCode } from "../country";
 import { useDisplayPrefs } from "../prefs";
 import { gradeDataUrl } from "./GradeBadge";
 import { fmtNum } from "../format";
+import { GRADE_ORDER } from "../types";
 
 
 /**
@@ -116,7 +117,6 @@ export function ShareCard({ onClose }: { onClose: () => void }) {
     { label: "Clears", value: fmtNum(played) },
     { label: "Completion", value: `${completion}%` },
   ];
-  const gradeRow = ["XH", "X", "SH", "S", "A", "B", "C", "D"];
 
   // composite XP for the wither level (grade counts from the tracker's
   // per-map bests, the rest from the osu! profile)
@@ -348,7 +348,7 @@ export function ShareCard({ onClose }: { onClose: () => void }) {
             })}
 
             {/* official grade badges + counts */}
-            {gradeRow.map((gr, i) => {
+            {GRADE_ORDER.map((gr, i) => {
               const cx = 62 + i * ((W - 124) / 7);
               const url = gradeDataUrl(gr);
               return (

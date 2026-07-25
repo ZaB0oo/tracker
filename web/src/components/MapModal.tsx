@@ -6,7 +6,6 @@ import { MedalIcon } from "./Icons";
 import { displayGrade, fmtDate, fmtDateTime, fmtNum } from "../format";
 import { FC_LABELS, STATUS_LABELS } from "../types";
 
-const fmtDT = (iso: string) => fmtDateTime(iso);
 const mmss = (s: number | null) =>
   s == null ? "—" : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
@@ -108,7 +107,7 @@ export function MapModal({
             )}
             {data.scores.map((s) => (
               <div key={s.id} className="mm-score-row">
-                <span className="mm-date">{fmtDT(s.ended_at)}</span>
+                <span className="mm-date">{fmtDateTime(s.ended_at)}</span>
                 <span className="mm-grade">
                   <GradeBadge grade={s.rank} width={34} title={displayGrade(s.rank)} />
                 </span>
@@ -135,7 +134,7 @@ export function MapModal({
                 <h3>{firstPlaceLabel(country)} history</h3>
                 {data.countryEvents.map((e, i) => (
                   <div key={i} className="mm-score-row">
-                    <span className="mm-date">{fmtDT(e.score_at ?? e.at)}</span>
+                    <span className="mm-date">{fmtDateTime(e.score_at ?? e.at)}</span>
                     <span className={e.event === "gained" ? "mm-green" : "mm-red"}>
                       {e.event === "gained" ? "#1 gained" : "#1 lost"}
                     </span>

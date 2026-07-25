@@ -2,10 +2,7 @@ import { useEffect, useState } from "react";
 import { firstPlaceLabel, useCountryCode } from "../country";
 import { collectionExportUrl, fetchLazerImportStatus, lazerImport } from "../api";
 import { displayGrade } from "../format";
-import { useDisplayPrefs } from "../prefs";
-import { DEFAULT_FILTERS, type Filters } from "../types";
-
-const GRADES = ["XH", "X", "SH", "S", "A", "B", "C", "D"];
+import { DEFAULT_FILTERS, GRADE_ORDER, type Filters } from "../types";
 const FC_OPTS = [
   { v: "0", label: "PFC" },
   { v: "1", label: "FC" },
@@ -61,7 +58,6 @@ export function FilterBar({
 }) {
   const [local, setLocal] = useState(filters);
   const country = useCountryCode();
-  const prefs = useDisplayPrefs();
   useEffect(() => setLocal(filters), [filters]);
 
   // Direct lazer import: button shown only if the server has the importer.
@@ -256,7 +252,7 @@ export function FilterBar({
         <div className="filter-group">
           <span className="filter-group-label">Grade</span>
           <div className="chips">
-            {GRADES.map((g) => (
+            {GRADE_ORDER.map((g) => (
               <button
                 key={g}
                 className={`chip ${local.grades.includes(g) ? "on" : ""}`}

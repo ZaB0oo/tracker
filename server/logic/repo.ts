@@ -9,23 +9,15 @@ import { computeFcState } from "./score.js";
  * submitted via polling would skip the map in the backfill and an old best
  * would stay forever on osu!'s side.
  *
- * Returns whether the best (lazer pointer) changed and whether this was the
- * map's first clear — used by the polling path for Discord notifications
- * (other callers ignore the return value).
+ * Returns the resulting best (lazer pointer) — used by the polling path for
+ * Discord notifications (other callers ignore the return value).
  */
 export function saveScores(
   beatmapId: number,
   scores: SoloScore[],
   opts?: { markFetched?: boolean }
-): { bestChanged: boolean; firstClear: boolean; bestScoreId: number | null } {
+): { bestScoreId: number | null } {
   const db = getDb();
-  const before = db
-    .prepare(
-      "SELECT played, best_lazer_score_id FROM beatmap_user WHERE beatmap_id = ?"
-    )
-    .get(beatmapId) as
-    | { played: number; best_lazer_score_id: number | null }
-    | undefined;
   const maxCombo = (
     db.prepare("SELECT max_combo FROM beatmaps WHERE id = ?").get(beatmapId) as
       | { max_combo: number | null }
@@ -99,13 +91,7 @@ export function saveScores(
   const after = db
     .prepare("SELECT best_lazer_score_id FROM beatmap_user WHERE beatmap_id = ?")
     .get(beatmapId) as { best_lazer_score_id: number | null } | undefined;
-  const bestScoreId = after?.best_lazer_score_id ?? null;
-  return {
-    bestChanged:
-      bestScoreId != null && bestScoreId !== (before?.best_lazer_score_id ?? null),
-    firstClear: !(before?.played === 1),
-    bestScoreId,
-  };
+  return { bestScoreId: after?.best_lazer_score_id ?? null };
 }
 
 /**
@@ -172,6 +158,8 @@ export function cleanupPreLeaderboardScores(): { deleted: number; maps: number }
       SELECT 1 FROM beatmaps b JOIN beatmapsets st ON st.id = b.beatmapset_id
       WHERE b.id = s.beatmap_id AND st.ranked_date IS NOT NULL
         AND datetime(s.ended_at) < datetime(st.ranked_date))`;
+  const any = db.prepare(`SELECT 1 FROM scores s WHERE ${COND} LIMIT 1`).get();
+  if (!any) return { deleted: 0, maps: 0 };
   // only refresh maps that still exist (refreshBest would otherwise create
   // orphan beatmap_user rows for deleted maps)
   const ids = (
@@ -182,8 +170,6 @@ export function cleanupPreLeaderboardScores(): { deleted: number; maps: number }
       )
       .all() as { id: number }[]
   ).map((r) => r.id);
-  const any = db.prepare(`SELECT 1 FROM scores s WHERE ${COND} LIMIT 1`).get();
-  if (!any) return { deleted: 0, maps: 0 };
 
   let deleted = 0;
   transaction(() => {

@@ -317,14 +317,12 @@ export function SyncBar() {
               >
                 Catch up on new maps
               </button>
-              {s?.sweeps?.country ? (
+              {s.sweeps.country ? (
                 <button onClick={() => act("country-pause")} disabled={!connected}>
                   Pause {lbl} sweep
-                  {s?.sweeps
-                    ? ` (${fmtNum(s.sweeps.countryChecked)}/${fmtNum(
-                        s.sweeps.countryChecked + s.sweeps.countryPending
-                      )})`
-                    : ""}
+                  {` (${fmtNum(s.sweeps.countryChecked)}/${fmtNum(
+                    s.sweeps.countryChecked + s.sweeps.countryPending
+                  )})`}
                 </button>
               ) : (
                 <button
@@ -340,17 +338,15 @@ export function SyncBar() {
                   {!connected && " (account not connected)"}
                 </button>
               )}
-              {s?.sweeps?.globalTracking || s?.sweeps?.global ? (
+              {s.sweeps.globalTracking || s.sweeps.global ? (
                 <button
                   onClick={() => act("global-pause")}
                   title="Pause the sweep and disable the periodic re-checks"
                 >
                   Pause global tops sweep
-                  {s?.sweeps
-                    ? ` (${fmtNum(s.sweeps.globalChecked)}/${fmtNum(
-                        s.sweeps.globalChecked + s.sweeps.globalPending
-                      )})`
-                    : ""}
+                  {` (${fmtNum(s.sweeps.globalChecked)}/${fmtNum(
+                    s.sweeps.globalChecked + s.sweeps.globalPending
+                  )})`}
                 </button>
               ) : (
                 <button

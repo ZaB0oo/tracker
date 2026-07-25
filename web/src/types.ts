@@ -223,6 +223,9 @@ export const DEFAULT_FILTERS: Filters = {
   playedFrom: "", playedTo: "",
 };
 
+/** Canonical grade display order, best to worst (XH/X are the SS ranks). */
+export const GRADE_ORDER = ["XH", "X", "SH", "S", "A", "B", "C", "D"];
+
 export const STATUS_LABELS: Record<number, string> = {
   1: "Ranked",
   2: "Approved",

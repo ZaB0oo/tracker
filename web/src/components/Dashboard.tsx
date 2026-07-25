@@ -12,6 +12,7 @@ import { VisibilityMenu } from "./VisibilityMenu";
 import { displayGrade, fmtNum } from "../format";
 import {
   FC_LABELS,
+  GRADE_ORDER,
   type Bucket,
   type SkillCurveBucket,
 } from "../types";
@@ -453,11 +454,10 @@ export function Dashboard() {
     rankedClassic: past ? past.ranked : data.scoreSums.classic,
   };
 
-  const gradeOrder = ["XH", "X", "SH", "S", "A", "B", "C", "D"];
   // timeline tiers are ordered D..XH; the grid shows XH..D
   const TIER_IDX: Record<string, number> = { D: 0, C: 1, B: 2, A: 3, S: 4, SH: 5, X: 6, XH: 7 };
   // all grades, zeros included (fixed 2x4 grid like the share card)
-  const grades = gradeOrder.map((g) => ({
+  const grades = GRADE_ORDER.map((g) => ({
     g,
     c: past ? past.grades[TIER_IDX[g]] ?? 0 : data.grades.find((x) => x.grade === g)?.c ?? 0,
   }));

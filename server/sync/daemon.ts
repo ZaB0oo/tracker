@@ -23,21 +23,12 @@ import {
   limiter,
 } from "../osu/api.js";
 import { markFetchedEmpty, saveScores, refreshBest } from "../logic/repo.js";
+import type { SoloScore } from "../osu/types.js";
 import {
   getDiscordSettings,
   notifyBests,
   type BestEvent,
 } from "../notify/discord.js";
-
-/** score mods JSON (lazer format: [{acronym: "HD"}, …]) → acronym list */
-function parseModAcronyms(json: string): string[] {
-  try {
-    const arr = JSON.parse(json) as { acronym?: string }[];
-    return arr.map((m) => m.acronym ?? "").filter(Boolean);
-  } catch {
-    return [];
-  }
-}
 import {
   enrichMaxCombo,
   importCatalogFromApi,
@@ -51,6 +42,16 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+/** score mods JSON (lazer format: [{acronym: "HD"}, …]) → acronym list */
+function parseModAcronyms(json: string): string[] {
+  try {
+    const arr = JSON.parse(json) as { acronym?: string }[];
+    return arr.map((m) => m.acronym ?? "").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
 
 export type Phase =
   | "idle"
@@ -258,6 +259,34 @@ const enrichProgress = (done: number, total: number) => {
   logActivity("enrich", `${done}/${total} maps enriched (max combo / SR)`);
 };
 
+/**
+ * Fetch and store my full score list for one map. Errors are logged and
+ * swallowed: the map keeps fetched_at NULL and will be retried later.
+ * Returns the fetched scores, or null on failure.
+ */
+async function backfillMap(
+  beatmapId: number,
+  priority: "high" | "low",
+  errCtx: string
+): Promise<SoloScore[] | null> {
+  try {
+    const scores = await getUserBeatmapScores(beatmapId, config.osuUserId, priority);
+    if (scores.length === 0) markFetchedEmpty(beatmapId);
+    else saveScores(beatmapId, scores);
+    return scores;
+  } catch (e) {
+    logError(e, errCtx);
+    return null;
+  }
+}
+
+/** Country checks need a connected account with supporter: once that error
+ * shows up, stop the pass instead of failing on every remaining map. */
+function isCountryAuthError(e: unknown): boolean {
+  const msg = String(e);
+  return msg.includes("not connected") || msg.includes("supporter");
+}
+
 // ---------- Polling (high priority) ----------
 
 // Out-of-scope plays (graveyard/WIP maps) are not stored, so the same recent
@@ -271,7 +300,7 @@ export async function pollRecentScores(): Promise<number> {
   if (unimportableMapIds.size > 10_000) unimportableMapIds.clear();
   let offset = 0;
   let newCount = 0;
-  const byBeatmap = new Map<number, import("../osu/types.js").SoloScore[]>();
+  const byBeatmap = new Map<number, SoloScore[]>();
   for (;;) {
     const batch = await getRecentScores(config.osuUserId, 50, offset);
     for (const s of batch) {
@@ -295,7 +324,7 @@ export async function pollRecentScores(): Promise<number> {
   const preStateStmt = db.prepare(
     "SELECT played, best_lazer_score_id AS best FROM beatmap_user WHERE beatmap_id = ?"
   );
-  const freshByMap = new Map<number, import("../osu/types.js").SoloScore[]>();
+  const freshByMap = new Map<number, SoloScore[]>();
   const preState = new Map<
     number,
     { played: number; best: number | null } | undefined
@@ -459,8 +488,7 @@ export async function pollRecentScores(): Promise<number> {
       } catch (e) {
         logError(e, `immediate country check map ${id}`);
         invalidateCountry.run(id); // the background sweep will retry
-        const msg = String(e);
-        if (msg.includes("not connected") || msg.includes("supporter")) break;
+        if (isCountryAuthError(e)) break;
       }
     }
   }
@@ -618,15 +646,8 @@ export async function refreshCatalogDelta(): Promise<number> {
     await enrichMaxCombo(enrichProgress);
 
     // targeted backfill: only the new diffs
-    for (const id of newIds) {
-      try {
-        const scores = await getUserBeatmapScores(id, config.osuUserId, "low");
-        if (scores.length === 0) markFetchedEmpty(id);
-        else saveScores(id, scores);
-      } catch (e) {
-        logError(e, `delta: backfill map ${id}`);
-      }
-    }
+    for (const id of newIds)
+      await backfillMap(id, "low", `delta: backfill map ${id}`);
     logActivity("new maps", `+${newIds.length} new diff(s) added`);
     console.log(`[sync] delta: ${newIds.length} new diffs added`);
     return newIds.length;
@@ -770,8 +791,7 @@ export async function confirmRecentCountryChecks(): Promise<void> {
       );
     } catch (e) {
       logError(e, `fresh-score country check map ${id}`);
-      const msg = String(e);
-      if (msg.includes("not connected") || msg.includes("supporter")) break;
+      if (isCountryAuthError(e)) break;
     }
   }
 }
@@ -785,7 +805,7 @@ export async function confirmRecentCountryChecks(): Promise<void> {
  */
 export function applyCountryCheck(
   beatmapId: number,
-  top: import("../osu/types.js").SoloScore | null,
+  top: SoloScore | null,
   recordInitial: boolean
 ): void {
   const db = getDb();
@@ -877,9 +897,8 @@ export async function runCountrySweep(force = false): Promise<void> {
             status.message = `${cc ? `#1 ${cc}` : "country #1"} sweep: ${done} maps checked...`;
         } catch (e) {
           logError(e, `country sweep map ${id}`);
-          const msg = String(e);
           // no connected account or no supporter: no point insisting
-          if (msg.includes("not connected") || msg.includes("supporter")) {
+          if (isCountryAuthError(e)) {
             countryWanted = false;
             break;
           }
@@ -1097,15 +1116,8 @@ export async function importSetById(
   setId: number
 ): Promise<{ source: "api" | "web" | null; newDiffs: number }> {
   const { source, newIds } = await importOneSet(setId);
-  for (const id of newIds) {
-    try {
-      const scores = await getUserBeatmapScores(id, config.osuUserId, "high");
-      if (scores.length === 0) markFetchedEmpty(id);
-      else saveScores(id, scores);
-    } catch (e) {
-      logError(e, `import set ${setId}: backfill map ${id}`);
-    }
-  }
+  for (const id of newIds)
+    await backfillMap(id, "high", `import set ${setId}: backfill map ${id}`);
   return { source, newDiffs: newIds.length };
 }
 
@@ -1114,15 +1126,8 @@ export async function verifyYearAndBackfill(year: number) {
   const result = await verifyYear(year, (m) => (status.message = m));
   if (result.newBeatmapIds.length > 0) {
     await enrichMaxCombo(enrichProgress);
-    for (const id of result.newBeatmapIds) {
-      try {
-        const scores = await getUserBeatmapScores(id, config.osuUserId, "low");
-        if (scores.length === 0) markFetchedEmpty(id);
-        else saveScores(id, scores);
-      } catch (e) {
-        logError(e, `verify-year: backfill map ${id}`);
-      }
-    }
+    for (const id of result.newBeatmapIds)
+      await backfillMap(id, "low", `verify-year: backfill map ${id}`);
   }
   status.message = `verify ${year} done: +${result.newBeatmapIds.length} diffs.`;
   return result;
@@ -1133,15 +1138,8 @@ export async function runBigSetsRepair(): Promise<number> {
   const newIds = await repairOversizedSets((m) => (status.message = m));
   if (newIds.length > 0) {
     await enrichMaxCombo(enrichProgress);
-    for (const id of newIds) {
-      try {
-        const scores = await getUserBeatmapScores(id, config.osuUserId, "low");
-        if (scores.length === 0) markFetchedEmpty(id);
-        else saveScores(id, scores);
-      } catch (e) {
-        logError(e, `big-sets: backfill map ${id}`);
-      }
-    }
+    for (const id of newIds)
+      await backfillMap(id, "low", `big-sets: backfill map ${id}`);
   }
   console.log(`[sync] big-sets: +${newIds.length} diffs`);
   return newIds.length;
@@ -1223,19 +1221,13 @@ async function runBackfill(): Promise<void> {
       }
       for (const id of ids) {
         if (!backfillWanted) break;
-        try {
-          const scores = await getUserBeatmapScores(id, config.osuUserId, "low");
-          if (scores.length === 0) markFetchedEmpty(id);
-          else saveScores(id, scores);
+        const scores = await backfillMap(id, "low", `backfill map ${id}`);
+        if (scores)
           logActivity(
             "backfill",
             () =>
               `${mapLabel(id)}${scores.length ? ` — ${scores.length} score(s)` : ""}`
           );
-        } catch (e) {
-          // we log and continue: the map will be retried (fetched_at NULL)
-          logError(e, `backfill map ${id}`);
-        }
       }
     }
     // Backfill done => run the leaderboard passes that were deferred while it

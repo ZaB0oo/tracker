@@ -1,5 +1,6 @@
 import { config } from "../config.js";
 import { getDb, getState, setState } from "../db/db.js";
+import { getStoredProfile } from "../osu/api.js";
 
 const logError = (e: unknown, ctx: string) =>
   console.error(`[${ctx}] ${e instanceof Error ? e.message : String(e)}`);
@@ -156,12 +157,7 @@ const displayGrade = (g: string) => (g === "XH" ? "SSH" : g === "X" ? "SS" : g);
 /** author line from the connected profile (best effort, no API call). */
 function profileAuthor(): Embed["author"] | undefined {
   try {
-    const p = JSON.parse(getState("user_profile") || "null") as {
-      username?: string;
-      avatar_url?: string;
-      country_code?: string;
-      stats?: { pp?: number; global_rank?: number | null; country_rank?: number | null };
-    } | null;
+    const p = getStoredProfile();
     if (!p?.username) return undefined;
     const bits = [p.username];
     if (p.stats?.pp) bits.push(`${Math.round(p.stats.pp).toLocaleString("en-US")}pp`);

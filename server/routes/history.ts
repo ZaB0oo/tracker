@@ -3,6 +3,23 @@ import { getDb } from "../db/db.js";
 
 export const historyRouter = Router();
 
+function paging(q: Record<string, string | undefined>): {
+  limit: number;
+  offset: number;
+} {
+  return {
+    limit: Math.min(Number(q.limit ?? 100), 500),
+    offset: Math.max(Number(q.offset ?? 0), 0),
+  };
+}
+
+const CLEARS_SELECT = `SELECT s.id, s.ended_at, s.rank, s.accuracy, s.total_score,
+    s.classic_total_score, s.mods, s.fc_state, s.pp,
+    s.beatmap_id, b.version, b.star_rating, st.artist, st.title
+   FROM scores s
+   JOIN beatmaps b ON b.id = s.beatmap_id
+   JOIN beatmapsets st ON st.id = b.beatmapset_id`;
+
 /**
  * GET /api/clears — history of ALL my scores (not just the bests),
  * newest to oldest.
@@ -10,8 +27,7 @@ export const historyRouter = Router();
 historyRouter.get("/clears", (req, res) => {
   const db = getDb();
   const q = req.query as Record<string, string | undefined>;
-  const limit = Math.min(Number(q.limit ?? 100), 500);
-  const offset = Math.max(Number(q.offset ?? 0), 0);
+  const { limit, offset } = paging(q);
   // Optional day filter (heatmap day card): one row per map, the day's best
   // (classic) play on it, oldest first.
   const day = q.day && /^\d{4}-\d{2}-\d{2}$/.test(q.day) ? q.day : null;
@@ -19,12 +35,7 @@ historyRouter.get("/clears", (req, res) => {
   if (day) {
     const rows = db
       .prepare(
-        `SELECT s.id, s.ended_at, s.rank, s.accuracy, s.total_score,
-          s.classic_total_score, s.mods, s.fc_state, s.pp,
-          s.beatmap_id, b.version, b.star_rating, st.artist, st.title
-         FROM scores s
-         JOIN beatmaps b ON b.id = s.beatmap_id
-         JOIN beatmapsets st ON st.id = b.beatmapset_id
+        `${CLEARS_SELECT}
          WHERE b.status IN (1, 2, 4) AND date(s.ended_at) = @day AND s.id = (
            SELECT s2.id FROM scores s2
            WHERE s2.beatmap_id = s.beatmap_id AND date(s2.ended_at) = @day
@@ -48,12 +59,7 @@ historyRouter.get("/clears", (req, res) => {
 
   const rows = db
     .prepare(
-      `SELECT s.id, s.ended_at, s.rank, s.accuracy, s.total_score,
-        s.classic_total_score, s.mods, s.fc_state, s.pp,
-        s.beatmap_id, b.version, b.star_rating, st.artist, st.title
-       FROM scores s
-       JOIN beatmaps b ON b.id = s.beatmap_id
-       JOIN beatmapsets st ON st.id = b.beatmapset_id
+      `${CLEARS_SELECT}
        WHERE b.status IN (1, 2, 4)
        ORDER BY s.ended_at DESC, s.id DESC
        LIMIT ? OFFSET ?`
@@ -79,9 +85,9 @@ historyRouter.get("/country-history", (req, res) => {
   const db = getDb();
   const q = req.query as Record<string, string | undefined>;
   const ev = q.event === "gained" || q.event === "lost" ? q.event : null;
-  const where = ev ? `WHERE e.event = '${ev}'` : "";
-  const limit = Math.min(Number(q.limit ?? 100), 500);
-  const offset = Math.max(Number(q.offset ?? 0), 0);
+  const where = ev ? "WHERE e.event = ?" : "";
+  const evParams = ev ? [ev] : [];
+  const { limit, offset } = paging(q);
 
   const rows = db
     .prepare(
@@ -94,9 +100,9 @@ historyRouter.get("/country-history", (req, res) => {
        ORDER BY e.at DESC, e.id DESC
        LIMIT ? OFFSET ?`
     )
-    .all(limit, offset);
+    .all(...evParams, limit, offset);
   const total = (
-    db.prepare(`SELECT COUNT(*) c FROM country_events e ${where}`).get() as {
+    db.prepare(`SELECT COUNT(*) c FROM country_events e ${where}`).get(...evParams) as {
       c: number;
     }
   ).c;
@@ -118,8 +124,7 @@ historyRouter.get("/global-history", (req, res) => {
       : q.event === "lost"
         ? `WHERE NOT ${GAINED}`
         : "";
-  const limit = Math.min(Number(q.limit ?? 100), 500);
-  const offset = Math.max(Number(q.offset ?? 0), 0);
+  const { limit, offset } = paging(q);
 
   const rows = db
     .prepare(

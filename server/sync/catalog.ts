@@ -325,7 +325,6 @@ export async function importCatalogFromApi(
   onProgress?: (msg: string) => void,
   opts?: { reset?: boolean }
 ): Promise<{ sets: number; maps: number }> {
-  getDb();
   const setStmt = upsertSetStmt();
   const mapStmt = upsertMapStmt();
   const counts = { sets: 0, maps: 0 };

@@ -8,17 +8,15 @@ import {
 } from "../api";
 import { firstPlaceLabel, useCountryCode } from "../country";
 import { GradeBadge } from "./GradeBadge";
-
-const GRADE_KEYS = ["XH", "X", "SH", "S", "A", "B", "C", "D"];
+// OBS overlay => English text, numbers in en-US format.
+import { fmtCompact, fmtNum } from "../format";
+import { GRADE_ORDER } from "../types";
 
 // Custom metric ids from the ?metrics= query param (chosen in the configurator)
 const METRIC_IDS = (new URLSearchParams(window.location.search).get("metrics") ?? "")
   .split(",")
   .map(Number)
   .filter((n) => Number.isInteger(n) && n > 0);
-
-// OBS overlay => English text, numbers in en-US format.
-import { fmtCompact, fmtNum } from "../format";
 
 const delta = (cur: number, base: number) => cur - base;
 const plus = (n: number) => (n > 0 ? `+${fmtNum(n)}` : "0");
@@ -95,7 +93,7 @@ export function StreamOverlay() {
             {!hide.has("session.clears") && (
               <span>Clears <b>{plus(delta(data.clears, b.clears))}</b></span>
             )}
-            {GRADE_KEYS.map(
+            {GRADE_ORDER.map(
               (k) =>
                 !hide.has(`session.${k.toLowerCase()}`) && (
                   <span key={k} className="ov-grade">
@@ -126,7 +124,7 @@ export function StreamOverlay() {
                 <span className="ov-dim"> / {fmtNum(data.totalMaps)} ({completion.toFixed(2)}%)</span>
               </span>
             )}
-            {GRADE_KEYS.map(
+            {GRADE_ORDER.map(
               (k) =>
                 !hide.has(`total.${k.toLowerCase()}`) && (
                   <span key={k} className="ov-grade">

@@ -5,6 +5,7 @@ import {
   type MetricBreakdown,
   type MetricParams,
 } from "./metrics.js";
+import { scoresVersion } from "./scoreSql.js";
 
 export interface MetricResult {
   count: number;
@@ -208,13 +209,6 @@ function evalRankedScore(p: MetricParams, gran: "month" | "day"): MetricResult {
 // version and everything recomputes on the next call.
 const cache = new Map<string, { version: string; result: MetricResult }>();
 const CACHE_MAX = 80;
-
-function scoresVersion(): string {
-  const r = getDb()
-    .prepare("SELECT COUNT(*) c, COALESCE(MAX(id), 0) m FROM scores")
-    .get() as { c: number; m: number };
-  return `${r.c}-${r.m}`;
-}
 
 export function evalMetric(
   p: MetricParams,

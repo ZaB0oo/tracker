@@ -72,13 +72,11 @@ function parseMapIds(text: string): number[] {
 function Section({
   title,
   children,
-  defaultOpen = false,
 }: {
   title: string;
   children: React.ReactNode;
-  defaultOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [open, setOpen] = useState(false);
   return (
     <div className="mb-section">
       <button className="mb-section-head" onClick={() => setOpen((o) => !o)}>
@@ -295,7 +293,7 @@ export function MetricBuilder({
           </>
         )}
 
-        <div className="mb-title">{isCount ? "On maps matching…" : "On maps matching…"}</div>
+        <div className="mb-title">On maps matching…</div>
         <Section title="Map filters (star rating, year, length, AR/OD/CS/HP…)">
           <input
             className="mb-query"
