@@ -522,6 +522,10 @@ export function startPolling(): void {
     // no credentials yet (first launch, UI settings not filled): stay quiet
     // instead of spamming an error every interval
     if (!config.hasCredentials) return;
+    // catalog import in progress: nothing else runs (the poll would race the
+    // enumeration on set imports and steal its budget; scores from the 24 h
+    // window are caught up right after)
+    if (catalogRunning || status.phase === "catalog") return;
     void pollRecentScores().catch((e) =>
       logError(e, "poll of recent scores (will retry on the next tick)")
     );
@@ -639,6 +643,8 @@ export function startCatalogRefresh(): void {
     if (!config.hasCredentials) return; // first launch: nothing to do yet
     try {
       await ensureCatalogComplete(); // catches up an incomplete catalog, whatever happens
+      // a catalog import is running (pipeline): everything else waits for it
+      if (catalogRunning || status.phase === "catalog") return;
       // DMCA/delisted sets are invisible to the search enumeration: once it is
       // done, import any set from the shipped known-sets list that is missing.
       const diffs = (
@@ -816,10 +822,10 @@ export async function runCountrySweep(force = false): Promise<void> {
   // interleaving them doubles the duration of BOTH. Automatic starts (periodic
   // tick, auth callback) are deferred while the backfill runs — the sweep is
   // launched as soon as the backfill completes. Manual starts (menu) force.
-  if (!force && status.backfill.running) {
+  if (!force && (status.backfill.running || catalogRunning || status.phase === "catalog")) {
     logActivity(
       "country #1",
-      "sweep deferred until the backfill completes (shared rate limit)"
+      "sweep deferred until the catalog/backfill completes (shared rate limit)"
     );
     return;
   }
@@ -903,10 +909,10 @@ export function getGlobalRecheckHours(): number {
  */
 export async function runGlobalSweep(force = false): Promise<void> {
   if (globalRunning) return;
-  if (!force && status.backfill.running) {
+  if (!force && (status.backfill.running || catalogRunning || status.phase === "catalog")) {
     logActivity(
       "global tops",
-      "sweep deferred until the backfill completes (shared rate limit)"
+      "sweep deferred until the catalog/backfill completes (shared rate limit)"
     );
     return;
   }
@@ -1161,11 +1167,16 @@ async function runBackfill(): Promise<void> {
         }
       }
     }
-    // Backfill done => start the country sweep that was deferred meanwhile
-    // (automatic starts skip while the backfill holds the rate budget).
-    if (completed && isUserConnected()) {
+    // Backfill done => run the leaderboard passes that were deferred while it
+    // held the rate budget: country sweep first (needs the connected
+    // account), then the global tops sweep. Initial sync therefore chains
+    // catalog -> scores -> country -> global tops.
+    if (completed) {
       status.backfill.running = false;
-      void runCountrySweep();
+      void (async () => {
+        if (isUserConnected()) await runCountrySweep();
+        if (isGlobalTrackingEnabled()) await runGlobalSweep();
+      })();
     }
   } finally {
     status.backfill.running = false;
