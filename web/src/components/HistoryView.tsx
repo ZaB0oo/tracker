@@ -4,9 +4,19 @@ import { fetchClears, fetchCountryHistory, fetchGlobalHistory } from "../api";
 import { firstPlaceLabel, useCountryCode } from "../country";
 import { displayGrade, fmtDateTime, fmtNum } from "../format";
 import { GradeBadge } from "./GradeBadge";
+import { MapModal } from "./MapModal";
 import { FC_LABELS } from "../types";
 
 const PAGE = 100;
+
+/** Map identity carried by every history row (context menu / details). */
+interface CtxMapInfo {
+  beatmap_id: number;
+  artist: string;
+  title: string;
+  version: string;
+}
+type OnMapContext = (e: React.MouseEvent, info: CtxMapInfo) => void;
 
 /** "YYYY-MM-DD HH:MM:SS" (UTC SQLite) or ISO -> readable local time */
 const fmtDate = (at: string) => {
@@ -15,7 +25,7 @@ const fmtDate = (at: string) => {
 };
 const fmtInt = (n: number | null | undefined) => (n == null ? "—" : fmtNum(n));
 
-function ClearsList() {
+function ClearsList({ onCtx }: { onCtx: OnMapContext }) {
   const query = useInfiniteQuery({
     queryKey: ["clears"],
     queryFn: ({ pageParam }) => fetchClears(pageParam, PAGE),
@@ -49,7 +59,8 @@ function ClearsList() {
           onDoubleClick={() =>
             window.open(`https://osu.ppy.sh/b/${c.beatmap_id}`, "_blank")
           }
-          title="Double-click: open the map on osu.ppy.sh"
+          onContextMenu={(e) => onCtx(e, c)}
+          title="Double-click: open on osu.ppy.sh — right-click: actions"
         >
           <span className="fr-event-date">{fmtDate(c.ended_at)}</span>
           <span className="fr-event-badge">
@@ -82,7 +93,13 @@ function ClearsList() {
   );
 }
 
-function CountryList({ filter }: { filter: "" | "gained" | "lost" }) {
+function CountryList({
+  filter,
+  onCtx,
+}: {
+  filter: "" | "gained" | "lost";
+  onCtx: OnMapContext;
+}) {
   const query = useInfiniteQuery({
     queryKey: ["country-history", filter],
     queryFn: ({ pageParam }) =>
@@ -121,7 +138,8 @@ function CountryList({ filter }: { filter: "" | "gained" | "lost" }) {
           onDoubleClick={() =>
             window.open(`https://osu.ppy.sh/b/${e.beatmap_id}`, "_blank")
           }
-          title="Double-click: open the map on osu.ppy.sh"
+          onContextMenu={(ev) => onCtx(ev, e)}
+          title="Double-click: open on osu.ppy.sh — right-click: actions"
         >
           <span
             className="fr-event-date"
@@ -170,7 +188,13 @@ function CountryList({ filter }: { filter: "" | "gained" | "lost" }) {
 }
 
 /** Global tops tier transitions (top 1/8/15/25/50/100). */
-function GlobalList({ filter }: { filter: "" | "gained" | "lost" }) {
+function GlobalList({
+  filter,
+  onCtx,
+}: {
+  filter: "" | "gained" | "lost";
+  onCtx: OnMapContext;
+}) {
   const query = useInfiniteQuery({
     queryKey: ["global-history", filter],
     queryFn: ({ pageParam }) =>
@@ -216,7 +240,8 @@ function GlobalList({ filter }: { filter: "" | "gained" | "lost" }) {
             onDoubleClick={() =>
               window.open(`https://osu.ppy.sh/b/${e.beatmap_id}`, "_blank")
             }
-            title="Double-click: open the map on osu.ppy.sh"
+            onContextMenu={(ev) => onCtx(ev, e)}
+            title="Double-click: open on osu.ppy.sh — right-click: actions"
           >
             <span className="fr-event-date">{fmtDate(e.at)}</span>
             <span className={`fr-event-badge ${gained ? "gained" : "lost"}`}>
@@ -262,13 +287,19 @@ export function HistoryView() {
   const country = useCountryCode();
   const [src, setSrc] = useState<"country" | "global">("country");
   const [frFilter, setFrFilter] = useState<"" | "gained" | "lost">("");
+  const [ctx, setCtx] = useState<{ x: number; y: number; row: CtxMapInfo } | null>(null);
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const onCtx: OnMapContext = (e, row) => {
+    e.preventDefault();
+    setCtx({ x: e.clientX, y: e.clientY, row });
+  };
 
   return (
     <div className="dashboard">
       <div className="history-cols">
         <div className="panel history-panel">
           <h3>Clears</h3>
-          <ClearsList />
+          <ClearsList onCtx={onCtx} />
         </div>
         <div className="panel history-panel">
           <div className="hist-col-head">
@@ -299,12 +330,74 @@ export function HistoryView() {
             </div>
           </div>
           {src === "country" ? (
-            <CountryList filter={frFilter} />
+            <CountryList filter={frFilter} onCtx={onCtx} />
           ) : (
-            <GlobalList filter={frFilter} />
+            <GlobalList filter={frFilter} onCtx={onCtx} />
           )}
         </div>
       </div>
+      {ctx && (
+        <>
+          <div
+            className="ctx-overlay"
+            onClick={() => setCtx(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setCtx(null);
+            }}
+          />
+          <div className="ctx-menu" style={{ left: ctx.x, top: ctx.y }}>
+            <div className="ctx-title">
+              {ctx.row.artist} – {ctx.row.title} [{ctx.row.version}]
+            </div>
+            <button
+              onClick={() => {
+                setDetailId(ctx.row.beatmap_id);
+                setCtx(null);
+              }}
+            >
+              Map details
+            </button>
+            <button
+              onClick={() => {
+                window.open(`https://osu.ppy.sh/b/${ctx.row.beatmap_id}`, "_blank");
+                setCtx(null);
+              }}
+            >
+              Open on osu.ppy.sh
+            </button>
+            <button
+              onClick={() => {
+                window.location.href = `osu://b/${ctx.row.beatmap_id}`;
+                setCtx(null);
+              }}
+            >
+              Open in osu! (osu!direct)
+            </button>
+            <button
+              onClick={() => {
+                void navigator.clipboard.writeText(String(ctx.row.beatmap_id));
+                setCtx(null);
+              }}
+            >
+              Copy beatmap id
+            </button>
+            <button
+              onClick={() => {
+                void navigator.clipboard.writeText(
+                  `${ctx.row.artist} - ${ctx.row.title} [${ctx.row.version}]`
+                );
+                setCtx(null);
+              }}
+            >
+              Copy « artist - title [diff] »
+            </button>
+          </div>
+        </>
+      )}
+      {detailId != null && (
+        <MapModal beatmapId={detailId} onClose={() => setDetailId(null)} />
+      )}
     </div>
   );
 }
