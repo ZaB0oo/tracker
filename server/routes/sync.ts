@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { config } from "../config.js";
 import { getDb, setState } from "../db/db.js";
 import { isUserConnected } from "../osu/api.js";
 import {
@@ -82,6 +83,12 @@ syncRouter.post("/sync/clear-errors", (_req, res) => {
 syncRouter.get("/sync/status", (_req, res) => res.json(getDaemonStatus()));
 
 syncRouter.post("/sync/start", (req, res) => {
+  if (!config.hasCredentials)
+    return res.status(400).json({
+      ok: false,
+      error:
+        "osu! API credentials are not set — open Settings (menu) and fill in the Client ID / secret / user id first.",
+    });
   void runPipeline({ skipCatalog: req.query.skipCatalog === "1" });
   res.json({ ok: true });
 });

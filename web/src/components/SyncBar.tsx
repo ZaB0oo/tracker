@@ -93,7 +93,9 @@ export function SyncBar() {
 
   const pct =
     s.backfill.total > 0 ? (s.backfill.fetched / s.backfill.total) * 100 : 0;
-  const needsInit = s.phase === "idle" && s.backfill.fetched === 0;
+  // also after a failed attempt (phase "error"): the sync must be retryable
+  const needsInit =
+    (s.phase === "idle" || s.phase === "error") && s.backfill.fetched === 0;
   const connected = auth?.connected ?? false;
   const ACTION_LABELS = actionLabels(lbl);
 
@@ -103,7 +105,9 @@ export function SyncBar() {
     if (labels) toast(labels.start);
     try {
       const r = await postSync(a);
-      if (labels) toast(labels.done(r));
+      if ((r as { ok?: boolean }).ok === false)
+        toast(`Failed: ${String((r as { error?: string }).error ?? "unknown error")}`);
+      else if (labels) toast(labels.done(r));
     } catch (e) {
       toast(`Failed: ${String(e)}`);
     }
