@@ -54,7 +54,7 @@ export const config = {
   // file exists), the UI offers direct import of collections into osu!lazer.
   lazerImporterPath: process.env.LAZER_IMPORTER_PATH ?? null,
   dbPath: path.resolve(process.env.DB_PATH ?? "./data/tracker.db"),
-  apiRpm: Number(process.env.API_RPM ?? 60),
+  apiRpm: 60,
   pollIntervalSeconds: Number(process.env.POLL_INTERVAL_SECONDS ?? 120),
   userAgent:
     "osu-completionist-tracker (single-user; https://github.com/osu-completionist-tracker)",

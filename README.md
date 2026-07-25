@@ -99,7 +99,7 @@ Settings menu → Advanced settings: paste a channel **webhook URL** and every n
 
 ## Rate limiting (osu!api terms of use)
 
-Single global queue: **60 req/min max, smoothed** (1 req/s), polling prioritized over backfill, exponential backoff on 429 (honoring `Retry-After`) and 5xx. The API's hard cap is 1200/min but we deliberately stay on the "polite" limit. Configurable via `API_RPM` (don't raise it without asking peppy).
+Single global queue: **60 req/min max, smoothed** (1 req/s), polling prioritized over backfill, exponential backoff on 429 (honoring `Retry-After`) and 5xx. 
 
 ## Score model — what is stored and why
 

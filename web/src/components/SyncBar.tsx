@@ -371,9 +371,14 @@ export function SyncBar() {
                 <button
                   onClick={() => act("country-sweep")}
                   disabled={!connected}
-                  title="Start/resume checking country leaderboards (resumable)"
+                  title={
+                    connected
+                      ? "Start/resume checking country leaderboards (resumable)"
+                      : "Country leaderboards need a connected osu! account with supporter — use “Connect my osu! account” above"
+                  }
                 >
                   Start/resume {lbl} sweep
+                  {!connected && " (account not connected)"}
                 </button>
               )}
               {s?.sweeps?.globalTracking || s?.sweeps?.global ? (
@@ -458,6 +463,29 @@ export function SyncBar() {
               </details>
               <details className="menu-group">
               <summary className="menu-section">OAuth osu!</summary>
+              <div className="menu-note">
+                Create an OAuth application on{" "}
+                <a
+                  href="https://osu.ppy.sh/home/account/edit#oauth"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  your osu! account settings
+                </a>{" "}
+                (section OAuth → New OAuth application) with this callback URL:
+                <code>
+                  http://localhost:{settings?.info?.port ?? 3727}/api/auth/callback
+                </code>
+                then paste its Client ID / secret below, plus your{" "}
+                <a
+                  href="https://osu.ppy.sh/home/account/edit"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  user id
+                </a>{" "}
+                (the number in your profile URL).
+              </div>
               <div className="menu-setting" title="Client ID of your osu! application">
                 <span>Client ID</span>
                 <input
@@ -484,7 +512,7 @@ export function SyncBar() {
               >
                 <span>osu! User ID</span>
                 <input
-                  type="number"
+                  type="text"
                   value={userIdInput ?? String(settings?.oauth?.userId ?? "")}
                   onChange={(e) => setUserIdInput(e.target.value)}
                 />
