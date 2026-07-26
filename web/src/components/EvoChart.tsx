@@ -30,11 +30,14 @@ export function EvoChart({
   data,
   fmtY = fmtNum,
   bare = false,
+  onPick,
 }: {
   title?: string;
   data: { period: string; value: number }[];
   fmtY?: (v: number) => string;
   bare?: boolean;
+  /** called on a simple click (no drag) with the clicked point's period */
+  onPick?: (period: string) => void;
 }) {
   const gradId = useId();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -86,6 +89,8 @@ export function EvoChart({
               const base = zoom ? zoom[0] : 0;
               setZoom([base + a, base + b]);
               setHover(null);
+            } else if (onPick && view[a]) {
+              onPick(view[a].period); // simple click: select the period
             }
           }
           setDrag(null);

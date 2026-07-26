@@ -17,6 +17,32 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** Seed the default metrics once (Clears, any FC, Ranked score). */
 function seedDefaultMetrics(d: DatabaseSync): void {
+  // "Profile pp" default (added later): seeded once, on old and new DBs alike.
+  const ppSeeded = d
+    .prepare("SELECT value FROM sync_state WHERE key = 'metrics_seeded_pp'")
+    .get();
+  if (!ppSeeded) {
+    const order =
+      (d.prepare("SELECT COALESCE(MAX(sort_order), 0) m FROM metrics").get() as {
+        m: number;
+      }).m + 1;
+    d.prepare("INSERT INTO metrics (name, params, sort_order) VALUES (?, ?, ?)").run(
+      "Profile pp",
+      JSON.stringify({
+        kind: "pp",
+        score: DEFAULT_SCORE_CONDS,
+        map: DEFAULT_MAP_CONDS,
+        progressMode: "milestone",
+        step: 500,
+        showEvolution: true,
+      }),
+      order
+    );
+    d.prepare(
+      "INSERT OR REPLACE INTO sync_state(key, value) VALUES('metrics_seeded_pp', '1')"
+    ).run();
+  }
+
   const seeded = d
     .prepare("SELECT value FROM sync_state WHERE key = 'metrics_seeded'")
     .get();

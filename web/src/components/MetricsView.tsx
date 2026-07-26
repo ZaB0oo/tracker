@@ -1,10 +1,27 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { deleteMetric, fetchMetrics, type Metric, type MetricBreakdown } from "../api";
+import {
+  deleteMetric,
+  fetchMetrics,
+  fetchMetricPpTop,
+  type Metric,
+  type MetricBreakdown,
+} from "../api";
 import { displayGrade, fmtCompact, fmtDate, fmtNum } from "../format";
 import { EvoChart } from "./EvoChart";
+import { GradeBadge } from "./GradeBadge";
 import { MissingIcon } from "./Icons";
+import { MapModal } from "./MapModal";
 import { MetricBuilder } from "./MetricBuilder";
+
+/** Map identity carried by pp-top rows (context menu / details). */
+interface CtxMapInfo {
+  beatmap_id: number;
+  artist: string;
+  title: string;
+  version: string;
+}
+type OnMapContext = (e: React.MouseEvent, info: CtxMapInfo) => void;
 
 
 const BREAKDOWN_TITLES: Record<MetricBreakdown, string> = {
@@ -84,17 +101,36 @@ function describeParams(p: Metric["params"]): string {
 
 function MetricCard({
   m,
+  gran,
   onDelete,
   onEdit,
   onMissing,
+  onCtx,
 }: {
   m: Metric;
+  gran: "month" | "day";
   onDelete: (id: number) => void;
   onEdit: (m: Metric) => void;
   onMissing: (m: Metric) => void;
+  onCtx: OnMapContext;
 }) {
-  const fmtV = m.params.kind === "ranked_score" ? fmtCompact : fmtNum;
   const isRanked = m.params.kind === "ranked_score";
+  const isPp = m.params.kind === "pp";
+  const fmtV = isRanked
+    ? fmtCompact
+    : isPp
+      ? (v: number) => `${fmtNum(Math.round(v))}pp`
+      : fmtNum;
+  // pp metrics: top plays as of a selected period (click the curve or pick)
+  const [ppPeriod, setPpPeriod] = useState("");
+  const nowIso = new Date().toISOString();
+  const effPeriod = ppPeriod || (gran === "day" ? nowIso.slice(0, 10) : nowIso.slice(0, 7));
+  const { data: ppTop } = useQuery({
+    queryKey: ["pp-top", m.id, effPeriod],
+    queryFn: () => fetchMetricPpTop(m.id, effPeriod),
+    refetchInterval: 60_000,
+    enabled: isPp,
+  });
   const totalMode = m.params.progressMode === "total" && m.params.kind === "count";
   const achieved = [...m.milestones].reverse();
   // Per-bucket completion: maps matched / all maps in the star-rating band.
@@ -130,7 +166,12 @@ function MetricCard({
     <div className="panel metric-card">
       <div className="metric-head">
         <h3>{m.name}</h3>
-        {!isRanked && (
+        {isPp && m.pp && (
+          <span className="pp-dim">
+            incl. {Math.round(m.pp.bonus)} bonus · {fmtNum(m.pp.scoreCount)} scores
+          </span>
+        )}
+        {!isRanked && !isPp && (
           <button
             className="metric-btn"
             title="List the missing maps in the Maps tab"
@@ -162,7 +203,7 @@ function MetricCard({
       </div>
 
       <div className="metric-body">
-        {!isRanked && (
+        {!isRanked && !isPp && (
         <div className="metric-sr">
           <div className="metric-sub">{srTitle}</div>
           {m.byBucket.map((b) => {
@@ -211,7 +252,70 @@ function MetricCard({
 
       {m.evolution && m.evolution.length > 1 && (
         <div className="metric-evo">
-          <EvoChart data={m.evolution} fmtY={fmtV} bare />
+          <EvoChart
+            data={m.evolution}
+            fmtY={fmtV}
+            bare
+            onPick={isPp ? setPpPeriod : undefined}
+          />
+        </div>
+      )}
+      {isPp && (
+        <div className="pp-top">
+          <div className="pp-top-head">
+            <span className="metric-sub">
+              Top plays as of {effPeriod}
+              {(() => {
+                const at = m.evolution?.filter((pt) => pt.period <= effPeriod).at(-1);
+                return at ? (
+                  <b className="pp-top-at"> · {fmtNum(Math.round(at.value))}pp</b>
+                ) : null;
+              })()}
+              <span className="pp-dim"> (click the curve to pick)</span>
+            </span>
+            <input
+              type={gran === "day" ? "date" : "month"}
+              value={effPeriod}
+              onChange={(e) => setPpPeriod(e.target.value)}
+            />
+          </div>
+          {ppTop && ppTop.rows.length === 0 && (
+            <p className="goal-note">No pp play up to this {gran === "day" ? "day" : "month"}.</p>
+          )}
+          <div className="pp-top-list">
+            {ppTop?.rows.map((r, i) => {
+              const sr = r.sr_mods ?? r.star_rating;
+              return (
+                <div
+                  key={r.beatmap_id}
+                  className={`pp-top-row${i % 2 ? " row-alt" : ""}`}
+                  onDoubleClick={() =>
+                    window.open(`https://osu.ppy.sh/b/${r.beatmap_id}`, "_blank")
+                  }
+                  onContextMenu={(e) => onCtx(e, r)}
+                  title="Double-click: open on osu.ppy.sh — right-click: actions"
+                >
+                  <span className="pp-top-idx">#{i + 1}</span>
+                  <b className="pp-top-pp">{r.pp.toFixed(2)}pp</b>
+                  <GradeBadge grade={r.rank} width={26} />
+                  <span className="pp-top-map">
+                    {r.artist} – {r.title} <i>[{r.version}]</i>
+                  </span>
+                  {r.mods_list.length > 0 && (
+                    <span className="pp-top-mods">+{r.mods_list.join("")}</span>
+                  )}
+                  <span className="pp-top-acc">{(r.accuracy * 100).toFixed(2)}%</span>
+                  <span
+                    className={`pp-top-sr${r.sr_mods != null ? " pp-top-sr-mod" : ""}`}
+                    title={r.sr_mods != null ? "star rating with mods" : undefined}
+                  >
+                    {sr != null ? `${sr.toFixed(2)}★` : ""}
+                  </span>
+                  <span className="pp-top-date">{fmtDate(r.ended_at)}</span>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
@@ -237,6 +341,12 @@ export function MetricsView({
     mutationFn: deleteMetric,
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["metrics"] }),
   });
+  const [ctx, setCtx] = useState<{ x: number; y: number; row: CtxMapInfo } | null>(null);
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const onCtx: OnMapContext = (e, row) => {
+    e.preventDefault();
+    setCtx({ x: e.clientX, y: e.clientY, row });
+  };
 
   if (isLoading) return <div className="panel">Loading metrics…</div>;
   if (error || !data) return <div className="panel">Failed to load.</div>;
@@ -266,12 +376,77 @@ export function MetricsView({
           <MetricCard
             key={m.id}
             m={m}
+            gran={gran}
             onDelete={(id) => del.mutate(id)}
             onEdit={(metric) => setEditing(metric)}
             onMissing={(metric) => onMissingMaps(metric.id, metric.name)}
+            onCtx={onCtx}
           />
         ))}
       </div>
+
+      {ctx && (
+        <>
+          <div
+            className="ctx-overlay"
+            onClick={() => setCtx(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setCtx(null);
+            }}
+          />
+          <div className="ctx-menu" style={{ left: ctx.x, top: ctx.y }}>
+            <div className="ctx-title">
+              {ctx.row.artist} – {ctx.row.title} [{ctx.row.version}]
+            </div>
+            <button
+              onClick={() => {
+                setDetailId(ctx.row.beatmap_id);
+                setCtx(null);
+              }}
+            >
+              Map details
+            </button>
+            <button
+              onClick={() => {
+                window.open(`https://osu.ppy.sh/b/${ctx.row.beatmap_id}`, "_blank");
+                setCtx(null);
+              }}
+            >
+              Open on osu.ppy.sh
+            </button>
+            <button
+              onClick={() => {
+                window.location.href = `osu://b/${ctx.row.beatmap_id}`;
+                setCtx(null);
+              }}
+            >
+              Open in osu! (osu!direct)
+            </button>
+            <button
+              onClick={() => {
+                void navigator.clipboard.writeText(String(ctx.row.beatmap_id));
+                setCtx(null);
+              }}
+            >
+              Copy beatmap id
+            </button>
+            <button
+              onClick={() => {
+                void navigator.clipboard.writeText(
+                  `${ctx.row.artist} - ${ctx.row.title} [${ctx.row.version}]`
+                );
+                setCtx(null);
+              }}
+            >
+              Copy « artist - title [diff] »
+            </button>
+          </div>
+        </>
+      )}
+      {detailId != null && (
+        <MapModal beatmapId={detailId} onClose={() => setDetailId(null)} />
+      )}
 
       {(builderOpen || editing) && (
         <MetricBuilder

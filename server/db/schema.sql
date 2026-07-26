@@ -128,3 +128,12 @@ CREATE TABLE IF NOT EXISTS global_events (
 );
 CREATE INDEX IF NOT EXISTS idx_global_events_at ON global_events(at);
 
+-- star ratings with mods, cached forever (filled lazily via the API
+-- "attributes" endpoint the first time a modded score shows up in a list).
+CREATE TABLE IF NOT EXISTS modded_sr (
+  beatmap_id INTEGER NOT NULL,
+  mods TEXT NOT NULL,                 -- sorted difficulty mods, e.g. "DT,HR"
+  star_rating REAL,
+  PRIMARY KEY (beatmap_id, mods)
+);
+

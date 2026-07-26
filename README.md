@@ -108,7 +108,7 @@ Every score is stored with **both systems** (modern `x-api-version` header):
 - `total_score`: lazer standardised (~1M × mod multiplier + bonus).
 - `classic_total_score`: lazer's "classic" display. Classic is a **monotone** transform of standardised on a given map, so best classic = best standardised (one best pointer for both).
 - UI toggle "Classic / Standardised" (classic by default).
-- Mod multipliers were rebalanced in **June 2026** and **every score recomputed server-side by osu!**, stable imports included: values returned by the API are already up to date. We never recompute a multiplier ourselves. Raw API payloads are kept (`raw`); `POST /api/sync/recompute` recomputes bests/FC states after a local logic change.
+- Mod multipliers were rebalanced in **June 2026** and **every score recomputed server-side by osu!**, stable imports included: values returned by the API are already up to date. We never recompute a multiplier ourselves. Raw API payloads are kept (`raw`); `POST /api/sync/recompute` recomputes bests/FC states after a local logic change. **pp values are NOT recomputed locally** — they come from the API; after a pp rework, run a full re-backfill to re-fetch every score with its new pp.
 
 ### FC states (FC column)
 

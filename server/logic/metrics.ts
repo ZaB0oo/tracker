@@ -50,7 +50,7 @@ export type MetricBreakdown =
   | "sr" | "year" | "length" | "combo" | "ar" | "od" | "cs" | "hp";
 
 export interface MetricParams {
-  kind: "count" | "ranked_score";
+  kind: "count" | "ranked_score" | "pp";
   score: MetricScoreConds;
   map: MetricMapConds;
   /** dimension of the per-bucket completion shown on the card (default sr) */

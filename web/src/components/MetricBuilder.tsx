@@ -185,6 +185,9 @@ export function MetricBuilder({
   });
 
   const isCount = p.kind === "count";
+  // score conditions apply to count AND weighted-pp metrics (pp filters which
+  // scores feed the weighting); only ranked_score sums everything
+  const hasScoreConds = p.kind !== "ranked_score";
   const srMax = Math.max(...(preview?.byBucket.map((b) => b.value) ?? [1]), 1);
 
   return (
@@ -205,24 +208,30 @@ export function MetricBuilder({
             value={p.kind}
             onChange={(e) => {
               const kind = e.target.value as MetricParams["kind"];
-              const step = kind === "ranked_score" ? 10_000_000_000 : 1000;
+              const step =
+                kind === "ranked_score" ? 10_000_000_000 : kind === "pp" ? 500 : 1000;
               setStepStr(String(step));
               setP((s) => ({
                 ...s,
                 kind,
                 step,
-                progressMode: kind === "ranked_score" ? "milestone" : s.progressMode,
+                progressMode: kind === "count" ? s.progressMode : "milestone",
               }));
             }}
           >
             <option value="count">Count maps</option>
             <option value="ranked_score">Ranked score</option>
+            <option value="pp">Weighted pp</option>
           </select>
         </div>
 
-        {isCount && (
+        {hasScoreConds && (
           <>
-            <div className="mb-title">A map counts when I have a score that is…</div>
+            <div className="mb-title">
+              {isCount
+                ? "A map counts when I have a score that is…"
+                : "Only weigh scores that are…"}
+            </div>
             <div className="mb-inline">
               <label>
                 FC
@@ -429,7 +438,11 @@ export function MetricBuilder({
 
         <div className="mb-preview">
           <div className="mb-preview-count">
-            {isCount ? "Maps matching now: " : "Ranked score now: "}
+            {isCount
+              ? "Maps matching now: "
+              : p.kind === "pp"
+                ? "Weighted pp now: "
+                : "Ranked score now: "}
             <b>{preview ? fmtNum(preview.count) : "…"}</b>
           </div>
           {preview && preview.byBucket.length > 0 && (

@@ -30,9 +30,9 @@ export async function fetchOverlayStats(): Promise<OverlayStats> {
 export interface OverlayMetric {
   id: number;
   name: string;
-  kind: "count" | "ranked_score";
+  kind: "count" | "ranked_score" | "pp";
   count: number;
-  total: number; // maps matching the metric's map filters (0 for ranked_score)
+  total: number; // maps matching the metric's map filters (0 for ranked_score/pp)
 }
 
 export async function fetchOverlayMetrics(ids: number[]): Promise<{ metrics: OverlayMetric[] }> {
@@ -360,6 +360,36 @@ export async function fetchGlobalHistory(
   return res.json();
 }
 
+// ---------- Profile pp ----------
+
+export interface PpTopRow {
+  beatmap_id: number;
+  pp: number;
+  rank: string;
+  accuracy: number;
+  ended_at: string;
+  version: string;
+  star_rating: number | null;
+  artist: string;
+  title: string;
+  /** mod acronyms (CL included — it affects pp) */
+  mods_list: string[];
+  /** star rating with the play's mods (cached; null until fetched) */
+  sr_mods: number | null;
+}
+
+/** Top pp plays of a pp metric, cumulative up to the end of the period. */
+export async function fetchMetricPpTop(
+  id: number,
+  period: string
+): Promise<{ rows: PpTopRow[] }> {
+  const res = await fetch(
+    `/api/metrics/${id}/pp-top?period=${encodeURIComponent(period)}`
+  );
+  if (!res.ok) throw new Error(`pp-top: HTTP ${res.status}`);
+  return res.json();
+}
+
 // ---------- Custom metrics ----------
 
 export interface Range {
@@ -404,7 +434,7 @@ export type MetricBreakdown =
   | "sr" | "year" | "length" | "combo" | "ar" | "od" | "cs" | "hp";
 
 export interface MetricParams {
-  kind: "count" | "ranked_score";
+  kind: "count" | "ranked_score" | "pp";
   score: MetricScoreConds;
   map: MetricMapConds;
   /** dimension of the per-bucket completion on the card (default sr) */
@@ -423,6 +453,8 @@ export interface Metric {
   milestones: { threshold: number; at: string }[];
   evolution: { period: string; value: number }[] | null;
   byBucket: { bucket: number | string; value: number; total: number }[];
+  /** weighted-pp extras (kind "pp" only) */
+  pp?: { bonus: number; scoreCount: number };
 }
 
 export async function fetchMetrics(

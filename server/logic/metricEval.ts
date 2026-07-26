@@ -15,6 +15,8 @@ export interface MetricResult {
   evolution: { period: string; value: number }[] | null;
   /** per-bucket completion in the chosen breakdown dimension */
   byBucket: { bucket: number | string; value: number; total: number }[];
+  /** weighted-pp extras (kind "pp" only) */
+  pp?: { bonus: number; scoreCount: number };
 }
 
 /** Bucket SQL per breakdown dimension (same buckets as the dashboard). */
@@ -203,6 +205,70 @@ function evalRankedScore(p: MetricParams, gran: "month" | "day"): MetricResult {
   };
 }
 
+/**
+ * Weighted-pp metric: the official profile rules applied to the matching set.
+ * ONE score per map — the HIGHEST pp, regardless of the tracker's classic
+ * best —, descending weights 0.95^i, plus the bonus 416.6667 × (1 − 0.9994^n)
+ * (n = maps with a pp score in the set). Loved maps drop out naturally
+ * (their scores have no pp). Successive pp-bests are replayed chronologically
+ * for milestones and the evolution chart.
+ */
+function evalPp(p: MetricParams, gran: "month" | "day"): MetricResult {
+  const db = getDb();
+  const base = baseFrom(p, false);
+  const rows = db
+    .prepare(
+      `SELECT s.beatmap_id AS bid, s.ended_at AS at, s.pp AS pp ${base}
+         AND s.pp IS NOT NULL AND s.passed = 1
+       ORDER BY s.ended_at`
+    )
+    .all() as { bid: number; at: string; pp: number }[];
+
+  const bestPp = new Map<number, number>();
+  const sorted: number[] = []; // descending pp, one per map
+  const WEIGHT_CAP = 600; // 0.95^600 ≈ 4e-14: nothing beyond contributes
+  const firstAtMost = (v: number) => {
+    let lo = 0;
+    let hi = sorted.length;
+    while (lo < hi) {
+      const m = (lo + hi) >> 1;
+      if (sorted[m] > v) lo = m + 1;
+      else hi = m;
+    }
+    return lo;
+  };
+  const weightedTotal = () => {
+    let t = 0;
+    let w = 1;
+    const n = Math.min(sorted.length, WEIGHT_CAP);
+    for (let i = 0; i < n; i++) {
+      t += sorted[i] * w;
+      w *= 0.95;
+    }
+    return t;
+  };
+  const bonusOf = (n: number) => 416.6667 * (1 - Math.pow(0.9994, n));
+
+  const points: { at: string; total: number }[] = [];
+  for (const r of rows) {
+    const prev = bestPp.get(r.bid);
+    if (prev != null && r.pp <= prev) continue;
+    if (prev != null) sorted.splice(firstAtMost(prev), 1);
+    bestPp.set(r.bid, r.pp);
+    sorted.splice(firstAtMost(r.pp), 0, r.pp);
+    points.push({ at: r.at, total: weightedTotal() + bonusOf(bestPp.size) });
+  }
+  return {
+    count: points.length > 0 ? points[points.length - 1].total : 0,
+    total: 0, // "total available" not meaningful for weighted pp
+    step: p.step,
+    milestones: thresholds(points, p.step),
+    evolution: p.showEvolution ? bucketEvolution(points, gran) : null,
+    byBucket: [],
+    pp: { bonus: bonusOf(bestPp.size), scoreCount: bestPp.size },
+  };
+}
+
 // Cache metric results, keyed by params+granularity and a "scores version"
 // (count + max id). Editing one metric only misses its own key; unchanged
 // metrics stay cached, so edit/delete refresh instantly. New scores bump the
@@ -218,7 +284,12 @@ export function evalMetric(
   const key = `${JSON.stringify(p)}|${gran}`;
   const hit = cache.get(key);
   if (hit && hit.version === version) return hit.result;
-  const result = p.kind === "ranked_score" ? evalRankedScore(p, gran) : evalCount(p, gran);
+  const result =
+    p.kind === "ranked_score"
+      ? evalRankedScore(p, gran)
+      : p.kind === "pp"
+        ? evalPp(p, gran)
+        : evalCount(p, gran);
   cache.set(key, { version, result });
   if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value!);
   return result;
@@ -229,6 +300,10 @@ export function previewMetric(p: MetricParams): {
   count: number;
   byBucket: { bucket: number | string; value: number; total: number }[];
 } {
+  if (p.kind === "pp") {
+    const r = evalPp({ ...p, showEvolution: false }, "month");
+    return { count: Math.round(r.count), byBucket: [] };
+  }
   const db = getDb();
   const base = baseFrom(p, p.kind !== "ranked_score");
   const count =

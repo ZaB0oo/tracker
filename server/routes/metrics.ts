@@ -1,7 +1,31 @@
 import { Router } from "express";
 import { getDb } from "../db/db.js";
 import { evalMetric, previewMetric } from "../logic/metricEval.js";
-import type { MetricParams } from "../logic/metrics.js";
+import { mapWhere, scoreWhere, type MetricParams } from "../logic/metrics.js";
+import { getModdedStarRating } from "../osu/api.js";
+
+const KINDS = ["count", "ranked_score", "pp"] as const;
+
+// mods that change star rating (HD counts since the 2026 reading rework)
+const DIFF_MODS = new Set(["DT", "NC", "HT", "DC", "HR", "EZ", "FL", "HD", "TD"]);
+
+/** Lazy background fill of the modded-SR cache (one low-priority request). */
+const srInFlight = new Set<string>();
+function queueModdedSr(beatmapId: number, diffMods: string[]): void {
+  const key = `${beatmapId}|${diffMods.join(",")}`;
+  if (srInFlight.has(key)) return;
+  srInFlight.add(key);
+  void getModdedStarRating(beatmapId, diffMods, "low")
+    .then((sr) => {
+      if (sr != null)
+        getDb()
+          .prepare(
+            "INSERT OR REPLACE INTO modded_sr (beatmap_id, mods, star_rating) VALUES (?, ?, ?)"
+          )
+          .run(beatmapId, diffMods.join(","), sr);
+    })
+    .finally(() => srInFlight.delete(key));
+}
 
 // Custom metrics (milestones + evolution)
 export const metricsRouter = Router();
@@ -74,7 +98,7 @@ metricsRouter.post("/metrics", (req, res) => {
   const name = String(body.name ?? "").trim();
   if (!name) return res.status(400).json({ ok: false, error: "name required" });
   const params = body.params;
-  if (!params || (params.kind !== "count" && params.kind !== "ranked_score"))
+  if (!params || !KINDS.includes(params.kind))
     return res.status(400).json({ ok: false, error: "invalid metric" });
   if (!(Number(params.step) > 0))
     return res.status(400).json({ ok: false, error: "invalid step" });
@@ -99,7 +123,7 @@ metricsRouter.put("/metrics/:id", (req, res) => {
   const name = String(body.name ?? "").trim();
   if (!name) return res.status(400).json({ ok: false, error: "name required" });
   const params = body.params;
-  if (!params || (params.kind !== "count" && params.kind !== "ranked_score"))
+  if (!params || !KINDS.includes(params.kind))
     return res.status(400).json({ ok: false, error: "invalid metric" });
   if (!(Number(params.step) > 0))
     return res.status(400).json({ ok: false, error: "invalid step" });
@@ -117,4 +141,72 @@ metricsRouter.put("/metrics/:id", (req, res) => {
 metricsRouter.delete("/metrics/:id", (req, res) => {
   getDb().prepare("DELETE FROM metrics WHERE id = ?").run(Number(req.params.id));
   res.json({ ok: true });
+});
+
+/**
+ * Top pp plays of a pp metric, CUMULATIVE from the beginning up to the end
+ * of the given period (YYYY-MM or YYYY-MM-DD) — "my top plays as of then".
+ * One score per map, the metric's map/score conditions applied.
+ */
+metricsRouter.get("/metrics/:id/pp-top", (req, res) => {
+  const id = Number(req.params.id);
+  const period = String(req.query.period ?? "");
+  const isDay = /^\d{4}-\d{2}-\d{2}$/.test(period);
+  if (!isDay && !/^\d{4}-\d{2}$/.test(period))
+    return res
+      .status(400)
+      .json({ ok: false, error: "period must be YYYY-MM or YYYY-MM-DD" });
+  const row = getDb()
+    .prepare("SELECT params FROM metrics WHERE id = ?")
+    .get(id) as { params: string } | undefined;
+  if (!row) return res.status(404).json({ ok: false, error: "unknown metric" });
+  const p = JSON.parse(row.params) as MetricParams;
+  const bound = isDay
+    ? "date(s.ended_at) <= @period"
+    : "strftime('%Y-%m', s.ended_at) <= @period";
+  const rows = getDb()
+    .prepare(
+      `SELECT s.beatmap_id, MAX(s.pp) AS pp, s.rank, s.accuracy, s.mods,
+         s.ended_at, b.version, b.star_rating, st.artist, st.title
+       FROM scores s
+       JOIN beatmaps b ON b.id = s.beatmap_id
+       JOIN beatmapsets st ON st.id = b.beatmapset_id
+       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
+       WHERE ${mapWhere(p.map)} AND ${scoreWhere(p.score)}
+         AND s.pp IS NOT NULL AND s.passed = 1 AND ${bound}
+       GROUP BY s.beatmap_id
+       ORDER BY pp DESC
+       LIMIT 100`
+    )
+    .all({ period }) as (Record<string, unknown> & {
+    beatmap_id: number;
+    mods: string;
+  })[];
+  // modded star rating from the cache; misses are fetched in the background
+  // and show up on the next refetch
+  const cached = getDb().prepare(
+    "SELECT star_rating FROM modded_sr WHERE beatmap_id = ? AND mods = ?"
+  );
+  const out = rows.map((r) => {
+    let acronyms: string[] = [];
+    try {
+      // CL kept: it affects pp (no slider acc → lower pp)
+      acronyms = (JSON.parse(r.mods) as { acronym?: string }[])
+        .map((m) => m.acronym ?? "")
+        .filter(Boolean);
+    } catch {
+      // ignore, treated as nomod
+    }
+    const diff = acronyms.filter((a) => DIFF_MODS.has(a)).sort();
+    let srMods: number | null = null;
+    if (diff.length > 0) {
+      const hit = cached.get(r.beatmap_id, diff.join(",")) as
+        | { star_rating: number | null }
+        | undefined;
+      if (hit) srMods = hit.star_rating;
+      else queueModdedSr(r.beatmap_id, diff);
+    }
+    return { ...r, mods_list: acronyms, sr_mods: srMods };
+  });
+  res.json({ rows: out });
 });
