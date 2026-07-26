@@ -310,10 +310,14 @@ export function HeatmapPanel({ cutoffDay = null }: { cutoffDay?: string | null }
                           <GradeBadge grade={r.rank} width={24} />
                         </td>
                         <td className="hm-day-map-name">
-                          {r.artist} - {r.title} <i>[{r.version}]</i>
-                          {modsLabel(r.mods) && (
-                            <span className="hm-day-map-mods"> +{modsLabel(r.mods)}</span>
-                          )}
+                          <div className="hm-day-map-cell">
+                            <span className="hm-day-map-title">
+                              {r.artist} - {r.title} <i>[{r.version}]</i>
+                            </span>
+                            {modsLabel(r.mods) && (
+                              <span className="hm-day-map-mods">+{modsLabel(r.mods)}</span>
+                            )}
+                          </div>
                         </td>
                         <td className="hm-day-map-acc">
                           {(r.accuracy * 100).toFixed(2)}%
