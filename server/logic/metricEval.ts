@@ -52,6 +52,23 @@ function thresholds(
   return out;
 }
 
+/** Downward milestones for descending metrics (crossing 900, 800, … 0 left). */
+function thresholdsDesc(
+  points: { at: string; total: number }[],
+  step: number
+): { threshold: number; at: string }[] {
+  const out: { threshold: number; at: string }[] = [];
+  let next: number | null = null;
+  for (const p of points) {
+    if (next == null) next = Math.ceil(p.total / step) * step - step;
+    while (next >= 0 && p.total <= next) {
+      out.push({ threshold: next, at: p.at });
+      next -= step;
+    }
+  }
+  return out;
+}
+
 function bucketEvolution(
   points: { at: string; total: number }[],
   gran: "month" | "day"
@@ -170,7 +187,11 @@ function evalCount(p: MetricParams, gran: "month" | "day"): MetricResult {
     count: total,
     total: mapTotal(p),
     step: p.step,
-    milestones: thresholds(points, p.step),
+    // countdown metrics: the conditions select the maps still to fix, so the
+    // celebrated milestones are downward (900, 800, … 0 left)
+    milestones: p.descending
+      ? thresholdsDesc(points, p.step)
+      : thresholds(points, p.step),
     evolution: p.showEvolution ? bucketEvolution(points, gran) : null,
     byBucket: countByBucket(p),
   };

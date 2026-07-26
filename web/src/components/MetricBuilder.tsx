@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   DEFAULT_METRIC_PARAMS,
+  fetchFilterBounds,
   postMetric,
   previewMetric,
   putMetric,
@@ -14,6 +15,7 @@ import { fmtNum } from "../format";
 // osu!std mods grouped by the in-game categories (lazer). AT/CN can't submit a
 // score so they're excluded. Fun mods are std-only.
 const MOD_GROUPS: { label: string; mods: string[] }[] = [
+  { label: "None", mods: ["NM"] },
   { label: "Reduction", mods: ["EZ", "NF", "HT", "DC"] },
   { label: "Increase", mods: ["HR", "SD", "PF", "DT", "NC", "HD", "FL", "BL", "ST", "AC", "TC"] },
   { label: "Automation", mods: ["RX", "AP", "SO"] },
@@ -31,18 +33,15 @@ const COUNT_FIELDS: { key: keyof MetricParams["score"]["counts"]; label: string 
   { key: "nSliderEnd", label: "Missed slider ends" },
   { key: "imperfections", label: "Imperfections (100s + slider ends)" },
 ];
-const MAP_FIELDS: { min: keyof MetricParams["map"]; max: keyof MetricParams["map"]; label: string; step: number }[] = [
-  { min: "srMin", max: "srMax", label: "Star rating", step: 0.1 },
-  { min: "yearMin", max: "yearMax", label: "Year", step: 1 },
-  { min: "lenMin", max: "lenMax", label: "Length (s)", step: 1 },
-  { min: "arMin", max: "arMax", label: "AR", step: 0.1 },
-  { min: "odMin", max: "odMax", label: "OD", step: 0.1 },
-  { min: "csMin", max: "csMax", label: "CS", step: 0.1 },
-  { min: "hpMin", max: "hpMax", label: "HP", step: 0.1 },
-  { min: "comboMin", max: "comboMax", label: "Max combo", step: 1 },
-  { min: "bpmMin", max: "bpmMax", label: "BPM", step: 1 },
-  { min: "globalTopMin", max: "globalTopMax", label: "My global rank", step: 1 },
-];
+const CUR_YEAR = new Date().getUTCFullYear();
+interface MapField {
+  min: keyof MetricParams["map"];
+  max: keyof MetricParams["map"];
+  label: string;
+  step: number;
+  lo: number;
+  hi: number;
+}
 const STATUSES = [
   { v: 1, label: "Ranked" },
   { v: 2, label: "Approved" },
@@ -115,6 +114,71 @@ function RangeRow({
   );
 }
 
+/** Placeholder formatter matching the slider's step — plain digits, no
+ * thousands separators (they get cut off and read wrong for years). */
+function stepFmt(step: number): (v: number) => string {
+  const dec = step < 0.1 ? 2 : step < 1 ? 1 : 0;
+  return (v) => (dec ? v.toFixed(dec) : String(Math.round(v)));
+}
+
+/**
+ * Dual-thumb range slider + manual min/max inputs. A thumb pushed to its end
+ * means "no bound" (null), so the untouched slider filters nothing; typed
+ * values may exceed the slider's range.
+ */
+function SliderRow({
+  label, lo, hi, step, value, onChange,
+}: {
+  label: string; lo: number; hi: number; step: number;
+  value: Range; onChange: (r: Range) => void;
+}) {
+  const fmt = stepFmt(step);
+  const a = Math.min(Math.max(value.min ?? lo, lo), hi);
+  const b = Math.min(Math.max(value.max ?? hi, lo), hi);
+  const norm = (v: number) => ((v - lo) / (hi - lo)) * 100;
+  return (
+    <div className="mb-slider">
+      <span className="mb-slider-label">{label}</span>
+      <div className="mb-slider-track">
+        <div className="mb-slider-rail">
+          <div
+            className="mb-slider-fill"
+            style={{ left: `${norm(a)}%`, width: `${Math.max(norm(b) - norm(a), 0)}%` }}
+          />
+        </div>
+        <input
+          type="range" min={lo} max={hi} step={step} value={a}
+          // overlapped thumbs: at the RIGHT end the min thumb must be on top
+          // (only it can move), at the LEFT end the max thumb must be
+          style={{ zIndex: a > (lo + hi) / 2 ? 3 : 1 }}
+          onChange={(e) => {
+            const v = Math.min(Number(e.target.value), b);
+            onChange({ ...value, min: v <= lo ? null : v });
+          }}
+        />
+        <input
+          type="range" min={lo} max={hi} step={step} value={b}
+          style={{ zIndex: 2 }}
+          onChange={(e) => {
+            const v = Math.max(Number(e.target.value), a);
+            onChange({ ...value, max: v >= hi ? null : v });
+          }}
+        />
+      </div>
+      <input
+        type="number" className="mb-slider-num" step={step} min={0}
+        placeholder={fmt(lo)} value={value.min ?? ""}
+        onChange={(e) => onChange({ ...value, min: toNum(e.target.value.replace(/-/g, "")) })}
+      />
+      <input
+        type="number" className="mb-slider-num" step={step} min={0}
+        placeholder={fmt(hi)} value={value.max ?? ""}
+        onChange={(e) => onChange({ ...value, max: toNum(e.target.value.replace(/-/g, "")) })}
+      />
+    </div>
+  );
+}
+
 /** Metric builder modal with a live count + per-star-rating preview. */
 export function MetricBuilder({
   onClose,
@@ -165,6 +229,43 @@ export function MetricBuilder({
     setP((s) => ({ ...s, score: { ...s.score, counts: { ...s.score.counts, [key]: r } } }));
   const setMap = (key: keyof MetricParams["map"], v: number | null) =>
     setP((s) => ({ ...s, map: { ...s.map, [key]: v } }));
+
+  // slider bounds = real catalog maxima (highest map SR, longest map, …)
+  const { data: bounds } = useQuery({
+    queryKey: ["filter-bounds"],
+    queryFn: fetchFilterBounds,
+    staleTime: 60 * 60_000,
+  });
+  const mapFields = useMemo<MapField[]>(() => {
+    const sr = bounds?.sr != null ? Math.ceil(bounds.sr * 10) / 10 : 12;
+    const len = bounds?.len ?? 1200;
+    const combo = bounds?.combo ?? 10000;
+    const bpm = bounds?.bpm != null ? Math.ceil(bounds.bpm) : 500;
+    const year0 = bounds?.yearMin ?? 2007;
+    const glob = bounds?.globalMax ?? 100;
+    return [
+      { min: "srMin", max: "srMax", label: "Star rating", step: 0.1, lo: 0, hi: sr },
+      { min: "yearMin", max: "yearMax", label: "Year", step: 1, lo: year0, hi: CUR_YEAR },
+      { min: "lenMin", max: "lenMax", label: "Length (s)", step: 5, lo: 0, hi: len },
+      { min: "arMin", max: "arMax", label: "AR", step: 0.1, lo: 0, hi: 10 },
+      { min: "odMin", max: "odMax", label: "OD", step: 0.1, lo: 0, hi: 10 },
+      { min: "csMin", max: "csMax", label: "CS", step: 0.1, lo: 0, hi: 10 },
+      { min: "hpMin", max: "hpMax", label: "HP", step: 0.1, lo: 0, hi: 10 },
+      { min: "comboMin", max: "comboMax", label: "Max combo", step: 10, lo: 0, hi: combo },
+      { min: "bpmMin", max: "bpmMax", label: "BPM", step: 1, lo: 0, hi: bpm },
+      { min: "globalTopMin", max: "globalTopMax", label: "My global rank", step: 1, lo: 1, hi: glob },
+    ];
+  }, [bounds]);
+  const ppHi = bounds?.pp != null ? Math.ceil(bounds.pp) : 2000;
+
+  // Mods chips = the score must contain AT LEAST ONE of the selected mods
+  // (anyMods). NM is a normal chip meaning "no mods" (CL alone still counts
+  // as nomod: classic scoring doesn't change the play), combinable with the
+  // rest. Legacy metrics (requiredMods / allowedMods) pre-fill the selection.
+  const modList =
+    p.score.anyMods ??
+    p.score.requiredMods ??
+    (Array.isArray(p.score.allowedMods) ? ["NM"] : []);
 
   // Debounced live preview.
   const paramsKey = useMemo(() => JSON.stringify(p), [p]);
@@ -249,36 +350,46 @@ export function MetricBuilder({
                   <option value="S">S</option>
                 </select>
               </label>
-              <label>
-                Std score ≥
-                <input
-                  type="number" placeholder="none"
-                  value={p.score.minScore ?? ""}
-                  onChange={(e) => setScore({ minScore: toNum(e.target.value) })}
-                />
-              </label>
             </div>
-            <RangeRow
-              label="Accuracy (%)" step={0.1}
+            <SliderRow
+              label="Standardized" lo={0} step={1000}
+              hi={bounds?.stdMax != null ? Math.ceil(bounds.stdMax) : 1_000_000}
+              value={{ min: p.score.minScore ?? null, max: p.score.maxScore ?? null }}
+              onChange={(r) => setScore({ minScore: r.min, maxScore: r.max })}
+            />
+            <SliderRow
+              label="Accuracy (%)" lo={0} hi={100} step={0.01}
               value={p.score.acc ?? { min: null, max: null }}
               onChange={(r) => setScore({ acc: r })}
             />
+            <SliderRow
+              label="pp" lo={0} hi={ppHi} step={1}
+              value={p.score.pp ?? { min: null, max: null }}
+              onChange={(r) => setScore({ pp: r })}
+            />
 
             <Section title="Mods">
-              <div className="mb-mods-label">Allowed mods (empty = any mod allowed):</div>
+              <div className="mb-mods-label">
+                The score must have at least one of the selected mods — NM =
+                no mods (empty = any mods):
+              </div>
               {MOD_GROUPS.map((g) => (
                 <div key={g.label} className="mb-mod-group">
                   <span className="mb-mod-cat">{g.label}</span>
                   <div className="adv-mods">
                     {g.mods.map((m) => {
-                      const on = p.score.allowedMods?.includes(m) ?? false;
+                      const on = modList.includes(m);
                       return (
                         <button
                           key={m} className={`chip ${on ? "on" : ""}`}
                           onClick={() => {
-                            const cur = new Set(p.score.allowedMods ?? []);
+                            const cur = new Set(modList);
                             cur.has(m) ? cur.delete(m) : cur.add(m);
-                            setScore({ allowedMods: cur.size ? [...cur] : null });
+                            setScore({
+                              anyMods: cur.size ? [...cur] : null,
+                              requiredMods: null,
+                              allowedMods: null,
+                            });
                           }}
                         >
                           {m}
@@ -315,9 +426,9 @@ export function MetricBuilder({
               }))
             }
           />
-          {MAP_FIELDS.map((f) => (
-            <RangeRow
-              key={f.min} label={f.label} step={f.step}
+          {mapFields.map((f) => (
+            <SliderRow
+              key={f.min} label={f.label} step={f.step} lo={f.lo} hi={f.hi}
               value={{ min: p.map[f.min] as number | null, max: p.map[f.max] as number | null }}
               onChange={(r) => { setMap(f.min, r.min); setMap(f.max, r.max); }}
             />
@@ -427,6 +538,18 @@ export function MetricBuilder({
               </select>
             </label>
           )}
+          {isCount && (
+            <label
+              className="mb-check"
+              title="The conditions select the maps still to fix: the count heads down to 0, milestones are celebrated downward, and the list button shows those maps"
+            >
+              <input
+                type="checkbox" checked={p.descending ?? false}
+                onChange={(e) => setP((s) => ({ ...s, descending: e.target.checked }))}
+              />
+              Countdown — maps to fix (goal 0)
+            </label>
+          )}
           <label className="mb-check">
             <input
               type="checkbox" checked={p.showEvolution}
@@ -439,7 +562,9 @@ export function MetricBuilder({
         <div className="mb-preview">
           <div className="mb-preview-count">
             {isCount
-              ? "Maps matching now: "
+              ? p.descending
+                ? "Maps to fix now: "
+                : "Maps matching now: "
               : p.kind === "pp"
                 ? "Weighted pp now: "
                 : "Ranked score now: "}

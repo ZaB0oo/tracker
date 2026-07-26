@@ -95,10 +95,12 @@ function buildFilters(
   // (populated by the global tops sweep; any bound excludes unranked maps).
   num("globalTopMin", "u.global_rank", ">=");
   num("globalTopMax", "u.global_rank", "<=");
-  // Missing maps of a metric: maps matching its MAP conditions whose BEST
-  // score does not match its SCORE conditions (leaderboard semantics, same
-  // rule as the metric evaluation; the inner alias `s` shadows the outer
+  // Maps of a metric: maps matching its MAP conditions whose BEST score does
+  // not match its SCORE conditions — the missing maps (leaderboard semantics,
+  // same rule as the metric evaluation; the inner alias `s` shadows the outer
   // best-score join on purpose — scoreWhere targets the subquery row).
+  // metricMatching=1 flips to the maps the conditions SELECT (countdown
+  // metrics: the maps to fix).
   if (q.metricMissing != null && q.metricMissing !== "") {
     const row = db
       .prepare("SELECT params FROM metrics WHERE id = ?")
@@ -107,7 +109,7 @@ function buildFilters(
       const p = JSON.parse(row.params) as MetricParams;
       where.push(mapWhere(p.map));
       where.push(
-        `NOT EXISTS (SELECT 1 FROM scores s
+        `${q.metricMatching === "1" ? "EXISTS" : "NOT EXISTS"} (SELECT 1 FROM scores s
            WHERE s.id = u.best_lazer_score_id AND ${scoreWhere(p.score)})`
       );
     }

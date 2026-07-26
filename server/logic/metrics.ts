@@ -13,10 +13,15 @@ export interface MetricScoreConds {
   fc: "none" | "any" | "pfc";
   minGrade: string | null; // "A" | "S"
   minScore: number | null;
+  maxScore?: number | null; // upper bound on standardized score
   minClassic: number | null;
   acc?: Range; // accuracy in percent (0-100)
+  pp?: Range; // score pp (loved/unranked scores have none and never match a bound)
   allowedMods: string[] | null; // no mod outside this set (null = no limit)
   requiredMods: string[] | null; // must include all of these
+  /** must include AT LEAST ONE of these; "NM" in the list also accepts nomod
+   * scores (CL alone counts as nomod) */
+  anyMods?: string[] | null;
   counts: {
     n100: Range;
     n50: Range;
@@ -55,6 +60,9 @@ export interface MetricParams {
   map: MetricMapConds;
   /** dimension of the per-bucket completion shown on the card (default sr) */
   breakdown?: MetricBreakdown;
+  /** count kind (countdown): the conditions select the maps still TO FIX;
+   * the count heads to 0, with downward milestones */
+  descending?: boolean;
   /** "milestone": progress toward the next step. "total": X / all available maps. */
   progressMode: "milestone" | "total";
   step: number;
@@ -92,9 +100,11 @@ export function scoreWhere(c: MetricScoreConds): string {
   if (c.minGrade && GRADE_IN[c.minGrade])
     w.push(`s.rank IN (${GRADE_IN[c.minGrade]})`);
   if (num(c.minScore) != null) w.push(`s.total_score >= ${num(c.minScore)}`);
+  if (num(c.maxScore) != null) w.push(`s.total_score <= ${num(c.maxScore)}`);
   if (num(c.minClassic) != null)
     w.push(`COALESCE(s.classic_total_score, s.total_score) >= ${num(c.minClassic)}`);
   range("(s.accuracy * 100)", c.acc, w);
+  range("s.pp", c.pp, w);
   if (Array.isArray(c.allowedMods)) {
     const list = c.allowedMods.filter((m) => MOD_RE.test(m));
     const inList = list.length ? list.map((m) => `'${m}'`).join(",") : "''";
@@ -107,6 +117,19 @@ export function scoreWhere(c: MetricScoreConds): string {
       w.push(
         `EXISTS (SELECT 1 FROM json_each(s.mods) je WHERE json_extract(je.value,'$.acronym') = '${m}')`
       );
+  }
+  if (Array.isArray(c.anyMods) && c.anyMods.length) {
+    const list = c.anyMods.filter((m) => m !== "NM" && MOD_RE.test(m));
+    const or: string[] = [];
+    if (list.length)
+      or.push(
+        `EXISTS (SELECT 1 FROM json_each(s.mods) je WHERE json_extract(je.value,'$.acronym') IN (${list.map((m) => `'${m}'`).join(",")}))`
+      );
+    if (c.anyMods.includes("NM"))
+      or.push(
+        `NOT EXISTS (SELECT 1 FROM json_each(s.mods) je WHERE json_extract(je.value,'$.acronym') <> 'CL')`
+      );
+    if (or.length) w.push(`(${or.join(" OR ")})`);
   }
   const co = c.counts ?? ({} as MetricScoreConds["counts"]);
   range(N100, co.n100, w);
@@ -172,10 +195,13 @@ export const DEFAULT_SCORE_CONDS: MetricScoreConds = {
   fc: "none",
   minGrade: null,
   minScore: null,
+  maxScore: null,
   minClassic: null,
   acc: { min: null, max: null },
+  pp: { min: null, max: null },
   allowedMods: null,
   requiredMods: null,
+  anyMods: null,
   counts: {
     n100: { min: null, max: null },
     n50: { min: null, max: null },

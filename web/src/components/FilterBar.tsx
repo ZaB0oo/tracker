@@ -121,7 +121,7 @@ export function FilterBar({
   if (local.metricMissing)
     badges.push({
       key: "metric",
-      label: `Missing: ${local.metricMissing.name}`,
+      label: `${local.metricMissing.matching ? "To fix" : "Missing"}: ${local.metricMissing.name}`,
       clear: () => set("metricMissing", null),
     });
   if (local.platform)
@@ -189,7 +189,9 @@ export function FilterBar({
           onClick={() => {
             const name = window.prompt(
               "Collection name:",
-              local.metricMissing ? `Missing - ${local.metricMissing.name}` : "osu!completionist"
+              local.metricMissing
+                ? `${local.metricMissing.matching ? "To fix" : "Missing"} - ${local.metricMissing.name}`
+                : "osu!completionist"
             );
             if (name?.trim())
               window.location.href = collectionExportUrl(local, name.trim());
@@ -205,7 +207,9 @@ export function FilterBar({
             onClick={() => {
               const name = window.prompt(
                 "Collection name (merged into lazer):",
-                local.metricMissing ? `Missing - ${local.metricMissing.name}` : "osu!completionist"
+                local.metricMissing
+                  ? `${local.metricMissing.matching ? "To fix" : "Missing"} - ${local.metricMissing.name}`
+                  : "osu!completionist"
               );
               if (!name?.trim()) return;
               setLazerBusy(true);

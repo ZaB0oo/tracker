@@ -190,7 +190,9 @@ export interface Filters {
   countryFirst: boolean;
   /** my global leaderboard position range (empty = unbounded) */
   globalTopMin: string; globalTopMax: string;
-  metricMissing: { id: number; name: string } | null;
+  /** matching=true (countdown metrics): list the maps the conditions SELECT
+   * (the maps to fix) instead of the missing ones */
+  metricMissing: { id: number; name: string; matching?: boolean } | null;
   platform: "" | "lazer" | "stable";
   srMin: string; srMax: string;
   arMin: string; arMax: string;

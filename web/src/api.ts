@@ -72,7 +72,10 @@ function buildTableQuery(
   if (filters.statuses.length) p.set("statuses", filters.statuses.join(","));
   if (filters.mods) p.set("mods", filters.mods);
   if (filters.countryFirst) p.set("countryFirst", "1");
-  if (filters.metricMissing) p.set("metricMissing", String(filters.metricMissing.id));
+  if (filters.metricMissing) {
+    p.set("metricMissing", String(filters.metricMissing.id));
+    if (filters.metricMissing.matching) p.set("metricMatching", "1");
+  }
   if (filters.platform) p.set("platform", filters.platform);
   for (const k of [
     "srMin", "srMax", "arMin", "arMax", "odMin", "odMax",
@@ -400,10 +403,16 @@ export interface MetricScoreConds {
   fc: "none" | "any" | "pfc";
   minGrade: string | null;
   minScore: number | null;
+  /** upper bound on standardized score */
+  maxScore?: number | null;
   minClassic: number | null;
   acc?: Range;
+  /** score pp range (loved/unranked scores have none and never match a bound) */
+  pp?: Range;
   allowedMods: string[] | null;
   requiredMods: string[] | null;
+  /** must include AT LEAST ONE of these; "NM" also accepts nomod scores */
+  anyMods?: string[] | null;
   counts: {
     n100: Range;
     n50: Range;
@@ -439,6 +448,9 @@ export interface MetricParams {
   map: MetricMapConds;
   /** dimension of the per-bucket completion on the card (default sr) */
   breakdown?: MetricBreakdown;
+  /** count kind (countdown): the conditions select the maps still TO FIX;
+   * the count heads to 0, with downward milestones */
+  descending?: boolean;
   progressMode: "milestone" | "total";
   step: number;
   showEvolution: boolean;
@@ -522,10 +534,13 @@ export const DEFAULT_METRIC_PARAMS: MetricParams = {
     fc: "none",
     minGrade: null,
     minScore: null,
+    maxScore: null,
     minClassic: null,
     acc: { min: null, max: null },
+    pp: { min: null, max: null },
     allowedMods: null,
     requiredMods: null,
+    anyMods: null,
     counts: {
       n100: { min: null, max: null },
       n50: { min: null, max: null },
@@ -544,10 +559,30 @@ export const DEFAULT_METRIC_PARAMS: MetricParams = {
     query: null,
   },
   breakdown: "sr",
+  descending: false,
   progressMode: "milestone",
   step: 1000,
   showEvolution: true,
 };
+
+/** Real catalog maxima, used as slider bounds in the metric builder. */
+export interface FilterBounds {
+  sr: number | null;
+  len: number | null;
+  combo: number | null;
+  bpm: number | null;
+  yearMin: number | null;
+  globalMax: number | null;
+  /** highest pp among my scores */
+  pp: number | null;
+  /** highest standardized score (mod multipliers push it past 1M) */
+  stdMax: number | null;
+}
+export async function fetchFilterBounds(): Promise<FilterBounds> {
+  const res = await fetch("/api/metrics/filter-bounds");
+  if (!res.ok) throw new Error(`filter-bounds: HTTP ${res.status}`);
+  return res.json();
+}
 
 export interface DisplayPrefs {
   wither: boolean;

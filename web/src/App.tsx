@@ -69,9 +69,9 @@ export default function App() {
       )}
       {view === "metrics" && (
         <MetricsView
-          onMissingMaps={(id, name) =>
+          onMissingMaps={(id, name, matching) =>
             drillDown(
-              { ...DEFAULT_FILTERS, mode: filters.mode, metricMissing: { id, name } },
+              { ...DEFAULT_FILTERS, mode: filters.mode, metricMissing: { id, name, matching } },
               [{ id: "star_rating", desc: false }]
             )
           }

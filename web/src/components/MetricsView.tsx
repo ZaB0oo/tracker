@@ -66,11 +66,18 @@ function describeParams(p: Metric["params"]): string {
   if (s.fc === "pfc") parts.push("PFC");
   if (s.minGrade) parts.push(`${displayGrade(s.minGrade)}+`);
   rng(s.acc?.min, s.acc?.max, "acc", "%");
+  rng(s.pp?.min, s.pp?.max, "pp");
   if (s.minClassic) parts.push(`classic ≥ ${fmtCompact(s.minClassic)}`);
-  if (s.minScore) parts.push(`std ≥ ${fmtCompact(s.minScore)}`);
+  if (s.minScore != null && s.maxScore != null)
+    parts.push(`standardized ${fmtCompact(s.minScore)}–${fmtCompact(s.maxScore)}`);
+  else if (s.minScore != null) parts.push(`standardized ≥ ${fmtCompact(s.minScore)}`);
+  else if (s.maxScore != null) parts.push(`standardized ≤ ${fmtCompact(s.maxScore)}`);
   if (s.requiredMods?.length) parts.push(`+${s.requiredMods.join("")}`);
-  if (s.allowedMods)
-    parts.push(s.allowedMods.length ? `only ${s.allowedMods.join("/")}` : "nomod");
+  if (s.anyMods?.length) parts.push(`mods ${s.anyMods.join("/")}`);
+  if (s.allowedMods) {
+    const rest = s.allowedMods.filter((m) => m !== "CL");
+    parts.push(rest.length ? `only ${s.allowedMods.join("/")}` : "nomod");
+  }
   const counts: [keyof typeof s.counts, string][] = [
     ["n100", "100s"], ["n50", "50s"], ["nMiss", "misses"],
     ["nSliderEnd", "slider ends"], ["imperfections", "imperfections"],
@@ -97,6 +104,7 @@ function describeParams(p: Metric["params"]): string {
   if (m.ids?.length) parts.push(`${fmtNum(m.ids.length)}-map pool`);
 
   if (p.kind === "ranked_score") parts.unshift("ranked score");
+  if (p.kind === "count" && p.descending) parts.unshift("to fix");
   return parts.join(" · ") || "all clears";
 }
 
@@ -117,6 +125,7 @@ function MetricCard({
 }) {
   const isRanked = m.params.kind === "ranked_score";
   const isPp = m.params.kind === "pp";
+  const isDesc = m.params.kind === "count" && !!m.params.descending;
   const fmtV = isRanked
     ? fmtCompact
     : isPp
@@ -139,7 +148,7 @@ function MetricCard({
   const dim = (m.params.breakdown ?? "sr") as MetricBreakdown;
   const hasTotals = m.byBucket.some((b) => b.total > 0);
   const srMax = Math.max(...m.byBucket.map((b) => b.value), 1);
-  const srTitle = `Completion by ${BREAKDOWN_TITLES[dim]}`;
+  const srTitle = `${isDesc ? "Remaining" : "Completion"} by ${BREAKDOWN_TITLES[dim]}`;
   // days between consecutive milestones (ascending order)
   const daysBetween = new Map<number, number>();
   for (let i = 1; i < m.milestones.length; i++) {
@@ -152,11 +161,26 @@ function MetricCard({
   }
 
   // Progress bar: X / total available (total mode) or toward the next step.
+  // Descending metrics head toward 0 (bar fills as the remaining count drops).
   let pct: number;
   let label: string;
   if (totalMode) {
-    pct = m.total > 0 ? (m.count / m.total) * 100 : 0;
-    label = `${fmtV(m.count)} / ${fmtV(m.total)} (${pct.toFixed(2)}%)`;
+    if (isDesc) {
+      pct = m.total > 0 ? ((m.total - m.count) / m.total) * 100 : 0;
+      label = `${fmtV(m.count)} left / ${fmtV(m.total)} (${pct.toFixed(2)}% done)`;
+    } else {
+      pct = m.total > 0 ? (m.count / m.total) * 100 : 0;
+      label = `${fmtV(m.count)} / ${fmtV(m.total)} (${pct.toFixed(2)}%)`;
+    }
+  } else if (isDesc) {
+    if (m.count === 0) {
+      pct = 100;
+      label = "0 left — done!";
+    } else {
+      const upper = Math.ceil(m.count / m.step) * m.step;
+      pct = ((upper - m.count) / m.step) * 100;
+      label = `${fmtV(m.count)} left — next: ${fmtV(upper - m.step)} (${pct.toFixed(1)}%)`;
+    }
   } else {
     const reached = Math.floor(m.count / m.step) * m.step;
     pct = ((m.count - reached) / m.step) * 100;
@@ -175,7 +199,11 @@ function MetricCard({
         {!isRanked && !isPp && (
           <button
             className="metric-btn"
-            title="List the missing maps in the Maps tab"
+            title={
+              isDesc
+                ? "List the maps to fix in the Maps tab"
+                : "List the missing maps in the Maps tab"
+            }
             onClick={() => onMissing(m)}
           >
             <MissingIcon />
@@ -327,7 +355,7 @@ function MetricCard({
 export function MetricsView({
   onMissingMaps,
 }: {
-  onMissingMaps: (id: number, name: string) => void;
+  onMissingMaps: (id: number, name: string, matching: boolean) => void;
 }) {
   const qc = useQueryClient();
   const [gran, setGran] = useState<"month" | "day">("month");
@@ -380,7 +408,13 @@ export function MetricsView({
             gran={gran}
             onDelete={(id) => del.mutate(id)}
             onEdit={(metric) => setEditing(metric)}
-            onMissing={(metric) => onMissingMaps(metric.id, metric.name)}
+            onMissing={(metric) =>
+              onMissingMaps(
+                metric.id,
+                metric.name,
+                metric.params.kind === "count" && !!metric.params.descending
+              )
+            }
             onCtx={onCtx}
           />
         ))}

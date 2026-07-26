@@ -26,6 +26,18 @@ function level(c: number): number {
 }
 const COLORS = ["#2a2338", "#5a3752", "#95436f", "#d05189", "#ff66aa"];
 
+/** "HDDTCL" from the score's mods JSON ("" when nomod / unparseable). */
+function modsLabel(mods: string): string {
+  try {
+    return (JSON.parse(mods) as { acronym?: string }[])
+      .map((m) => m.acronym ?? "")
+      .filter(Boolean)
+      .join("");
+  } catch {
+    return "";
+  }
+}
+
 interface DayStats {
   clears: number;
   fc: number;
@@ -83,7 +95,7 @@ export function HeatmapPanel({ cutoffDay = null }: { cutoffDay?: string | null }
   });
   const [modalId, setModalId] = useState<number | null>(null);
   const [ctx, setCtx] = useState<{ x: number; y: number; row: ClearRow } | null>(null);
-  const [sortKey, setSortKey] = useState<"time" | "title" | "sr" | "grade">("time");
+  const [sortKey, setSortKey] = useState<"time" | "title" | "sr" | "grade" | "acc">("time");
   const [sortDesc, setSortDesc] = useState(false);
   if (!data) return null;
 
@@ -103,6 +115,7 @@ export function HeatmapPanel({ cutoffDay = null }: { cutoffDay?: string | null }
         cmp = (GRADE_ORDER[a.rank] ?? -1) - (GRADE_ORDER[b.rank] ?? -1)
           || (a.accuracy - b.accuracy);
         break;
+      case "acc": cmp = a.accuracy - b.accuracy; break;
     }
     return sortDesc ? -cmp : cmp;
   });
@@ -111,7 +124,7 @@ export function HeatmapPanel({ cutoffDay = null }: { cutoffDay?: string | null }
     else {
       setSortKey(key);
       // sensible default direction per column
-      setSortDesc(key === "sr" || key === "grade");
+      setSortDesc(key === "sr" || key === "grade" || key === "acc");
     }
   };
 
@@ -264,6 +277,7 @@ export function HeatmapPanel({ cutoffDay = null }: { cutoffDay?: string | null }
                         [
                           ["grade", "Grade"],
                           ["title", "Map"],
+                          ["acc", "Acc"],
                           ["sr", "★"],
                           ["time", "Time"],
                         ] as const
@@ -297,6 +311,12 @@ export function HeatmapPanel({ cutoffDay = null }: { cutoffDay?: string | null }
                         </td>
                         <td className="hm-day-map-name">
                           {r.artist} - {r.title} <i>[{r.version}]</i>
+                          {modsLabel(r.mods) && (
+                            <span className="hm-day-map-mods"> +{modsLabel(r.mods)}</span>
+                          )}
+                        </td>
+                        <td className="hm-day-map-acc">
+                          {(r.accuracy * 100).toFixed(2)}%
                         </td>
                         <td className="hm-day-map-sr">
                           {r.star_rating != null ? r.star_rating.toFixed(1) : "—"}

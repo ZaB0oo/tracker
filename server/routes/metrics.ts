@@ -30,6 +30,42 @@ function queueModdedSr(beatmapId: number, diffMods: string[]): void {
 // Custom metrics (milestones + evolution)
 export const metricsRouter = Router();
 
+// Real maxima of the catalog, used as slider bounds in the metric builder
+// (instead of arbitrary caps / ∞). Loved maps are excluded: their broken SR /
+// BPM outliers would stretch the sliders into uselessness.
+metricsRouter.get("/metrics/filter-bounds", (_req, res) => {
+  const db = getDb();
+  const b = db
+    .prepare(
+      `SELECT MAX(star_rating) sr, MAX(total_length) len, MAX(max_combo) combo,
+         MAX(bpm) bpm
+       FROM beatmaps WHERE ruleset = 0 AND status IN (1, 2)`
+    )
+    .get() as { sr: number | null; len: number | null; combo: number | null; bpm: number | null };
+  const yr = db
+    .prepare(
+      `SELECT MIN(strftime('%Y', ranked_date)) y FROM beatmapsets
+       WHERE ranked_date IS NOT NULL AND status IN (1, 2)`
+    )
+    .get() as { y: string | null };
+  const g = db
+    .prepare("SELECT MAX(global_rank) r FROM beatmap_user")
+    .get() as { r: number | null };
+  const pp = db
+    .prepare("SELECT MAX(pp) p, MAX(total_score) std FROM scores")
+    .get() as { p: number | null; std: number | null };
+  res.json({
+    sr: b.sr,
+    len: b.len,
+    combo: b.combo,
+    bpm: b.bpm,
+    yearMin: yr.y != null ? Number(yr.y) : null,
+    globalMax: g.r,
+    pp: pp.p,
+    stdMax: pp.std,
+  });
+});
+
 metricsRouter.get("/metrics", (req, res) => {
   const db = getDb();
   const gran = req.query.granularity === "day" ? "day" : "month";
