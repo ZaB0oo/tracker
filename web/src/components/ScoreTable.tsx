@@ -4,6 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { fetchTable } from "../api";
 import { displayGrade } from "../format";
 import { firstPlaceLabel, useCountryCode } from "../country";
+import { ctxMenuStyle } from "../ctxmenu";
 import { GradeBadge } from "./GradeBadge";
 import { MedalIcon } from "./Icons";
 import { FC_LABELS, STATUS_LABELS, type Filters, type TableRow } from "../types";
@@ -343,7 +344,7 @@ export function ScoreTable({
       {ctx && (
         <>
           <div className="ctx-overlay" onClick={() => setCtx(null)} onContextMenu={(e) => { e.preventDefault(); setCtx(null); }} />
-          <div className="ctx-menu" style={{ left: ctx.x, top: ctx.y }}>
+          <div className="ctx-menu" style={ctxMenuStyle(ctx.x, ctx.y)}>
             <div className="ctx-title">
               {ctx.row.artist} – {ctx.row.title} [{ctx.row.version}]
             </div>

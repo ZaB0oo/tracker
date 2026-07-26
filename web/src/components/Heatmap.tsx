@@ -7,6 +7,7 @@ import {
   type ClearRow,
   type TimelinePoint,
 } from "../api";
+import { ctxMenuStyle } from "../ctxmenu";
 import { fmtCompact, fmtDate, fmtNum } from "../format";
 import { GradeBadge } from "./GradeBadge";
 import { MapModal } from "./MapModal";
@@ -325,7 +326,7 @@ export function HeatmapPanel({ cutoffDay = null }: { cutoffDay?: string | null }
               setCtx(null);
             }}
           />
-          <div className="ctx-menu" style={{ left: ctx.x, top: ctx.y }}>
+          <div className="ctx-menu" style={ctxMenuStyle(ctx.x, ctx.y)}>
             <div className="ctx-title">
               {ctx.row.artist} – {ctx.row.title} [{ctx.row.version}]
             </div>

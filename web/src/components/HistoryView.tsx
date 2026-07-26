@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { fetchClears, fetchCountryHistory, fetchGlobalHistory } from "../api";
 import { firstPlaceLabel, useCountryCode } from "../country";
+import { ctxMenuStyle } from "../ctxmenu";
 import { displayGrade, fmtDateTime, fmtNum } from "../format";
 import { GradeBadge } from "./GradeBadge";
 import { MapModal } from "./MapModal";
@@ -346,7 +347,7 @@ export function HistoryView() {
               setCtx(null);
             }}
           />
-          <div className="ctx-menu" style={{ left: ctx.x, top: ctx.y }}>
+          <div className="ctx-menu" style={ctxMenuStyle(ctx.x, ctx.y)}>
             <div className="ctx-title">
               {ctx.row.artist} – {ctx.row.title} [{ctx.row.version}]
             </div>

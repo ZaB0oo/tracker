@@ -41,6 +41,7 @@ export function EvoChart({
 }) {
   const gradId = useId();
   const svgRef = useRef<SVGSVGElement>(null);
+  const pickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [zoom, setZoom] = useState<[number, number] | null>(null);
   const [drag, setDrag] = useState<[number, number] | null>(null);
   const [hover, setHover] = useState<number | null>(null);
@@ -90,12 +91,20 @@ export function EvoChart({
               setZoom([base + a, base + b]);
               setHover(null);
             } else if (onPick && view[a]) {
-              onPick(view[a].period); // simple click: select the period
+              const period = view[a].period;
+              if (pickTimer.current) clearTimeout(pickTimer.current);
+              pickTimer.current = setTimeout(() => onPick(period), 250);
             }
           }
           setDrag(null);
         }}
-        onDoubleClick={() => setZoom(null)}
+        onDoubleClick={() => {
+          if (pickTimer.current) {
+            clearTimeout(pickTimer.current);
+            pickTimer.current = null;
+          }
+          setZoom(null);
+        }}
       >
         <defs>
           <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">

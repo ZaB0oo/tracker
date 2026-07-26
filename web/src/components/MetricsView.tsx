@@ -7,6 +7,7 @@ import {
   type Metric,
   type MetricBreakdown,
 } from "../api";
+import { ctxMenuStyle } from "../ctxmenu";
 import { displayGrade, fmtCompact, fmtDate, fmtNum } from "../format";
 import { EvoChart } from "./EvoChart";
 import { GradeBadge } from "./GradeBadge";
@@ -395,7 +396,7 @@ export function MetricsView({
               setCtx(null);
             }}
           />
-          <div className="ctx-menu" style={{ left: ctx.x, top: ctx.y }}>
+          <div className="ctx-menu" style={ctxMenuStyle(ctx.x, ctx.y)}>
             <div className="ctx-title">
               {ctx.row.artist} – {ctx.row.title} [{ctx.row.version}]
             </div>
