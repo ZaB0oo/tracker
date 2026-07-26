@@ -859,6 +859,10 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .mb-slider { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
 .mb-slider-label { width: 120px; flex-shrink: 0; font-size: 13px; }
 .mb-slider-num { width: 78px; flex-shrink: 0; font-size: 12px; }
+.mb-grades { display: inline-flex; }
+/* same look as .mb-inline label, but a label would forward :hover/clicks to
+   its first chip (SSH lighting up when hovering D) */
+.mb-grades-wrap { display: flex; align-items: center; gap: 6px; font-size: 13px; }
 .mb-slider-track { position: relative; flex: 1; height: 22px; }
 /* rail inset by the thumb radius so the bar never sticks out past the thumbs */
 .mb-slider-rail {

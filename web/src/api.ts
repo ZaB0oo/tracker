@@ -400,8 +400,10 @@ export interface Range {
   max: number | null;
 }
 export interface MetricScoreConds {
-  fc: "none" | "any" | "pfc";
+  fc: "none" | "any" | "pfc" | "nonfc";
   minGrade: string | null;
+  /** exact grades the score must have (subset of XH X SH S A B C D) */
+  grades?: string[] | null;
   minScore: number | null;
   /** upper bound on standardized score */
   maxScore?: number | null;
@@ -533,6 +535,7 @@ export const DEFAULT_METRIC_PARAMS: MetricParams = {
   score: {
     fc: "none",
     minGrade: null,
+    grades: null,
     minScore: null,
     maxScore: null,
     minClassic: null,

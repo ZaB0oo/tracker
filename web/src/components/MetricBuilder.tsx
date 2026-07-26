@@ -10,7 +10,7 @@ import {
   type MetricParams,
   type Range,
 } from "../api";
-import { fmtNum } from "../format";
+import { displayGrade, fmtNum } from "../format";
 
 // osu!std mods grouped by the in-game categories (lazer). AT/CN can't submit a
 // score so they're excluded. Fun mods are std-only.
@@ -42,6 +42,7 @@ interface MapField {
   lo: number;
   hi: number;
 }
+const GRADES = ["XH", "X", "SH", "S", "A", "B", "C", "D"];
 const STATUSES = [
   { v: 1, label: "Ranked" },
   { v: 2, label: "Approved" },
@@ -267,6 +268,15 @@ export function MetricBuilder({
     p.score.requiredMods ??
     (Array.isArray(p.score.allowedMods) ? ["NM"] : []);
 
+  // grade chips; a legacy "Grade ≥" metric pre-fills the equivalent selection
+  const gradeList =
+    p.score.grades ??
+    (p.score.minGrade === "S"
+      ? ["S", "SH", "X", "XH"]
+      : p.score.minGrade === "A"
+        ? ["A", "S", "SH", "X", "XH"]
+        : []);
+
   // Debounced live preview.
   const paramsKey = useMemo(() => JSON.stringify(p), [p]);
   useEffect(() => {
@@ -336,20 +346,41 @@ export function MetricBuilder({
             <div className="mb-inline">
               <label>
                 FC
-                <select value={p.score.fc} onChange={(e) => setScore({ fc: e.target.value as "none" | "any" | "pfc" })}>
+                <select
+                  value={p.score.fc}
+                  onChange={(e) =>
+                    setScore({ fc: e.target.value as MetricParams["score"]["fc"] })
+                  }
+                >
                   <option value="none">No requirement</option>
                   <option value="any">Full combo</option>
                   <option value="pfc">Perfect (SS combo)</option>
+                  <option value="nonfc">Not FC</option>
                 </select>
               </label>
-              <label>
-                Grade ≥
-                <select value={p.score.minGrade ?? ""} onChange={(e) => setScore({ minGrade: e.target.value || null })}>
-                  <option value="">Any</option>
-                  <option value="A">A</option>
-                  <option value="S">S</option>
-                </select>
-              </label>
+              <div className="mb-grades-wrap">
+                Grades
+                <span className="adv-mods mb-grades">
+                  {GRADES.map((g) => {
+                    const on = gradeList.includes(g);
+                    return (
+                      <button
+                        key={g} className={`chip ${on ? "on" : ""}`}
+                        onClick={() => {
+                          const cur = new Set(gradeList);
+                          cur.has(g) ? cur.delete(g) : cur.add(g);
+                          setScore({
+                            grades: cur.size ? [...cur] : null,
+                            minGrade: null,
+                          });
+                        }}
+                      >
+                        {displayGrade(g)}
+                      </button>
+                    );
+                  })}
+                </span>
+              </div>
             </div>
             <SliderRow
               label="Standardized" lo={0} step={1000}

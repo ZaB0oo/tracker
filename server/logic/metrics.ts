@@ -10,8 +10,10 @@ export interface Range {
 }
 
 export interface MetricScoreConds {
-  fc: "none" | "any" | "pfc";
-  minGrade: string | null; // "A" | "S"
+  fc: "none" | "any" | "pfc" | "nonfc";
+  minGrade: string | null; // "A" | "S" (legacy — new metrics use `grades`)
+  /** exact grades the score must have (subset of XH X SH S A B C D) */
+  grades?: string[] | null;
   minScore: number | null;
   maxScore?: number | null; // upper bound on standardized score
   minClassic: number | null;
@@ -73,6 +75,7 @@ const GRADE_IN: Record<string, string> = {
   A: "'A','S','SH','X','XH'",
   S: "'S','SH','X','XH'",
 };
+const GRADES_ALL = ["XH", "X", "SH", "S", "A", "B", "C", "D"];
 const MOD_RE = /^[A-Z0-9]{2}$/;
 const num = (v: unknown): number | null =>
   typeof v === "number" && Number.isFinite(v) ? v : null;
@@ -97,8 +100,13 @@ export function scoreWhere(c: MetricScoreConds): string {
   const w: string[] = ["s.passed = 1"];
   if (c.fc === "any") w.push("s.fc_state <= 1");
   else if (c.fc === "pfc") w.push("s.fc_state = 0");
+  else if (c.fc === "nonfc") w.push("s.fc_state = 2");
   if (c.minGrade && GRADE_IN[c.minGrade])
     w.push(`s.rank IN (${GRADE_IN[c.minGrade]})`);
+  if (Array.isArray(c.grades)) {
+    const gs = c.grades.filter((g) => GRADES_ALL.includes(g));
+    if (gs.length) w.push(`s.rank IN (${gs.map((g) => `'${g}'`).join(",")})`);
+  }
   if (num(c.minScore) != null) w.push(`s.total_score >= ${num(c.minScore)}`);
   if (num(c.maxScore) != null) w.push(`s.total_score <= ${num(c.maxScore)}`);
   if (num(c.minClassic) != null)
@@ -194,6 +202,7 @@ export function mapWhere(
 export const DEFAULT_SCORE_CONDS: MetricScoreConds = {
   fc: "none",
   minGrade: null,
+  grades: null,
   minScore: null,
   maxScore: null,
   minClassic: null,

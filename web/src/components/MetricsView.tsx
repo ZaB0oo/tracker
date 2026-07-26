@@ -64,7 +64,9 @@ function describeParams(p: Metric["params"]): string {
   const s = p.score;
   if (s.fc === "any") parts.push("FC");
   if (s.fc === "pfc") parts.push("PFC");
+  if (s.fc === "nonfc") parts.push("non-FC");
   if (s.minGrade) parts.push(`${displayGrade(s.minGrade)}+`);
+  if (s.grades?.length) parts.push(s.grades.map(displayGrade).join("/"));
   rng(s.acc?.min, s.acc?.max, "acc", "%");
   rng(s.pp?.min, s.pp?.max, "pp");
   if (s.minClassic) parts.push(`classic ≥ ${fmtCompact(s.minClassic)}`);
