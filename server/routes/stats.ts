@@ -628,6 +628,12 @@ statsRouter.get("/overlay", (_req, res) => {
         ${gradeCols},
         SUM(COALESCE(u.any_fc, 0)) fc,
         SUM(COALESCE(u.country_first, 0)) country,
+        SUM(CASE WHEN u.global_rank = 1 THEN 1 ELSE 0 END) top1,
+        SUM(CASE WHEN u.global_rank <= 8 THEN 1 ELSE 0 END) top8,
+        SUM(CASE WHEN u.global_rank <= 15 THEN 1 ELSE 0 END) top15,
+        SUM(CASE WHEN u.global_rank <= 25 THEN 1 ELSE 0 END) top25,
+        SUM(CASE WHEN u.global_rank <= 50 THEN 1 ELSE 0 END) top50,
+        SUM(CASE WHEN u.global_rank <= 100 THEN 1 ELSE 0 END) top100,
         COALESCE(SUM(COALESCE(s.classic_total_score, s.total_score)), 0) ranked_classic,
         COALESCE(SUM(CASE WHEN ${N_OBJ} > 0
           THEN ${witherSql("s.total_score")}
@@ -646,6 +652,14 @@ statsRouter.get("/overlay", (_req, res) => {
     grades,
     fc: row.fc ?? 0,
     country: row.country ?? 0,
+    globalTops: {
+      top1: row.top1 ?? 0,
+      top8: row.top8 ?? 0,
+      top15: row.top15 ?? 0,
+      top25: row.top25 ?? 0,
+      top50: row.top50 ?? 0,
+      top100: row.top100 ?? 0,
+    },
     rankedClassic: row.ranked_classic ?? 0,
     rankedWither: row.ranked_wither ?? 0,
   });

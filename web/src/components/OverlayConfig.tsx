@@ -14,18 +14,15 @@ const GRADE_ITEMS = [
   { id: "c", label: "C" },
   { id: "d", label: "D" },
 ];
-const SESSION_ITEMS = [
-  { id: "clears", label: "Clears gained" },
-  ...GRADE_ITEMS.map((g) => ({ id: g.id, label: `${g.label} gained` })),
-  { id: "fc", label: "FCs gained" },
-  { id: "country", label: "Country #1 gained" },
-  { id: "score", label: "Ranked score gained" },
-];
-const TOTAL_ITEMS = [
+// Each stat shows its TOTAL with the session gain as a green "+n".
+const STAT_ITEMS = [
+  { id: "timer", label: "Session timer" },
   { id: "clears", label: "Clears (+ completion %)" },
-  ...GRADE_ITEMS,
   { id: "fc", label: "FCs" },
   { id: "country", label: "Country #1" },
+  { id: "global", label: "Global tops (top 1/8/15/25/50/100)" },
+  { id: "ranked", label: "Ranked score" },
+  { id: "last", label: "Last played map" },
 ];
 
 function Section({
@@ -120,28 +117,21 @@ export function OverlayConfig({ onClose }: { onClose: () => void }) {
           URL (transparent background).
         </p>
 
-        <Section title={master("session", "Session (live gains since the source loaded)")}>
-          {itemList("session", SESSION_ITEMS)}
+        <div className="ov-items">
+          {STAT_ITEMS.map((it) => (
+            <label key={it.id} className="mb-check">
+              <input
+                type="checkbox"
+                checked={!hidden.has(it.id)}
+                onChange={() => toggle(it.id)}
+              />
+              {it.label}
+            </label>
+          ))}
+        </div>
+        <Section title={master("grades", "Grades (total + session gain)")}>
+          {itemList("grades", GRADE_ITEMS)}
         </Section>
-        <Section title={master("total", "Totals")}>
-          {itemList("total", TOTAL_ITEMS)}
-        </Section>
-        <label className="adv-toggle">
-          <input
-            type="checkbox"
-            checked={!hidden.has("ranked")}
-            onChange={() => toggle("ranked")}
-          />
-          <span>Ranked score</span>
-        </label>
-        <label className="adv-toggle">
-          <input
-            type="checkbox"
-            checked={!hidden.has("last")}
-            onChange={() => toggle("last")}
-          />
-          <span>Last played map</span>
-        </label>
 
         {(metricsData?.metrics.length ?? 0) > 0 && (
           <Section title="Custom metrics">

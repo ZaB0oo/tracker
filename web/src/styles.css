@@ -874,26 +874,49 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 /* OBS stream overlay (?overlay=1): transparent background, compact card */
 body.overlay-body { background: transparent; }
 .overlay-root { padding: 8px; display: inline-block; }
+/* Compact vertical card: one counter per stat (total + green session gain). */
 .ov-card {
   background: rgb(23, 19, 31); border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px; padding: 12px 16px; min-width: 780px;
+  border-radius: 12px; padding: 12px 18px; min-width: 720px; max-width: 720px;
   font-size: 15px; color: #fff; backdrop-filter: blur(2px);
+  display: flex; flex-direction: column; gap: 6px;
+}
+/* light separator between stat groups (grades | global/country | ranked | metrics) */
+.ov-section {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin-top: 2px; padding-top: 6px;
 }
 .ov-row {
-  display: flex; align-items: baseline; gap: 30px; line-height: 30px;
-  white-space: nowrap;
+  display: flex; align-items: baseline; gap: 18px; line-height: 24px;
+  white-space: nowrap; flex-wrap: wrap;
 }
 .ov-row b { font-weight: 800; }
 .ov-tag {
-  width: 76px; flex-shrink: 0; font-size: 11px; font-weight: 800;
+  flex-shrink: 0; font-size: 11px; font-weight: 800;
   letter-spacing: 0.1em; color: var(--accent);
 }
-.ov-session b { color: var(--green); }
-.ov-timer { color: var(--fg-dim); font-variant-numeric: tabular-nums; width: 84px; }
+.ov-timer { color: var(--fg-dim); font-variant-numeric: tabular-nums; }
 .ov-dim { color: var(--fg-dim); font-size: 13px; }
-.ov-last { border-top: 1px solid rgba(255, 255, 255, 0.08); margin-top: 4px; padding-top: 4px; }
+/* Grades: 2 rows x 4 columns like the dashboard, gain under the total */
+.ov-grades {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px 10px;
+  padding: 2px 0;
+}
+.ov-grade-cell {
+  display: flex; align-items: center; gap: 6px; justify-content: flex-start;
+}
+.ov-grade-cell b { font-weight: 800; }
+.ov-grade-cell .ov-gain { font-size: 12px; }
+/* Global tops: 2 rows x 3 columns */
+.ov-tiers {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 14px;
+  padding-top: 4px;
+}
+.ov-tier-cell { white-space: nowrap; }
+.ov-tier { color: #ffd966; font-weight: 700; font-size: 12.5px; }
+.ov-last { border-top: 1px solid rgba(255, 255, 255, 0.08); margin-top: 2px; padding-top: 6px; }
 .ov-lastmap {
-  overflow: hidden; text-overflow: ellipsis; max-width: 560px; font-size: 14px;
+  overflow: hidden; text-overflow: ellipsis; max-width: 400px; font-size: 14px;
 }
 
 /* Country #1 history */

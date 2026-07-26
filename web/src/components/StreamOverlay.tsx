@@ -19,7 +19,6 @@ const METRIC_IDS = (new URLSearchParams(window.location.search).get("metrics") ?
   .filter((n) => Number.isInteger(n) && n > 0);
 
 const delta = (cur: number, base: number) => cur - base;
-const plus = (n: number) => (n > 0 ? `+${fmtNum(n)}` : "0");
 
 /**
  * Stream overlay (OBS browser source, /?overlay=1): transparent background,
@@ -83,69 +82,94 @@ export function StreamOverlay() {
       .filter(Boolean)
   );
 
+  /** total + green session gain, one counter per stat */
+  const stat = (label: string, total: string, gain: number) => (
+    <span>
+      {label} <b>{total}</b>
+      {gain > 0 && <span className="ov-gain"> +{fmtNum(gain)}</span>}
+    </span>
+  );
+  const TIERS = [
+    ["#1", "top1"],
+    ["Top 8", "top8"],
+    ["Top 15", "top15"],
+    ["Top 25", "top25"],
+    ["Top 50", "top50"],
+    ["Top 100", "top100"],
+  ] as const;
+  const anyGlobal = Object.values(data.globalTops).some((v) => v > 0);
+
   return (
     <div className="overlay-root">
       <div className="ov-card">
-        {!hide.has("session") && (
+        {!hide.has("timer") && (
           <div className="ov-row ov-session">
             <span className="ov-tag">SESSION</span>
             <span className="ov-timer">{timer}</span>
-            {!hide.has("session.clears") && (
-              <span>Clears <b>{plus(delta(data.clears, b.clears))}</b></span>
-            )}
-            {GRADE_ORDER.map(
-              (k) =>
-                !hide.has(`session.${k.toLowerCase()}`) && (
-                  <span key={k} className="ov-grade">
-                    <GradeBadge grade={k} width={26} />{" "}
-                    <b>{plus(delta(data.grades[k] ?? 0, b.grades[k] ?? 0))}</b>
-                  </span>
-                )
-            )}
-            {!hide.has("session.fc") && (
-              <span>FC <b>{plus(delta(data.fc, b.fc))}</b></span>
-            )}
-            {!hide.has("session.country") && (
-              <span>{firstPlaceLabel(country)} <b>{plus(delta(data.country, b.country))}</b></span>
-            )}
-            {!hide.has("session.score") && (
-              <span>
-                Score <b>{rankedGain > 0 ? `+${fmtNum(rankedGain)}` : "0"}</b>
-              </span>
-            )}
           </div>
         )}
-        {!hide.has("total") && (
-          <div className="ov-row">
-            <span className="ov-tag">TOTAL</span>
-            {!hide.has("total.clears") && (
-              <span>
-                Clears <b>{fmtNum(data.clears)}</b>
-                <span className="ov-dim"> / {fmtNum(data.totalMaps)} ({completion.toFixed(2)}%)</span>
-              </span>
-            )}
-            {GRADE_ORDER.map(
-              (k) =>
-                !hide.has(`total.${k.toLowerCase()}`) && (
-                  <span key={k} className="ov-grade">
-                    <GradeBadge grade={k} width={26} /> <b>{fmtNum(data.grades[k] ?? 0)}</b>
+        <div className="ov-row">
+          {!hide.has("clears") && (
+            <span>
+              Clears <b>{fmtNum(data.clears)}</b>
+              <span className="ov-dim"> / {fmtNum(data.totalMaps)} ({completion.toFixed(2)}%)</span>
+              {delta(data.clears, b.clears) > 0 && (
+                <span className="ov-gain"> +{fmtNum(delta(data.clears, b.clears))}</span>
+              )}
+            </span>
+          )}
+          {!hide.has("fc") && stat("FC", fmtNum(data.fc), delta(data.fc, b.fc))}
+          {!hide.has("ranked") && (
+            <span>
+              Score <b>{fmtNum(data.rankedClassic)}</b>
+              {rankedGain > 0 && <span className="ov-gain"> +{fmtNum(rankedGain)}</span>}
+            </span>
+          )}
+        </div>
+        {!hide.has("grades") && (
+          <div className="ov-grades">
+            {GRADE_ORDER.map((k) => {
+              const gain = delta(data.grades[k] ?? 0, b.grades[k] ?? 0);
+              return (
+                !hide.has(`grades.${k.toLowerCase()}`) && (
+                  <span key={k} className="ov-grade-cell">
+                    <GradeBadge grade={k} width={28} />
+                    <b>{fmtNum(data.grades[k] ?? 0)}</b>
+                    {gain > 0 && <span className="ov-gain">+{fmtNum(gain)}</span>}
                   </span>
                 )
-            )}
-            {!hide.has("total.fc") && <span>FC <b>{fmtNum(data.fc)}</b></span>}
-            {!hide.has("total.country") && (
-              <span>{firstPlaceLabel(country)} <b>{fmtNum(data.country)}</b></span>
-            )}
+              );
+            })}
           </div>
         )}
-        {!hide.has("ranked") && (
-          <div className="ov-row">
-            <span className="ov-tag">RANKED SCORE</span>
-            <span>Classic <b>{fmtNum(data.rankedClassic)}</b></span>
+        {(!hide.has("country") || (!hide.has("global") && anyGlobal)) && (
+          <div className="ov-section">
+            <div className="ov-row">
+              <span className="ov-tag">GLOBAL / {country ?? "COUNTRY"}</span>
+              {!hide.has("country") &&
+                stat(firstPlaceLabel(country), fmtNum(data.country), delta(data.country, b.country))}
+            </div>
+            {!hide.has("global") && anyGlobal && (
+              <div className="ov-tiers">
+                {TIERS.map(([label, key]) => {
+                  const gain = delta(
+                    data.globalTops[key],
+                    b.globalTops?.[key] ?? data.globalTops[key]
+                  );
+                  return (
+                    <span key={key} className="ov-tier-cell">
+                      <span className="ov-tier">{label}</span>{" "}
+                      <b>{fmtNum(data.globalTops[key])}</b>
+                      {gain > 0 && <span className="ov-gain"> +{fmtNum(gain)}</span>}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
         {metrics && metrics.metrics.length > 0 && (
-          <div className="ov-row">
+          <div className="ov-row ov-section">
             <span className="ov-tag">METRICS</span>
             {metrics.metrics.map((m) => {
               const base = metricBaseline.current?.get(m.id) ?? m.count;

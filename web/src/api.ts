@@ -13,6 +13,10 @@ export interface OverlayStats {
   grades: Record<string, number>; // XH, X, SH, S, A, B, C, D
   fc: number;
   country: number;
+  globalTops: {
+    top1: number; top8: number; top15: number;
+    top25: number; top50: number; top100: number;
+  };
   rankedClassic: number;
   rankedWither: number;
 }
