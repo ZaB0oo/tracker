@@ -76,13 +76,20 @@ export function EvoChart({
           setHover(null);
           setDrag(null);
         }}
-        onMouseDown={(e) => setDrag([idxFromEvent(e), idxFromEvent(e)])}
+        onMouseDown={(e) => {
+          // any new press cancels a pending pick (2nd press of a double-click)
+          if (pickTimer.current) {
+            clearTimeout(pickTimer.current);
+            pickTimer.current = null;
+          }
+          setDrag([idxFromEvent(e), idxFromEvent(e)]);
+        }}
         onMouseMove={(e) => {
           const i = idxFromEvent(e);
           setHover(i);
           setDrag((d) => (d ? [d[0], i] : null));
         }}
-        onMouseUp={() => {
+        onMouseUp={(e) => {
           if (drag) {
             const a = Math.min(drag[0], drag[1]);
             const b = Math.max(drag[0], drag[1]);
@@ -90,10 +97,10 @@ export function EvoChart({
               const base = zoom ? zoom[0] : 0;
               setZoom([base + a, base + b]);
               setHover(null);
-            } else if (onPick && view[a]) {
+            } else if (onPick && view[a] && e.detail === 1) {
+              // 1st click only; delayed so a double-click (reset zoom) wins
               const period = view[a].period;
-              if (pickTimer.current) clearTimeout(pickTimer.current);
-              pickTimer.current = setTimeout(() => onPick(period), 250);
+              pickTimer.current = setTimeout(() => onPick(period), 400);
             }
           }
           setDrag(null);
