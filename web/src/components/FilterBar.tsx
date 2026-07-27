@@ -3,6 +3,8 @@ import { firstPlaceLabel, useCountryCode } from "../country";
 import { collectionExportUrl, fetchLazerImportStatus, lazerImport } from "../api";
 import { displayGrade } from "../format";
 import { DEFAULT_FILTERS, GRADE_ORDER, type Filters } from "../types";
+import { NamePrompt } from "./NamePrompt";
+import { appAlert } from "../dialogs";
 const FC_OPTS = [
   { v: "0", label: "PFC" },
   { v: "1", label: "FC" },
@@ -63,6 +65,9 @@ export function FilterBar({
   // Direct lazer import: button shown only if the server has the importer.
   const [lazerAvailable, setLazerAvailable] = useState(false);
   const [lazerBusy, setLazerBusy] = useState(false);
+  // which export is asking for a collection name (window.prompt does not
+  // exist in Electron — this drives the in-app NamePrompt modal instead)
+  const [naming, setNaming] = useState<"collection" | "lazer" | null>(null);
   useEffect(() => {
     void fetchLazerImportStatus().then((s) => setLazerAvailable(s.available));
   }, []);
@@ -186,16 +191,7 @@ export function FilterBar({
         <button
           className="export-coll"
           title="Download these maps as a collection.db file"
-          onClick={() => {
-            const name = window.prompt(
-              "Collection name:",
-              local.metricMissing
-                ? `${local.metricMissing.matching ? "To fix" : "Missing"} - ${local.metricMissing.name}`
-                : "osu!completionist"
-            );
-            if (name?.trim())
-              window.location.href = collectionExportUrl(local, name.trim());
-          }}
+          onClick={() => setNaming("collection")}
         >
           ⤓ Collection
         </button>
@@ -204,18 +200,34 @@ export function FilterBar({
             className="export-coll"
             disabled={lazerBusy}
             title="Import these maps as a collection directly into osu!lazer (osu! must be closed; a backup of the database is made first)"
-            onClick={() => {
-              const name = window.prompt(
-                "Collection name (merged into lazer):",
-                local.metricMissing
-                  ? `${local.metricMissing.matching ? "To fix" : "Missing"} - ${local.metricMissing.name}`
-                  : "osu!completionist"
-              );
-              if (!name?.trim()) return;
+            onClick={() => setNaming("lazer")}
+          >
+            {lazerBusy ? "…" : "⇥ lazer"}
+          </button>
+        )}
+        {naming && (
+          <NamePrompt
+            title={
+              naming === "lazer"
+                ? "Collection name (merged into lazer)"
+                : "Collection name"
+            }
+            initial={
+              local.metricMissing
+                ? `${local.metricMissing.matching ? "To fix" : "Missing"} - ${local.metricMissing.name}`
+                : "osu!completionist"
+            }
+            submitLabel={naming === "lazer" ? "Import into lazer" : "Download"}
+            onClose={() => setNaming(null)}
+            onSubmit={(name) => {
+              if (naming === "collection") {
+                window.location.href = collectionExportUrl(local, name);
+                return;
+              }
               setLazerBusy(true);
-              lazerImport(local, name.trim())
+              lazerImport(local, name)
                 .then((r) =>
-                  window.alert(
+                  appAlert(
                     `Imported into osu!lazer:\n` +
                       `  ${r.created} collection(s) created, ${r.updated} updated\n` +
                       `  ${r.hashes} map(s) added (of ${r.mapCount} matching)` +
@@ -228,12 +240,10 @@ export function FilterBar({
                       (r.invalid ? `\n  ${r.invalid} invalid hash(es) skipped` : "")
                   )
                 )
-                .catch((e: Error) => window.alert(`lazer import failed:\n${e.message}`))
+                .catch((e: Error) => appAlert(`lazer import failed:\n${e.message}`))
                 .finally(() => setLazerBusy(false));
             }}
-          >
-            {lazerBusy ? "…" : "⇥ lazer"}
-          </button>
+          />
         )}
       </div>
 

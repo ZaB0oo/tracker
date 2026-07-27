@@ -315,6 +315,14 @@ h1 { font-size: 21px; margin: 0; }
   display: inline-flex; align-items: center; justify-content: center;
   font-size: 16px; border-radius: 6px; margin: 0;
 }
+/* in-app prompt modal (window.prompt does not exist in Electron) */
+.name-prompt { width: min(440px, 92vw); }
+.name-prompt input {
+  width: 100%; box-sizing: border-box; margin: 12px 0 4px;
+  padding: 8px 10px; font-size: 14px; background: var(--bg3);
+  border: 1px solid var(--border); border-radius: 6px; color: var(--fg);
+}
+.name-prompt input:focus { outline: none; border-color: var(--accent); }
 /* path field + Browse button side by side */
 .set-path { display: flex; gap: 6px; }
 .set-path input { flex: 1; min-width: 0; }

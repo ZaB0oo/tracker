@@ -8,9 +8,10 @@ import {
   postSync,
 } from "../api";
 import { firstPlaceLabel, useCountryCode } from "../country";
+import { appConfirm } from "../dialogs";
 
-// Electron bridge (desktop/preload.cjs): native file picker. Absent in a
-// plain browser — the path is then typed manually.
+// Electron bridge (desktop/preload.cjs): native file picker + dialogs.
+// Absent in a plain browser — built-ins are used instead.
 declare global {
   interface Window {
     desktop?: {
@@ -18,6 +19,8 @@ declare global {
         title?: string;
         filters?: { name: string; extensions: string[] }[];
       }) => Promise<string | null>;
+      confirm: (message: string) => boolean;
+      alert: (message: string) => void;
     };
   }
 }
@@ -76,7 +79,7 @@ export function AdvancedSettings({
     startMsg: string,
     confirmMsg?: string
   ) => {
-    if (confirmMsg && !window.confirm(confirmMsg)) return;
+    if (confirmMsg && !appConfirm(confirmMsg)) return;
     setMaintMsg(startMsg);
     try {
       const r = await postSync(a);

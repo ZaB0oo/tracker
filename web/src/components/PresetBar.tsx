@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Filters } from "../types";
 import type { SortSpec } from "../App";
+import { NamePrompt } from "./NamePrompt";
 
 interface SavedPreset {
   label: string;
@@ -27,12 +28,11 @@ export function PresetBar({
 }) {
   const [custom, setCustom] = useState<SavedPreset[]>(loadCustom);
 
-  const saveCurrent = () => {
-    const name = window.prompt("Preset name (current filters + sort):");
-    if (!name?.trim()) return;
+  const [namingOpen, setNamingOpen] = useState(false);
+  const saveCurrent = (name: string) => {
     const next = [
-      ...custom.filter((c) => c.label !== name.trim()),
-      { label: name.trim(), filters, sort },
+      ...custom.filter((c) => c.label !== name),
+      { label: name, filters, sort },
     ];
     setCustom(next);
     localStorage.setItem("customPresets", JSON.stringify(next));
@@ -68,9 +68,22 @@ export function PresetBar({
           </button>
         </span>
       ))}
-      <button className="chip chip-save" title="Save the current filters and sort as a preset" onClick={saveCurrent}>
+      <button
+        className="chip chip-save"
+        title="Save the current filters and sort as a preset"
+        onClick={() => setNamingOpen(true)}
+      >
         💾 Save current filters
       </button>
+      {namingOpen && (
+        <NamePrompt
+          title="Preset name (current filters + sort)"
+          initial=""
+          submitLabel="Save preset"
+          onClose={() => setNamingOpen(false)}
+          onSubmit={saveCurrent}
+        />
+      )}
     </div>
   );
 }

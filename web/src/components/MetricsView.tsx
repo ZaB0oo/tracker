@@ -9,6 +9,7 @@ import {
   type MetricBreakdown,
 } from "../api";
 import { ctxMenuStyle } from "../ctxmenu";
+import { appConfirm } from "../dialogs";
 import { displayGrade, fmtCompact, fmtDate, fmtNum } from "../format";
 import { EvoChart } from "./EvoChart";
 import { GradeBadge } from "./GradeBadge";
@@ -256,7 +257,7 @@ function MetricCard({
           className="metric-btn metric-del"
           title="Delete this metric"
           onClick={() => {
-            if (window.confirm(`Delete metric “${m.name}”?`)) onDelete(m.id);
+            if (appConfirm(`Delete metric “${m.name}”?`)) onDelete(m.id);
           }}
         >
           ✕

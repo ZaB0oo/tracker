@@ -271,6 +271,32 @@ function setupAutoUpdate() {
   setInterval(check, 6 * 3600 * 1000);
 }
 
+// native confirm/alert for the UI: the renderer's window.confirm/alert leave
+// the window without keyboard focus afterwards (upstream Electron bug)
+ipcMain.on("confirm-sync", (e, message) => {
+  const opts = {
+    type: "question",
+    buttons: ["OK", "Cancel"],
+    defaultId: 0,
+    cancelId: 1,
+    title: "osu!completionist",
+    message: String(message),
+  };
+  e.returnValue =
+    (win ? dialog.showMessageBoxSync(win, opts) : dialog.showMessageBoxSync(opts)) === 0;
+});
+ipcMain.on("alert-sync", (e, message) => {
+  const opts = {
+    type: "info",
+    buttons: ["OK"],
+    title: "osu!completionist",
+    message: String(message),
+  };
+  if (win) dialog.showMessageBoxSync(win, opts);
+  else dialog.showMessageBoxSync(opts);
+  e.returnValue = true;
+});
+
 // native file picker for the UI (Settings → LazerCollectionImporter path…)
 ipcMain.handle("pick-file", async (_e, opts) => {
   const r = await dialog.showOpenDialog({

@@ -9,4 +9,10 @@ contextBridge.exposeInMainWorld("desktop", {
    * @param {{ title?: string, filters?: { name: string, extensions: string[] }[] }} opts
    */
   pickFile: (opts) => ipcRenderer.invoke("pick-file", opts ?? {}),
+  /**
+   * Native confirm/alert (main-process dialogs): the renderer's built-in
+   * window.confirm/alert break keyboard focus in Electron.
+   */
+  confirm: (message) => ipcRenderer.sendSync("confirm-sync", String(message)),
+  alert: (message) => ipcRenderer.sendSync("alert-sync", String(message)),
 });
