@@ -216,6 +216,13 @@ function migrate(d: DatabaseSync): void {
     `);
   }
 
+  // Multi-ruleset events: gained/lost history rows are tagged with the mode.
+  for (const table of ["country_events", "global_events"]) {
+    const cols = d.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (!cols.some((c) => c.name === "ruleset"))
+      d.exec(`ALTER TABLE ${table} ADD COLUMN ruleset INTEGER NOT NULL DEFAULT 0`);
+  }
+
   seedDefaultMetrics(d);
   // Startup repair: the immediate country check after a new score can race
   // osu!'s leaderboard update and stamp a false "not #1" (and the deferred

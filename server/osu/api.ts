@@ -280,9 +280,10 @@ export function logoutUser(): void {
  */
 export async function getCountryTop(
   beatmapId: number,
-  priority: Priority = "low"
+  priority: Priority = "low",
+  modeName = "osu"
 ): Promise<import("./types.js").SoloScore | null> {
-  return (await getCountryTopScores(beatmapId, priority))[0] ?? null;
+  return (await getCountryTopScores(beatmapId, priority, modeName))[0] ?? null;
 }
 
 /**
@@ -291,12 +292,13 @@ export async function getCountryTop(
  */
 export async function getCountryTopScores(
   beatmapId: number,
-  priority: Priority = "low"
+  priority: Priority = "low",
+  modeName = "osu"
 ): Promise<import("./types.js").SoloScore[]> {
   return limiter.schedule(async () => {
     const auth = await getUserToken();
     const res = await netFetch(
-      `${config.apiBase}/beatmaps/${beatmapId}/scores?mode=osu&type=country`,
+      `${config.apiBase}/beatmaps/${beatmapId}/scores?mode=${modeName}&type=country`,
       {
         headers: {
           Authorization: `Bearer ${auth}`,
@@ -366,11 +368,12 @@ async function apiGet<T>(pathAndQuery: string, priority: Priority): Promise<T> {
 export async function getUserBeatmapPosition(
   beatmapId: number,
   userId: number,
-  priority: Priority = "high"
+  priority: Priority = "high",
+  modeName = "osu"
 ): Promise<number | null> {
   try {
     const res = await apiGet<{ position?: number | null }>(
-      `/beatmaps/${beatmapId}/scores/users/${userId}?mode=osu`,
+      `/beatmaps/${beatmapId}/scores/users/${userId}?mode=${modeName}`,
       priority
     );
     return res.position ?? null;

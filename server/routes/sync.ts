@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { config } from "../config.js";
-import { getDb, setState } from "../db/db.js";
+import { getActiveRulesets, getDb, setState } from "../db/db.js";
 import { isUserConnected } from "../osu/api.js";
 import {
   clearSyncErrors,
@@ -53,7 +53,8 @@ syncRouter.post("/sync/global-pause", (_req, res) => {
 syncRouter.post("/sync/global-recheck-all", (_req, res) => {
   const n = getDb()
     .prepare(
-      "UPDATE beatmap_user SET global_checked_at = NULL WHERE ruleset = 0 AND played = 1"
+      `UPDATE beatmap_user SET global_checked_at = NULL
+       WHERE ruleset IN (${getActiveRulesets().join(",")}) AND played = 1`
     )
     .run().changes;
   setState("global_tracking", "1");

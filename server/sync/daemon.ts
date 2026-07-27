@@ -201,8 +201,10 @@ export function getDaemonStatus(): DaemonStatus & {
       db
         .prepare(
           `SELECT COUNT(*) c FROM beatmap_user u
-           JOIN beatmaps b ON b.id = u.beatmap_id AND u.ruleset = 0
-           WHERE u.played = 1 AND b.ruleset = 0 AND b.status IN (1, 2, 4)
+           JOIN beatmaps b ON b.id = u.beatmap_id
+           WHERE u.played = 1 AND b.status IN (1, 2, 4)
+             AND u.ruleset IN (${getActiveRulesets().join(",")})
+             AND (b.ruleset = u.ruleset OR b.ruleset = 0)
              AND ${cond}`
         )
         .get() as { c: number }
@@ -470,9 +472,7 @@ async function pollRecentScoresForMode(mode: number): Promise<number> {
     // by this very tick (score saved during the set import) is seen too.
     const pre = preState.get(beatmapId);
     const bestId = result.bestScoreId;
-    // best events feed Discord + the immediate country/global checks — still
-    // std-only (the per-ruleset leaderboard passes land with M4)
-    if (mode === 0 && bestId != null && bestId !== (pre?.best ?? null)) {
+    if (bestId != null && bestId !== (pre?.best ?? null)) {
       const s = bestRow.get(bestId) as
         | {
             rank: string;
@@ -507,10 +507,9 @@ async function pollRecentScoresForMode(mode: number): Promise<number> {
 
   // New score => IMMEDIATE country leaderboard check at high priority (without
   // it, the map would wait its turn behind the whole initial sweep).
-  // std-only until the per-ruleset sweeps (M4).
-  if (mode === 0 && freshBeatmapIds.length > 0 && isUserConnected()) {
+  if (freshBeatmapIds.length > 0 && isUserConnected()) {
     const invalidateCountry = db.prepare(
-      "UPDATE beatmap_user SET country_checked_at = NULL WHERE beatmap_id = ? AND ruleset = 0"
+      `UPDATE beatmap_user SET country_checked_at = NULL WHERE beatmap_id = ? AND ruleset = ${mode}`
     );
     for (const id of freshBeatmapIds) {
       try {
@@ -519,12 +518,18 @@ async function pollRecentScoresForMode(mode: number): Promise<number> {
         const wasFirst =
           (
             db
-              .prepare("SELECT country_first FROM beatmap_user WHERE beatmap_id = ? AND ruleset = 0")
+              .prepare(
+                `SELECT country_first FROM beatmap_user WHERE beatmap_id = ? AND ruleset = ${mode}`
+              )
               .get(id) as { country_first: number } | undefined
           )?.country_first === 1;
-        const countryScores = await getCountryTopScores(id, "high");
+        const countryScores = await getCountryTopScores(
+          id,
+          "high",
+          rulesetDef(mode).apiName
+        );
         const top = countryScores[0] ?? null;
-        applyCountryCheck(id, top, true);
+        applyCountryCheck(id, top, true, mode);
         // Discord: mark the best as "country #1 at submit time" (display only,
         // no country event notifications). The runner-up is the previous
         // holder — the player this score just sniped.
@@ -543,7 +548,7 @@ async function pollRecentScoresForMode(mode: number): Promise<number> {
         // AND schedule a quick confirmation ~10 min from now.
         if (!(top && top.user_id === config.osuUserId)) {
           invalidateCountry.run(id);
-          scheduleCountryConfirm(id);
+          scheduleCountryConfirm(id, mode);
         }
       } catch (e) {
         logError(e, `immediate country check map ${id}`);
@@ -564,21 +569,27 @@ async function pollRecentScoresForMode(mode: number): Promise<number> {
     // since the 2026 reading rework)
     const DIFF_MODS = new Set(["DT", "NC", "HT", "DC", "HR", "EZ", "FL", "HD", "TD"]);
     for (const e of bestEvents) {
-      if (discordOn) {
+      if (discordOn && mode === 0) {
+        // modded SR display: std only for now (the attributes cache is std)
         const acronyms = parseModAcronyms(e.modsJson).filter((a) => a !== "CL");
         if (acronyms.some((a) => DIFF_MODS.has(a)))
           e.moddedSr = await getModdedStarRating(e.beatmapId, acronyms, "high");
       }
       try {
-        e.globalRank = await getUserBeatmapPosition(e.beatmapId, config.osuUserId, "high");
-        applyGlobalCheck(e.beatmapId, e.globalRank, true);
+        e.globalRank = await getUserBeatmapPosition(
+          e.beatmapId,
+          config.osuUserId,
+          "high",
+          rulesetDef(mode).apiName
+        );
+        applyGlobalCheck(e.beatmapId, e.globalRank, true, mode);
         // the leaderboard may not include the fresh score yet: confirm later
-        scheduleGlobalConfirm(e.beatmapId);
+        scheduleGlobalConfirm(e.beatmapId, mode);
       } catch (err) {
         // failed check: back into the sweep queue, it will retry
         logError(err, `position check map ${e.beatmapId}`);
         db.prepare(
-          "UPDATE beatmap_user SET global_checked_at = NULL WHERE beatmap_id = ? AND ruleset = 0"
+          `UPDATE beatmap_user SET global_checked_at = NULL WHERE beatmap_id = ? AND ruleset = ${mode}`
         ).run(e.beatmapId);
       }
     }
@@ -620,8 +631,10 @@ export function startPolling(): void {
     const queued = (cond: string) =>
       getDb()
         .prepare(
-          `SELECT 1 FROM beatmap_user u JOIN beatmaps b ON b.id = u.beatmap_id AND u.ruleset = 0
-           WHERE u.played = 1 AND ${cond} AND b.ruleset = 0 LIMIT 1`
+          `SELECT 1 FROM beatmap_user u JOIN beatmaps b ON b.id = u.beatmap_id
+           WHERE u.played = 1 AND ${cond}
+             AND u.ruleset IN (${getActiveRulesets().join(",")})
+             AND (b.ruleset = u.ruleset OR b.ruleset = 0) LIMIT 1`
         )
         .get() != null;
     const sweepsFree =
@@ -788,7 +801,7 @@ export function startCatalogRefresh(): void {
         getDb()
           .prepare(
             `UPDATE beatmap_user SET country_checked_at = NULL
-             WHERE ruleset = 0 AND country_first = 1
+             WHERE ruleset IN (${getActiveRulesets().join(",")}) AND country_first = 1
                AND country_checked_at < datetime('now', '-' || ? || ' hours')`
           )
           .run(getCountryRecheckHours());
@@ -801,7 +814,8 @@ export function startCatalogRefresh(): void {
         gdb
           .prepare(
             `UPDATE beatmap_user SET global_checked_at = NULL
-             WHERE ruleset = 0 AND global_rank IS NOT NULL AND global_rank <= 100
+             WHERE ruleset IN (${getActiveRulesets().join(",")})
+               AND global_rank IS NOT NULL AND global_rank <= 100
                AND global_checked_at < datetime('now', '-' || ? || ' hours')`
           )
           .run(getGlobalRecheckHours());
@@ -810,9 +824,11 @@ export function startCatalogRefresh(): void {
         // update — and the deferred-confirm timer does not survive a restart.
         gdb.exec(
           `UPDATE beatmap_user SET global_checked_at = NULL
-           WHERE ruleset = 0 AND global_checked_at IS NOT NULL AND EXISTS (
+           WHERE ruleset IN (${getActiveRulesets().join(",")})
+             AND global_checked_at IS NOT NULL AND EXISTS (
              SELECT 1 FROM scores s
-             WHERE s.beatmap_id = beatmap_user.beatmap_id AND s.ruleset = 0
+             WHERE s.beatmap_id = beatmap_user.beatmap_id
+               AND s.ruleset = beatmap_user.ruleset
                AND datetime(s.ended_at) >= datetime('now', '-2 days')
                AND datetime(beatmap_user.global_checked_at) <= datetime(s.ended_at, '+15 minutes'))`
         );
@@ -847,11 +863,11 @@ let countryPaused = false;
  */
 const COUNTRY_CONFIRM_DELAY_MS = 2 * 60_000;
 
-function scheduleCountryConfirm(beatmapId: number): void {
+function scheduleCountryConfirm(beatmapId: number, ruleset = 0): void {
   const t = setTimeout(() => {
     if (!isUserConnected()) return;
-    getCountryTop(beatmapId, "high")
-      .then((top) => applyCountryCheck(beatmapId, top, true))
+    getCountryTop(beatmapId, "high", rulesetDef(ruleset).apiName)
+      .then((top) => applyCountryCheck(beatmapId, top, true, ruleset))
       .catch((e) => logError(e, `deferred country check map ${beatmapId}`));
   }, COUNTRY_CONFIRM_DELAY_MS);
   t.unref(); // never keeps the process alive
@@ -865,22 +881,25 @@ function scheduleCountryConfirm(beatmapId: number): void {
  */
 export async function confirmRecentCountryChecks(): Promise<void> {
   if (!isUserConnected()) return;
+  const modes = getActiveRulesets().join(",");
   const rows = getDb()
     .prepare(
-      `SELECT u.beatmap_id AS id FROM beatmap_user u
-       JOIN beatmaps b ON b.id = u.beatmap_id AND u.ruleset = 0
-       WHERE u.played = 1 AND u.country_checked_at IS NULL AND b.ruleset = 0
+      `SELECT u.beatmap_id AS id, u.ruleset AS r FROM beatmap_user u
+       JOIN beatmaps b ON b.id = u.beatmap_id
+       WHERE u.played = 1 AND u.country_checked_at IS NULL
+         AND u.ruleset IN (${modes})
+         AND (b.ruleset = u.ruleset OR b.ruleset = 0)
          AND EXISTS (
            SELECT 1 FROM scores s
-           WHERE s.beatmap_id = u.beatmap_id
+           WHERE s.beatmap_id = u.beatmap_id AND s.ruleset = u.ruleset
              AND datetime(s.ended_at) >= datetime('now', '-2 days'))
        LIMIT 100`
     )
-    .all() as { id: number }[];
-  for (const { id } of rows) {
+    .all() as { id: number; r: number }[];
+  for (const { id, r } of rows) {
     try {
-      const top = await getCountryTop(id, "high");
-      applyCountryCheck(id, top, true);
+      const top = await getCountryTop(id, "high", rulesetDef(r).apiName);
+      applyCountryCheck(id, top, true, r);
       logActivity(
         "country #1",
         () =>
@@ -905,14 +924,15 @@ export async function confirmRecentCountryChecks(): Promise<void> {
 export function applyCountryCheck(
   beatmapId: number,
   top: SoloScore | null,
-  recordInitial: boolean
+  recordInitial: boolean,
+  ruleset = 0
 ): void {
   const db = getDb();
   const prev = db
     .prepare(
-      "SELECT country_first, country_checked_at FROM beatmap_user WHERE beatmap_id = ? AND ruleset = 0"
+      "SELECT country_first, country_checked_at FROM beatmap_user WHERE beatmap_id = ? AND ruleset = ?"
     )
-    .get(beatmapId) as
+    .get(beatmapId, ruleset) as
     | { country_first: number; country_checked_at: string | null }
     | undefined;
   const isFirst = top && top.user_id === config.osuUserId ? 1 : 0;
@@ -925,10 +945,11 @@ export function applyCountryCheck(
   const shouldRecord = prevFirst === 1 || wasChecked || recordInitial;
   if (shouldRecord && prevFirst !== isFirst) {
     db.prepare(
-      `INSERT INTO country_events (beatmap_id, event, at, score_at, by_user_id, by_username)
-       VALUES (?, ?, datetime('now'), ?, ?, ?)`
+      `INSERT INTO country_events (beatmap_id, ruleset, event, at, score_at, by_user_id, by_username)
+       VALUES (?, ?, ?, datetime('now'), ?, ?, ?)`
     ).run(
       beatmapId,
+      ruleset,
       isFirst ? "gained" : "lost",
       // real date of the score that took the #1 (mine or the sniper's)
       top?.ended_at ?? null,
@@ -937,8 +958,8 @@ export function applyCountryCheck(
     );
   }
   db.prepare(
-    "UPDATE beatmap_user SET country_first = ?, country_checked_at = datetime('now') WHERE beatmap_id = ? AND ruleset = 0"
-  ).run(isFirst, beatmapId);
+    "UPDATE beatmap_user SET country_first = ?, country_checked_at = datetime('now') WHERE beatmap_id = ? AND ruleset = ?"
+  ).run(isFirst, beatmapId, ruleset);
 }
 
 /**
@@ -965,23 +986,27 @@ export async function runCountrySweep(force = false): Promise<void> {
   countryWanted = true;
   try {
     const db = getDb();
+    // one shared queue across the active rulesets (specific maps + converts);
+    // held #1s first, then std before the other modes
     const nextBatch = db.prepare(
-      `SELECT u.beatmap_id AS id FROM beatmap_user u
-       JOIN beatmaps b ON b.id = u.beatmap_id AND u.ruleset = 0
-       WHERE u.played = 1 AND u.country_checked_at IS NULL AND b.ruleset = 0
-       ORDER BY u.country_first DESC, u.beatmap_id
+      `SELECT u.beatmap_id AS id, u.ruleset AS r FROM beatmap_user u
+       JOIN beatmaps b ON b.id = u.beatmap_id
+       WHERE u.played = 1 AND u.country_checked_at IS NULL
+         AND u.ruleset IN (${getActiveRulesets().join(",")})
+         AND (b.ruleset = u.ruleset OR b.ruleset = 0)
+       ORDER BY u.country_first DESC, u.ruleset, u.beatmap_id
        LIMIT 200`
     );
     let done = 0;
     while (countryWanted) {
-      const ids = (nextBatch.all() as { id: number }[]).map((r) => r.id);
-      if (ids.length === 0) break;
-      for (const id of ids) {
+      const rows = nextBatch.all() as { id: number; r: number }[];
+      if (rows.length === 0) break;
+      for (const { id, r } of rows) {
         if (!countryWanted) break;
         try {
-          const top = await getCountryTop(id, "low");
+          const top = await getCountryTop(id, "low", rulesetDef(r).apiName);
           const cc = getStoredCountryCode();
-          applyCountryCheck(id, top, false);
+          applyCountryCheck(id, top, false, r);
           done++;
           logActivity(
               `${cc ? `#1 ${cc}` : "country #1"} sweep`,
@@ -1045,14 +1070,15 @@ function globalTier(rank: number | null): number | null {
 export function applyGlobalCheck(
   beatmapId: number,
   pos: number | null,
-  recordInitial = false
+  recordInitial = false,
+  ruleset = 0
 ): void {
   const db = getDb();
   const prev = db
     .prepare(
-      "SELECT global_rank, global_checked_at, global_seen FROM beatmap_user WHERE beatmap_id = ? AND ruleset = 0"
+      "SELECT global_rank, global_checked_at, global_seen FROM beatmap_user WHERE beatmap_id = ? AND ruleset = ?"
     )
-    .get(beatmapId) as
+    .get(beatmapId, ruleset) as
     | {
         global_rank: number | null;
         global_checked_at: string | null;
@@ -1068,8 +1094,8 @@ export function applyGlobalCheck(
   const newTier = globalTier(pos);
   if ((wasKnown || recordInitial) && oldTier !== newTier) {
     db.prepare(
-      "INSERT INTO global_events (beatmap_id, at, old_rank, new_rank) VALUES (?, datetime('now'), ?, ?)"
-    ).run(beatmapId, prevRank, pos);
+      "INSERT INTO global_events (beatmap_id, ruleset, at, old_rank, new_rank) VALUES (?, ?, datetime('now'), ?, ?)"
+    ).run(beatmapId, ruleset, prevRank, pos);
     logActivity(
       "global tops",
       () =>
@@ -1079,8 +1105,8 @@ export function applyGlobalCheck(
     );
   }
   db.prepare(
-    "UPDATE beatmap_user SET global_rank = ?, global_checked_at = datetime('now'), global_seen = 1 WHERE beatmap_id = ? AND ruleset = 0"
-  ).run(pos, beatmapId);
+    "UPDATE beatmap_user SET global_rank = ?, global_checked_at = datetime('now'), global_seen = 1 WHERE beatmap_id = ? AND ruleset = ?"
+  ).run(pos, beatmapId, ruleset);
 }
 
 /**
@@ -1091,11 +1117,16 @@ export function applyGlobalCheck(
  */
 const GLOBAL_CONFIRM_DELAY_MS = 3 * 60_000;
 
-function scheduleGlobalConfirm(beatmapId: number): void {
+function scheduleGlobalConfirm(beatmapId: number, ruleset = 0): void {
   const t = setTimeout(() => {
     if (!config.hasCredentials) return;
-    getUserBeatmapPosition(beatmapId, config.osuUserId, "high")
-      .then((pos) => applyGlobalCheck(beatmapId, pos, true))
+    getUserBeatmapPosition(
+      beatmapId,
+      config.osuUserId,
+      "high",
+      rulesetDef(ruleset).apiName
+    )
+      .then((pos) => applyGlobalCheck(beatmapId, pos, true, ruleset))
       .catch((e) => logError(e, `deferred global check map ${beatmapId}`));
   }, GLOBAL_CONFIRM_DELAY_MS);
   t.unref(); // never keeps the process alive
@@ -1127,23 +1158,32 @@ export async function runGlobalSweep(force = false): Promise<void> {
   globalWanted = true;
   try {
     const db = getDb();
+    // shared queue across active rulesets (specific + converts); held ranks
+    // first (losing a top spot matters more than discovering a new #4000)
     const nextBatch = db.prepare(
-      `SELECT u.beatmap_id AS id FROM beatmap_user u
-       JOIN beatmaps b ON b.id = u.beatmap_id AND u.ruleset = 0
-       WHERE u.played = 1 AND u.global_checked_at IS NULL AND b.ruleset = 0
-       ORDER BY (u.global_rank IS NOT NULL) DESC, u.global_rank, u.beatmap_id
+      `SELECT u.beatmap_id AS id, u.ruleset AS r FROM beatmap_user u
+       JOIN beatmaps b ON b.id = u.beatmap_id
+       WHERE u.played = 1 AND u.global_checked_at IS NULL
+         AND u.ruleset IN (${getActiveRulesets().join(",")})
+         AND (b.ruleset = u.ruleset OR b.ruleset = 0)
+       ORDER BY (u.global_rank IS NOT NULL) DESC, u.global_rank, u.ruleset, u.beatmap_id
        LIMIT 200`
     );
     let done = 0;
     let failures = 0;
     while (globalWanted) {
-      const ids = (nextBatch.all() as { id: number }[]).map((r) => r.id);
-      if (ids.length === 0) break;
-      for (const id of ids) {
+      const rows = nextBatch.all() as { id: number; r: number }[];
+      if (rows.length === 0) break;
+      for (const { id, r } of rows) {
         if (!globalWanted) break;
         try {
-          const pos = await getUserBeatmapPosition(id, config.osuUserId, "low");
-          applyGlobalCheck(id, pos);
+          const pos = await getUserBeatmapPosition(
+            id,
+            config.osuUserId,
+            "low",
+            rulesetDef(r).apiName
+          );
+          applyGlobalCheck(id, pos, false, r);
           done++;
           failures = 0;
           logActivity(

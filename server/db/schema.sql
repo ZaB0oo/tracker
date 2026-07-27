@@ -125,6 +125,7 @@ CREATE TABLE IF NOT EXISTS metrics (
 CREATE TABLE IF NOT EXISTS country_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   beatmap_id INTEGER NOT NULL,
+  ruleset INTEGER NOT NULL DEFAULT 0,
   event TEXT NOT NULL,                -- 'gained' | 'lost'
   at TEXT NOT NULL,                   -- DETECTION date (UTC)
   score_at TEXT,                      -- date of the score that caused the event
@@ -139,6 +140,7 @@ CREATE INDEX IF NOT EXISTS idx_country_events_at ON country_events(at);
 CREATE TABLE IF NOT EXISTS global_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   beatmap_id INTEGER NOT NULL,
+  ruleset INTEGER NOT NULL DEFAULT 0,
   at TEXT NOT NULL,                   -- detection date (UTC)
   old_rank INTEGER,                   -- NULL = was not on the leaderboard
   new_rank INTEGER                    -- NULL = dropped off the leaderboard
