@@ -12,6 +12,8 @@
     "dev:web": "npm --workspace web run dev",
     "build": "tsc -p tsconfig.json && node -e \"const f=require('fs');f.copyFileSync('server/db/schema.sql','dist/server/db/schema.sql');f.copyFileSync('server/db/seed-sets.json','dist/server/db/seed-sets.json')\" && npm --workspace web run build",
     "start": "node dist/server/index.js",
+    "desktop": "npm run build && electron desktop/main.js",
+    "desktop:check": "electron desktop/check-runtime.js",
     "export-seed": "node scripts/export-seed-sets.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && npm --workspace web exec tsc -- --noEmit",
     "check": "npm run typecheck && npm test",
@@ -29,6 +31,7 @@
     "@types/express": "^4.17.21",
     "@types/node": "^22.10.2",
     "concurrently": "^9.1.0",
+    "electron": "43.2.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

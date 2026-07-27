@@ -1,14 +1,18 @@
 // Shared formatting helpers. Numbers use en-US grouping; dates are yyyy/mm/dd.
 
-export const fmtNum = (n: number): string => n.toLocaleString("en-US");
+// null-tolerant: on an empty database SQL SUM() yields NULL for many stats
+export const fmtNum = (n: number | null | undefined): string =>
+  (n ?? 0).toLocaleString("en-US");
 
 /** Compact display for huge values: 1.23B / 4.5M, full grouping below 1M. */
-export const fmtCompact = (n: number): string =>
-  n >= 1_000_000_000
+export const fmtCompact = (n0: number | null | undefined): string => {
+  const n = n0 ?? 0;
+  return n >= 1_000_000_000
     ? `${(n / 1_000_000_000).toLocaleString("en-US", { maximumFractionDigits: 2 })}B`
     : n >= 1_000_000
       ? `${(n / 1_000_000).toLocaleString("en-US", { maximumFractionDigits: 1 })}M`
       : fmtNum(n);
+};
 
 /** API rank -> display grade (X/XH are the SS ranks). */
 export const displayGrade = (g: string): string =>
