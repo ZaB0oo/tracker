@@ -1,7 +1,7 @@
 import { Router } from "express";
 
 /** Bump at each release (matches the GitHub tag, without the leading v). */
-export const APP_VERSION = "1.7.2";
+export const APP_VERSION = "1.7.3";
 
 const REPO = "ZaB0oo/tracker";
 const CHECK_TTL_MS = 24 * 3600 * 1000;
