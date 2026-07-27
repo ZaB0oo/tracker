@@ -59,6 +59,56 @@ syncRouter.post("/sync/global-recheck-all", (_req, res) => {
   res.json({ ok: true, requeued: Number(n) });
 });
 
+// Targeted pp refresh: re-fetches the scores of the top ~250 maps by LOCAL
+// best pp, plus your OFFICIAL top 100 (users/{id}/scores/best) — after a pp
+// rework the ordering changes, and a map absent from the local top can surge
+// into the official one. Union of both ≈ 4 min instead of a 40 h re-backfill.
+syncRouter.post("/sync/refresh-top-pp", async (_req, res) => {
+  const db = getDb();
+  const ids = new Set<number>(
+    (
+      db
+        .prepare(
+          `SELECT s.beatmap_id AS bid FROM scores s
+           WHERE s.pp IS NOT NULL AND s.passed = 1
+           GROUP BY s.beatmap_id
+           ORDER BY MAX(s.pp) DESC LIMIT 250`
+        )
+        .all() as { bid: number }[]
+    ).map((r) => r.bid)
+  );
+  // official post-rework ranking; offline / API failure / slow token
+  // acquisition → fall back to the local list only (bounded wait)
+  let fromOfficial = 0;
+  try {
+    const { getBestScores } = await import("../osu/api.js");
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("official top: timeout")), 20_000)
+    );
+    const official = await Promise.race([
+      (async () => [
+        ...(await getBestScores(config.osuUserId, 50, 0)),
+        ...(await getBestScores(config.osuUserId, 50, 50)),
+      ])(),
+      timeout,
+    ]);
+    for (const s of official)
+      if (!ids.has(s.beatmap_id)) {
+        ids.add(s.beatmap_id);
+        fromOfficial++;
+      }
+  } catch {
+    // keep going with the local top only
+  }
+  const upd = db.prepare(
+    "UPDATE beatmap_user SET fetched_at = NULL WHERE beatmap_id = ?"
+  );
+  let n = 0;
+  for (const id of ids) n += Number(upd.run(id).changes);
+  void resumeBackfill();
+  res.json({ ok: true, requeued: n, fromOfficialTop: fromOfficial });
+});
+
 // Full score re-scan: puts every map back to "to check" (no existing score
 // is lost, ~40h). Use it if the app stayed off for > 24h while you played.
 syncRouter.post("/sync/rebackfill", (_req, res) => {
@@ -154,6 +204,70 @@ syncRouter.post("/sync/import-set/:id", async (req, res) => {
   try {
     const result = await importSetById(id);
     res.json({ ok: true, ...result });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Diagnostic: local pp state vs the official "Best performance" list.
+// Compares your official top 100 with the DB's best-pp per map and reports
+// stale values, missing scores, and local maps that outrank the official list
+// (e.g. a map that went loved: osu! stops counting it, the DB still would).
+// Open http://localhost:3727/api/debug/pp-diff in a browser.
+syncRouter.get("/debug/pp-diff", async (_req, res) => {
+  try {
+    const { getBestScores } = await import("../osu/api.js");
+    const official = [
+      ...(await getBestScores(config.osuUserId, 50, 0)),
+      ...(await getBestScores(config.osuUserId, 50, 50)),
+    ];
+    const db = getDb();
+    const ourBest = db
+      .prepare(
+        `SELECT s.beatmap_id AS bid, MAX(s.pp) AS pp, b.status AS status
+         FROM scores s JOIN beatmaps b ON b.id = s.beatmap_id
+         WHERE s.pp IS NOT NULL AND s.passed = 1
+         GROUP BY s.beatmap_id ORDER BY pp DESC LIMIT 150`
+      )
+      .all() as { bid: number; pp: number; status: number }[];
+    const oursByMap = new Map(ourBest.map((r) => [r.bid, r]));
+    const officialByMap = new Map(
+      official.map((s) => [s.beatmap_id, s.pp ?? 0])
+    );
+    const stale: unknown[] = [];
+    const missing: unknown[] = [];
+    for (const s of official) {
+      const ours = oursByMap.get(s.beatmap_id);
+      const opp = s.pp ?? 0;
+      if (!ours)
+        missing.push({ beatmap_id: s.beatmap_id, official_pp: opp });
+      else if (Math.abs(ours.pp - opp) > 0.01)
+        stale.push({
+          beatmap_id: s.beatmap_id,
+          official_pp: opp,
+          local_pp: ours.pp,
+          diff: Number((ours.pp - opp).toFixed(2)),
+        });
+    }
+    const floor = Math.min(...official.map((s) => s.pp ?? 0));
+    const extra = ourBest
+      .filter((r) => !officialByMap.has(r.bid) && r.pp > floor)
+      .map((r) => ({
+        beatmap_id: r.bid,
+        local_pp: r.pp,
+        status: r.status,
+        note:
+          r.status === 4
+            ? "LOVED — osu! does not count it, the metric should not either"
+            : "above the official top-100 floor but absent from it",
+      }));
+    res.json({
+      officialTop: official.length,
+      officialFloorPp: floor,
+      stale,
+      missingLocally: missing,
+      extraLocally: extra,
+    });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e) });
   }

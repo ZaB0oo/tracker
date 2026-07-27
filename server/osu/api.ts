@@ -400,6 +400,18 @@ export async function getUserBeatmapScores(
 }
 
 /** Recent scores (24h window on the API side). */
+/** Official "Best performance" list (top plays by pp), pages of 50. */
+export async function getBestScores(
+  userId: number,
+  limit = 50,
+  offset = 0
+): Promise<SoloScore[]> {
+  return apiGet<SoloScore[]>(
+    `/users/${userId}/scores/best?mode=osu&limit=${limit}&offset=${offset}`,
+    "high"
+  );
+}
+
 export async function getRecentScores(
   userId: number,
   limit = 50,

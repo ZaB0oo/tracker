@@ -256,15 +256,27 @@ export function SyncBar() {
             <>
               <div className="menu-overlay" onClick={() => setMenuOpen(false)} />
               <div className="actions-menu avatar-menu">
-              <div className="avatar-name">
-                {connected ? (
-                  <>
-                    {auth?.profile?.username ?? "osu! account"}{" "}
-                    <span className="avatar-ok">connected ✔</span>
-                  </>
-                ) : (
-                  <span className="avatar-ko">osu! account not connected</span>
-                )}
+              <div className="avatar-head">
+                <div className="avatar-name">
+                  {connected ? (
+                    <>
+                      {auth?.profile?.username ?? "osu! account"}{" "}
+                      <span className="avatar-ok">connected ✔</span>
+                    </>
+                  ) : (
+                    <span className="avatar-ko">osu! account not connected</span>
+                  )}
+                </div>
+                <button
+                  className="gear-btn"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setAdvancedOpen(true);
+                  }}
+                  title="Settings: sync intervals, osu! OAuth, Discord, integrations, maintenance"
+                >
+                  ⚙
+                </button>
               </div>
               {!connected && (
                 <button
@@ -295,15 +307,6 @@ export function SyncBar() {
                 title="Snapshot of your stats as a PNG image"
               >
                 Share card (PNG)
-              </button>
-              <button
-                onClick={() => {
-                  setMenuOpen(false);
-                  setAdvancedOpen(true);
-                }}
-                title="Polling & re-check intervals, osu! OAuth credentials, Discord notifications, display options"
-              >
-                ⚙ Settings…
               </button>
 
               <details className="menu-group" open>
@@ -357,55 +360,6 @@ export function SyncBar() {
               )}
 
               </details>
-              <details className="menu-group">
-              <summary className="menu-section">Maintenance</summary>
-              <button
-                onClick={() => {
-                  setMenuOpen(false);
-                  window.open("/api/export-db");
-                }}
-                title="Download a consistent copy of the SQLite database (full backup: scores, catalog, settings)"
-              >
-                Export database (.db)
-              </button>
-              <button
-                onClick={() => act("catalog-full?force=1")}
-                title="Full re-enumeration of the catalog via the API: star ratings, statuses up to date (~30-60 min)"
-              >
-                Full catalog re-scan
-              </button>
-              <button
-                onClick={() => act("recompute")}
-                title="Recompute bests for all scores"
-              >
-                Recompute bests
-              </button>
-              <button
-                onClick={() => {
-                  if (
-                    window.confirm(
-                      "Re-check ALL global positions (any depth, resumable). The periodic rotation only refreshes held top-100s — use this to refresh everything else. Start?"
-                    )
-                  )
-                    void act("global-recheck-all");
-                }}
-                title="Re-queue every played map for a global position check"
-              >
-                Re-check all global tops
-              </button>
-              <button
-                onClick={() => {
-                  if (
-                    window.confirm(
-                      "FULL re-backfill: all maps go back to « to check » (~40h, resumable, no score lost). Includes a re-sweep of all country leaderboards. Start?"
-                    )
-                  )
-                    void act("rebackfill");
-                }}
-                title="Use this if the app stayed off > 24h while you were playing"
-              >
-                Full re-backfill (~40h)
-              </button>
               {connected && (
                 <button
                   onClick={async () => {
@@ -418,7 +372,6 @@ export function SyncBar() {
                   Log out
                 </button>
               )}
-              </details>
               </div>
             </>
           )}

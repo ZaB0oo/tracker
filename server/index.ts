@@ -22,6 +22,25 @@ if (fs.existsSync(webDist)) {
   );
 }
 
+// Staged DB import (Settings → Import database): swap BEFORE the DB opens.
+// The previous database is kept as a single rolling backup (.bak, replaced).
+const staged = `${config.dbPath}.import`;
+if (fs.existsSync(staged)) {
+  try {
+    if (fs.existsSync(config.dbPath))
+      fs.copyFileSync(config.dbPath, `${config.dbPath}.bak`);
+    for (const ext of ["-wal", "-shm"])
+      fs.rmSync(config.dbPath + ext, { force: true });
+    fs.renameSync(staged, config.dbPath);
+    console.log(
+      `[db] staged import applied (previous database saved as ${path.basename(config.dbPath)}.bak)`
+    );
+  } catch (e) {
+    console.error("[db] staged import failed, keeping the current database:", e);
+    fs.rmSync(staged, { force: true });
+  }
+}
+
 getDb(); // creates the schema on first launch
 
 // Startup repair: drop stored scores osu! does not honor (played while the

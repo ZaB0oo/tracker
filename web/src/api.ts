@@ -255,6 +255,7 @@ export async function postSync(
     | "global-pause"
     | "global-recheck-all"
     | "recompute"
+    | "refresh-top-pp"
     | "rebackfill"
     | "catalog-full?force=1"
 ): Promise<Record<string, unknown>> {
@@ -619,7 +620,24 @@ export interface Settings {
   display: DisplayPrefs;
   discord: { webhookSet: boolean; bests: boolean };
   oauth: { clientId: string; userId: number; secretSet: boolean };
+  /** path to LazerCollectionImporter.exe ("" = not configured) */
+  lazerImporterPath: string;
   info: { port: number };
+}
+
+/** Uploads a tracker.db; applied at the next app restart (staged swap). */
+export async function postImportDb(file: File): Promise<string> {
+  const res = await fetch("/api/settings/import-db", {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: file,
+  });
+  const json = (await res.json().catch(() => ({}))) as {
+    error?: string;
+    note?: string;
+  };
+  if (!res.ok) throw new Error(json.error ?? `import-db: HTTP ${res.status}`);
+  return json.note ?? "Import staged — restart the app to apply.";
 }
 
 export async function postDiscordTest(): Promise<void> {
@@ -644,6 +662,7 @@ export async function postSettings(payload: {
   clientId?: string | number;
   clientSecret?: string | number;
   userId?: string | number;
+  lazerImporterPath?: string;
 }): Promise<void> {
   const res = await fetch("/api/settings", {
     method: "POST",

@@ -229,8 +229,9 @@ function evalRankedScore(p: MetricParams, gran: "month" | "day"): MetricResult {
 /**
  * Weighted-pp metric: the official profile rules applied to the matching set.
  * ONE score per map — the HIGHEST pp, regardless of the tracker's classic
- * best —, descending weights 0.95^i, plus the bonus 416.6667 × (1 − 0.9994^n)
- * (n = maps with a pp score in the set). Loved maps drop out naturally
+ * best —, descending weights 0.95^i, plus the bonus
+ * 416.6667 × (1 − 0.995^min(n, 1000)) (official wiki formula; n = maps with a
+ * pp score in the set, max bonus 413.894). Loved maps drop out naturally
  * (their scores have no pp). Successive pp-bests are replayed chronologically
  * for milestones and the evolution chart.
  */
@@ -268,7 +269,8 @@ function evalPp(p: MetricParams, gran: "month" | "day"): MetricResult {
     }
     return t;
   };
-  const bonusOf = (n: number) => 416.6667 * (1 - Math.pow(0.9994, n));
+  const bonusOf = (n: number) =>
+    416.6667 * (1 - Math.pow(0.995, Math.min(n, 1000)));
 
   const points: { at: string; total: number }[] = [];
   for (const r of rows) {

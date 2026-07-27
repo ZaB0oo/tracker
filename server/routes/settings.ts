@@ -1,4 +1,4 @@
-import { Router } from "express";
+import express, { Router, type Request } from "express";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -23,6 +23,13 @@ import {
 } from "../notify/discord.js";
 
 export const settingsRouter = Router();
+
+// Local-only guard for sensitive settings (executable path, DB import): a LAN
+// client must never be able to point the app at an arbitrary program or DB.
+function isLoopback(req: Request): boolean {
+  const a = req.socket.remoteAddress;
+  return a === "127.0.0.1" || a === "::1" || a === "::ffff:127.0.0.1";
+}
 
 // Consistent copy of the DB (VACUUM INTO) downloaded in one click.
 settingsRouter.get("/export-db", (_req, res) => {
@@ -66,8 +73,38 @@ settingsRouter.get("/settings", (_req, res) =>
       userId: safe(() => config.osuUserId, 0),
       secretSet: safe(() => Boolean(config.osuClientSecret), false),
     },
+    // desktop: set from the UI (stored in DB); .env stays the fallback
+    lazerImporterPath:
+      getState("lazer_importer_path") ?? config.lazerImporterPath ?? "",
     info: { port: config.port },
   })
+);
+
+// Staged DB import: the file is written next to the live DB and swapped in at
+// the NEXT startup (swapping under a live server is unsafe). Loopback only.
+settingsRouter.post(
+  "/settings/import-db",
+  express.raw({ type: "*/*", limit: "16gb" }),
+  (req, res) => {
+    if (!isLoopback(req))
+      return res.status(403).json({ ok: false, error: "local requests only" });
+    const buf = req.body as Buffer;
+    if (!Buffer.isBuffer(buf) || buf.length < 100)
+      return res.status(400).json({ ok: false, error: "empty upload" });
+    if (!buf.subarray(0, 16).equals(Buffer.from("SQLite format 3\0", "latin1")))
+      return res
+        .status(400)
+        .json({ ok: false, error: "not a SQLite database file" });
+    try {
+      fs.writeFileSync(`${config.dbPath}.import`, buf);
+    } catch (e) {
+      return res.status(500).json({ ok: false, error: String(e) });
+    }
+    res.json({
+      ok: true,
+      note: "Import staged — restart the app to apply it (the current database is kept as a backup).",
+    });
+  }
 );
 
 settingsRouter.post("/settings", (req, res) => {
@@ -81,7 +118,16 @@ settingsRouter.post("/settings", (req, res) => {
     clientId?: unknown;
     clientSecret?: unknown;
     userId?: unknown;
+    lazerImporterPath?: unknown;
   };
+  // executable path: loopback only (see the lazer-import security model)
+  if (body.lazerImporterPath != null) {
+    if (!isLoopback(req))
+      return res
+        .status(403)
+        .json({ ok: false, error: "importer path: local requests only" });
+    setState("lazer_importer_path", String(body.lazerImporterPath).trim());
+  }
   if (body.discord != null) {
     const err = setDiscordSettings({
       webhookUrl:

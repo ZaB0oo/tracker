@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { Router, type Request } from "express";
 import { config } from "../config.js";
+import { getState } from "../db/db.js";
 import { buildCollectionDb } from "./table.js";
 
 /**
@@ -12,8 +13,9 @@ import { buildCollectionDb } from "./table.js";
  * automatic backup, schema-version detection, refusal while osu! runs).
  *
  * Security model:
- * - the executable path comes ONLY from the environment (LAZER_IMPORTER_PATH),
- *   never from a request — the API cannot be used to run arbitrary programs;
+ * - the executable path comes from the environment (LAZER_IMPORTER_PATH) or
+ *   from the Settings UI — and changing it via the API is LOOPBACK-ONLY, so a
+ *   LAN client can never point the app at an arbitrary program;
  * - execFile with an argument array (no shell → no injection), and the only
  *   variable argument is a temp file path generated server-side;
  * - loopback-only: writing to the local osu! database is not something a
@@ -27,7 +29,7 @@ function isLoopback(req: Request): boolean {
 }
 
 async function importerPath(): Promise<string | null> {
-  const p = config.lazerImporterPath;
+  const p = getState("lazer_importer_path") || config.lazerImporterPath;
   if (!p || !path.isAbsolute(p)) return null;
   try {
     await fs.access(p);
@@ -54,7 +56,8 @@ lazerRouter.post("/lazer-import", async (req, res) => {
   if (!exe)
     return res.status(400).json({
       ok: false,
-      error: "LAZER_IMPORTER_PATH is not set (or the file does not exist) — see .env.example",
+      error:
+        "LazerCollectionImporter path is not set (or the file does not exist) — Settings → Integrations",
     });
 
   const built = await buildCollectionDb(req.query as Record<string, string | undefined>);

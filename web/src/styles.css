@@ -302,6 +302,25 @@ h1 { font-size: 21px; margin: 0; }
 }
 .chip-custom { display: inline-flex; border: 1px solid var(--accent2); border-radius: 13px; overflow: hidden; }
 .presetbar-empty { color: var(--fg-dim); font-size: 12px; }
+
+/* avatar menu header: name + square settings button on the right */
+.avatar-head { display: flex; align-items: center; gap: 10px; }
+.avatar-head .avatar-name {
+  flex: 1; min-width: 0; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+/* the menu makes every button full-width: the gear must stay a square */
+.actions-menu button.gear-btn {
+  width: 30px; min-width: 30px; height: 30px; flex: 0 0 30px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 16px; border-radius: 6px; margin: 0;
+}
+/* path field + Browse button side by side */
+.set-path { display: flex; gap: 6px; }
+.set-path input { flex: 1; min-width: 0; }
+.set-path button { flex-shrink: 0; }
+/* maintenance buttons in the settings modal */
+.set-maint { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
 .chip-custom .chip-apply { border: none; border-radius: 0; padding: 4px 8px 4px 11px; }
 .chip-custom .chip-del { border: none; border-radius: 0; padding: 4px 8px; color: var(--fg-dim); }
 .chip-custom .chip-del:hover { color: var(--red); }
@@ -415,11 +434,19 @@ h1 { font-size: 21px; margin: 0; }
 .actions-menu button {
   text-align: left; width: 100%; box-sizing: border-box; padding: 6px 10px;
 }
-/* Settings modal: sectioned layout with roomy field grids */
-.settings-modal { width: min(680px, 94vw); }
+/* Settings modal: two columns so everything (and Save) fits without scroll.
+   NB: .adv-modal (declared later) also sets a width — the combined selector
+   keeps this one winning. */
+.adv-modal.settings-modal { width: min(1100px, 94vw); }
 .settings-modal h3 {
-  border-bottom: 1px solid var(--border); padding-bottom: 4px; margin-top: 20px;
+  color: var(--accent); letter-spacing: 0.4px;
+  border-bottom: 2px solid var(--accent); padding-bottom: 5px;
+  margin: 26px 0 10px; font-size: 14px;
 }
+.set-cols { display: flex; gap: 26px; align-items: flex-start; }
+.set-col { flex: 1; min-width: 0; }
+.set-col > h3:first-child { margin-top: 8px; }
+@media (max-width: 860px) { .set-cols { flex-direction: column; } }
 .set-grid {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px 18px; margin: 8px 0 4px;

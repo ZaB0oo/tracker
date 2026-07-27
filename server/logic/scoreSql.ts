@@ -63,10 +63,14 @@ let missingStamp = "";
 
 /** Cache key over the scores table: any insert bumps count and/or max id. */
 export function scoresVersion(): string {
+  // TOTAL(pp) catches in-place refreshes (osu! silently recalculates pp of
+  // existing scores): count+max id alone would keep serving stale caches.
   const v = getDb()
-    .prepare("SELECT COUNT(*) c, COALESCE(MAX(id), 0) m FROM scores")
-    .get() as { c: number; m: number };
-  return `${v.c}-${v.m}`;
+    .prepare(
+      "SELECT COUNT(*) c, COALESCE(MAX(id), 0) m, TOTAL(pp) p FROM scores"
+    )
+    .get() as { c: number; m: number; p: number };
+  return `${v.c}-${v.m}-${v.p.toFixed(3)}`;
 }
 
 export function ensureMissingFresh(): void {

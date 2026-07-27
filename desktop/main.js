@@ -13,6 +13,7 @@ import {
   app,
   BrowserWindow,
   dialog,
+  ipcMain,
   Menu,
   nativeImage,
   shell,
@@ -168,6 +169,9 @@ function showWindow() {
     backgroundColor: "#16121f",
     title: "osu!completionist",
     icon: ICON,
+    webPreferences: {
+      preload: path.join(import.meta.dirname, "preload.cjs"),
+    },
   });
   // target=_blank links (osu.ppy.sh, GitHub release page…) open in the
   // system browser, not in a new Electron window
@@ -266,6 +270,16 @@ function setupAutoUpdate() {
   check();
   setInterval(check, 6 * 3600 * 1000);
 }
+
+// native file picker for the UI (Settings → LazerCollectionImporter path…)
+ipcMain.handle("pick-file", async (_e, opts) => {
+  const r = await dialog.showOpenDialog({
+    title: typeof opts?.title === "string" ? opts.title : undefined,
+    filters: Array.isArray(opts?.filters) ? opts.filters : undefined,
+    properties: ["openFile"],
+  });
+  return r.canceled ? null : (r.filePaths[0] ?? null);
+});
 
 // ---------- lifecycle ----------
 app.whenReady().then(async () => {

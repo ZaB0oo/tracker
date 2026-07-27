@@ -1,7 +1,26 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchSettings, postDiscordTest, postSettings } from "../api";
+import {
+  fetchSettings,
+  postDiscordTest,
+  postImportDb,
+  postSettings,
+  postSync,
+} from "../api";
 import { firstPlaceLabel, useCountryCode } from "../country";
+
+// Electron bridge (desktop/preload.cjs): native file picker. Absent in a
+// plain browser — the path is then typed manually.
+declare global {
+  interface Window {
+    desktop?: {
+      pickFile: (opts?: {
+        title?: string;
+        filters?: { name: string; extensions: string[] }[];
+      }) => Promise<string | null>;
+    };
+  }
+}
 
 function Field({
   label,
@@ -47,6 +66,37 @@ export function AdvancedSettings({
   const [dBests, setDBests] = useState<boolean | null>(null);
   const [wither, setWither] = useState<boolean | null>(null);
   const [testMsg, setTestMsg] = useState<string | null>(null);
+  const [importerPath, setImporterPath] = useState<string | null>(null);
+  const importInput = useRef<HTMLInputElement>(null);
+  const [maintMsg, setMaintMsg] = useState<string | null>(null);
+
+  // maintenance actions run immediately (they are not part of "Save")
+  const maint = async (
+    a: Parameters<typeof postSync>[0],
+    startMsg: string,
+    confirmMsg?: string
+  ) => {
+    if (confirmMsg && !window.confirm(confirmMsg)) return;
+    setMaintMsg(startMsg);
+    try {
+      const r = await postSync(a);
+      if ((r as { ok?: boolean }).ok === false)
+        setMaintMsg(`Failed: ${String((r as { error?: string }).error ?? "unknown")}`);
+      else setMaintMsg("Started — tracked in the sync bar.");
+    } catch (e) {
+      setMaintMsg(`Failed: ${String(e)}`);
+    }
+    void qc.invalidateQueries({ queryKey: ["sync"] });
+  };
+
+  const importDb = async (f: File) => {
+    setMaintMsg("Uploading database…");
+    try {
+      setMaintMsg(await postImportDb(f));
+    } catch (e) {
+      setMaintMsg(`Import failed: ${String(e instanceof Error ? e.message : e)}`);
+    }
+  };
 
   const save = useMutation({
     mutationFn: async () => {
@@ -63,6 +113,7 @@ export function AdvancedSettings({
       if (clientId != null && clientId !== "") payload.clientId = clientId;
       if (secret !== "") payload.clientSecret = secret;
       if (userId != null && userId !== "") payload.userId = userId;
+      if (importerPath != null) payload.lazerImporterPath = importerPath;
       await postSettings(payload);
       return Boolean(payload.clientId || payload.clientSecret || payload.userId);
     },
@@ -101,40 +152,8 @@ export function AdvancedSettings({
           <button className="mm-close" onClick={onClose}>✕</button>
         </div>
 
-        <h3>Synchronization</h3>
-        <div className="set-grid">
-          <Field
-            label="Score polling (s)"
-            hint="How often your recent scores are fetched (10 to 3600 s)"
-          >
-            <input
-              type="number" min={10} max={3600} step={10}
-              value={poll ?? String(data.pollIntervalSeconds)}
-              onChange={(e) => setPoll(e.target.value)}
-            />
-          </Field>
-          <Field
-            label={`Re-check ${lbl} (h)`}
-            hint="Age at which a held country #1 is re-checked (snipe detection). Runs on the next background tick (every 6 h max)."
-          >
-            <input
-              type="number" min={1} max={720} step={1}
-              value={countryH ?? String(data.countryRecheckHours)}
-              onChange={(e) => setCountryH(e.target.value)}
-            />
-          </Field>
-          <Field
-            label="Re-check global tops (h)"
-            hint="Age at which a held global top-100 position is re-checked. Runs on the next background tick, only while global tops tracking is enabled."
-          >
-            <input
-              type="number" min={1} max={720} step={1}
-              value={globalH ?? String(data.globalRecheckHours)}
-              onChange={(e) => setGlobalH(e.target.value)}
-            />
-          </Field>
-        </div>
-
+        <div className="set-cols">
+        <div className="set-col">
         <h3>osu! API (OAuth)</h3>
         <p className="set-note">
           Create an OAuth application in{" "}
@@ -178,6 +197,61 @@ export function AdvancedSettings({
           </Field>
         </div>
 
+        <h3>Synchronization</h3>
+        <div className="set-grid">
+          <Field
+            label="Score polling (s)"
+            hint="How often your recent scores are fetched (10 to 3600 s)"
+          >
+            <input
+              type="number" min={10} max={3600} step={10}
+              value={poll ?? String(data.pollIntervalSeconds)}
+              onChange={(e) => setPoll(e.target.value)}
+            />
+          </Field>
+          <Field
+            label={`Re-check ${lbl} (h)`}
+            hint="Age at which a held country #1 is re-checked (snipe detection). Runs on the next background tick (every 6 h max)."
+          >
+            <input
+              type="number" min={1} max={720} step={1}
+              value={countryH ?? String(data.countryRecheckHours)}
+              onChange={(e) => setCountryH(e.target.value)}
+            />
+          </Field>
+          <Field
+            label="Re-check global tops (h)"
+            hint="Age at which a held global top-100 position is re-checked. Runs on the next background tick, only while global tops tracking is enabled."
+          >
+            <input
+              type="number" min={1} max={720} step={1}
+              value={globalH ?? String(data.globalRecheckHours)}
+              onChange={(e) => setGlobalH(e.target.value)}
+            />
+          </Field>
+        </div>
+
+        <h3>Display</h3>
+        <label className="adv-toggle">
+          <input
+            type="checkbox"
+            checked={wither ?? data.display.wither}
+            onChange={(e) => setWither(e.target.checked)}
+          />
+          <span>
+            Show witherscore alongside classic score.{" "}
+            <a
+              href="https://github.com/ppy/osu/discussions/38224"
+              target="_blank"
+              rel="noreferrer"
+            >
+              What is this?
+            </a>
+          </span>
+        </label>
+        </div>
+
+        <div className="set-col">
         <h3>Discord notifications</h3>
         <div className="set-grid set-grid-wide">
           <Field
@@ -212,24 +286,120 @@ export function AdvancedSettings({
           {testMsg && <span> {testMsg}</span>}
         </div>
 
-        <h3>Display</h3>
-        <label className="adv-toggle">
+        <h3>Integrations</h3>
+        <p className="set-note">
+          <a
+            href="https://github.com/ZaB0oo/LazerCollectionImporter"
+            target="_blank"
+            rel="noreferrer"
+          >
+            LazerCollectionImporter
+          </a>{" "}
+          imports collections straight into osu!lazer — download its .exe, then
+          point the field below at it.
+        </p>
+        <div className="set-grid set-grid-wide">
+          <Field
+            label="LazerCollectionImporter.exe"
+            hint="Absolute path to the LazerCollectionImporter executable — enables one-click import of collections straight into osu!lazer (github.com/ZaB0oo/LazerCollectionImporter)"
+          >
+            <span className="set-path">
+              <input
+                type="text"
+                placeholder="C:\\Tools\\LazerCollectionImporter.exe (empty = disabled)"
+                value={importerPath ?? data.lazerImporterPath}
+                onChange={(e) => setImporterPath(e.target.value)}
+              />
+              {window.desktop && (
+                <button
+                  onClick={async () => {
+                    const p = await window.desktop!.pickFile({
+                      title: "Select LazerCollectionImporter.exe",
+                      filters: [{ name: "Executable", extensions: ["exe"] }],
+                    });
+                    if (p) setImporterPath(p);
+                  }}
+                >
+                  Browse…
+                </button>
+              )}
+            </span>
+          </Field>
+        </div>
+
+        <h3>Maintenance</h3>
+        <div className="set-maint">
+          <button
+            onClick={() => window.open("/api/export-db")}
+            title="Download a consistent copy of the SQLite database (full backup: scores, catalog, settings)"
+          >
+            Export database (.db)
+          </button>
+          <button
+            onClick={() => importInput.current?.click()}
+            title="Replace the current database with another tracker.db (applied at the next app restart; the current one is kept as .bak)"
+          >
+            Import database…
+          </button>
           <input
-            type="checkbox"
-            checked={wither ?? data.display.wither}
-            onChange={(e) => setWither(e.target.checked)}
+            ref={importInput}
+            type="file"
+            accept=".db"
+            style={{ display: "none" }}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (f) void importDb(f);
+            }}
           />
-          <span>
-            Show witherscore alongside classic score.{" "}
-            <a
-              href="https://github.com/ppy/osu/discussions/38224"
-              target="_blank"
-              rel="noreferrer"
-            >
-              What is this?
-            </a>
-          </span>
-        </label>
+          <button
+            onClick={() => void maint("catalog-full?force=1", "Re-scanning catalog…")}
+            title="Full re-enumeration of the catalog via the API: star ratings, statuses up to date (~30-60 min)"
+          >
+            Full catalog re-scan
+          </button>
+          <button
+            onClick={() => void maint("recompute", "Recomputing…")}
+            title="Recompute bests for all scores"
+          >
+            Recompute bests
+          </button>
+          <button
+            onClick={() =>
+              void maint(
+                "global-recheck-all",
+                "Re-queuing all global positions…",
+                "Re-check ALL global positions (any depth, resumable). The periodic rotation only refreshes held top-100s — use this to refresh everything else. Start?"
+              )
+            }
+            title="Re-queue every played map for a global position check"
+          >
+            Re-check all global tops
+          </button>
+          <button
+            onClick={() =>
+              void maint("refresh-top-pp", "Re-fetching your top pp scores…")
+            }
+            title="Re-fetches the scores of your ~250 best-pp maps (~4 min). osu! silently adjusts stored pp over time — use this when the Profile pp metric drifts a little from your official profile."
+          >
+            Refresh top pp scores
+          </button>
+          <button
+            onClick={() =>
+              void maint(
+                "rebackfill",
+                "Re-backfill…",
+                "FULL re-backfill: all maps go back to « to check » (~40h, resumable, no score lost). Includes a re-sweep of all country leaderboards. Start?"
+              )
+            }
+            title="Use this if the app stayed off > 24h while you were playing"
+          >
+            Full re-backfill (~40h)
+          </button>
+        </div>
+        {maintMsg && <p className="set-note">{maintMsg}</p>}
+        </div>
+        </div>
 
         <div className="adv-actions">
           <button
