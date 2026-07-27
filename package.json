@@ -1,8 +1,9 @@
 {
   "name": "osu-completionist-tracker",
-  "version": "0.1.0",
+  "version": "1.7.3",
   "private": true,
   "type": "module",
+  "main": "desktop/main.js",
   "workspaces": [
     "web"
   ],
@@ -14,6 +15,8 @@
     "start": "node dist/server/index.js",
     "desktop": "npm run build && electron desktop/main.js",
     "desktop:check": "electron desktop/check-runtime.js",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder --win",
     "export-seed": "node scripts/export-seed-sets.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && npm --workspace web exec tsc -- --noEmit",
     "check": "npm run typecheck && npm test",
@@ -22,6 +25,47 @@
   },
   "engines": {
     "node": ">=22.13.0"
+  },
+  "build": {
+    "appId": "com.zaboo.osucompletionist",
+    "productName": "osu!completionist",
+    "asar": false,
+    "files": [
+      "desktop/**/*",
+      "dist/**/*",
+      "web/dist/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "artifactName": "osu-completionist-Setup-${version}.${ext}",
+    "win": {
+      "target": "nsis",
+      "icon": "desktop/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "desktop/icon.png",
+      "artifactName": "osu-completionist-${version}-mac.${ext}"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "desktop/icon.png",
+      "artifactName": "osu-completionist-${version}.${ext}"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "ZaB0oo",
+      "repo": "tracker"
+    }
   },
   "dependencies": {
     "dotenv": "^16.4.5",
@@ -32,6 +76,7 @@
     "@types/node": "^22.10.2",
     "concurrently": "^9.1.0",
     "electron": "43.2.0",
+    "electron-builder": "^26.15.3",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

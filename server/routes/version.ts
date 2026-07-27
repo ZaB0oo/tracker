@@ -1,7 +1,26 @@
 import { Router } from "express";
+import { readFileSync } from "node:fs";
 
-/** Bump at each release (matches the GitHub tag, without the leading v). */
-export const APP_VERSION = "1.7.3";
+/**
+ * Single source of truth: the root package.json version (also what
+ * electron-builder stamps into the installers). Resolved relative to this
+ * module: two levels up from source (server/routes), three from dist.
+ */
+function readVersion(): string {
+  for (const rel of ["../../package.json", "../../../package.json"]) {
+    try {
+      const pkg = JSON.parse(
+        readFileSync(new URL(rel, import.meta.url), "utf8")
+      ) as { name?: string; version?: string };
+      if (pkg.name === "osu-completionist-tracker" && pkg.version)
+        return pkg.version;
+    } catch {
+      // try the next candidate
+    }
+  }
+  return "0.0.0";
+}
+export const APP_VERSION = readVersion();
 
 const REPO = "ZaB0oo/tracker";
 const CHECK_TTL_MS = 24 * 3600 * 1000;

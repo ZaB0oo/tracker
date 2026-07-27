@@ -1,6 +1,7 @@
 node_modules/
 dist/
 web/dist/
+release/
 data/
 downloads/
 .env
