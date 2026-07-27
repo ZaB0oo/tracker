@@ -59,6 +59,7 @@
     "linux": {
       "target": "AppImage",
       "icon": "desktop/icon.png",
+      "executableName": "osu-completionist",
       "artifactName": "osu-completionist-${version}.${ext}"
     },
     "publish": {
