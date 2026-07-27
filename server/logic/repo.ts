@@ -19,11 +19,22 @@ export function saveScores(
 ): { bestScoreId: number | null } {
   const ruleset = opts?.ruleset ?? 0;
   const db = getDb();
-  const maxCombo = (
-    db.prepare("SELECT max_combo FROM beatmaps WHERE id = ?").get(beatmapId) as
-      | { max_combo: number | null }
-      | undefined
-  )?.max_combo ?? null;
+  // convert plays (ruleset != map's mode): the map's own max_combo is not a
+  // valid reference — use the per-ruleset convert_attrs when known
+  const nativeRow = db
+    .prepare("SELECT ruleset, max_combo FROM beatmaps WHERE id = ?")
+    .get(beatmapId) as { ruleset: number; max_combo: number | null } | undefined;
+  let maxCombo = nativeRow?.max_combo ?? null;
+  if (nativeRow && nativeRow.ruleset !== ruleset) {
+    maxCombo =
+      (
+        db
+          .prepare(
+            "SELECT max_combo FROM convert_attrs WHERE beatmap_id = ? AND ruleset = ?"
+          )
+          .get(beatmapId, ruleset) as { max_combo: number | null } | undefined
+      )?.max_combo ?? null;
+  }
 
   const upsertScore = db.prepare(`
     INSERT INTO scores (
@@ -52,7 +63,7 @@ export function saveScores(
   transaction(() => {
     for (const s of scores) {
       if (!existsStmt.get(s.id)) hasNewScore = true;
-      const fcState = computeFcState(s, maxCombo);
+      const fcState = computeFcState(s, maxCombo, s.ruleset_id ?? ruleset);
       upsertScore.run({
         id: s.id,
         legacy_score_id: s.legacy_score_id ?? null,
