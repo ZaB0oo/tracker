@@ -99,6 +99,22 @@ export function rulesetDef(id: number): RulesetDef {
   return RULESETS[(id as RulesetId) in RULESETS ? (id as RulesetId) : RULESET_OSU];
 }
 
+/** Safe ruleset from a query param (default osu!). */
+export function parseRulesetParam(v: unknown): RulesetId {
+  const n = Number(v);
+  return (ALL_RULESETS as readonly number[]).includes(n) ? (n as RulesetId) : 0;
+}
+
+/**
+ * SQL map-pool condition (alias b) for a ruleset view:
+ * - specific: only maps native to the ruleset;
+ * - all (non-std only): + the converts (std maps playable in that mode).
+ */
+export function poolWhere(ruleset: number, pool: string | undefined): string {
+  if (ruleset === 0 || pool !== "all") return `b.ruleset = ${ruleset}`;
+  return `(b.ruleset = ${ruleset} OR b.ruleset = 0)`;
+}
+
 /**
  * Classic (stable-feel) score from a standardised score.
  * Source: osu.Game/Scoring/Legacy/ScoreInfoExtensions.convertStandardisedToClassic —

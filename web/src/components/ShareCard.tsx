@@ -43,7 +43,7 @@ const H = 512;
 export function ShareCard({ onClose }: { onClose: () => void }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const { data: auth } = useQuery({ queryKey: ["auth"], queryFn: fetchAuthStatus });
-  const { data: stats } = useQuery({ queryKey: ["stats"], queryFn: fetchStats });
+  const { data: stats } = useQuery({ queryKey: ["stats"], queryFn: () => fetchStats() });
   const { data: images } = useQuery({
     queryKey: ["profile-images"],
     queryFn: fetchProfileImages,

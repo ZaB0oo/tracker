@@ -170,6 +170,19 @@ export function FilterBar({
             Standardised
           </button>
         </div>
+        {local.ruleset !== 0 && (
+          <label
+            className="mb-check pool-toggle"
+            title="Also list the osu! standard maps playable as converts in this ruleset"
+          >
+            <input
+              type="checkbox"
+              checked={local.pool === "all"}
+              onChange={(e) => set("pool", e.target.checked ? "all" : "")}
+            />
+            Include converts
+          </label>
+        )}
         <input
           className="search"
           placeholder="Search artist / title / mapper / diff..."

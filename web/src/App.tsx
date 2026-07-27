@@ -19,10 +19,21 @@ type View = "table" | "metrics" | "history" | "dashboard";
 const isActivityWindow = new URLSearchParams(window.location.search).has("activity");
 const isOverlayWindow = new URLSearchParams(window.location.search).has("overlay");
 
+const RULESET_TABS: [number, string][] = [
+  [0, "osu!"],
+  [1, "taiko"],
+  [2, "catch"],
+  [3, "mania"],
+];
+
 export default function App() {
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [sort, setSort] = useState<SortSpec>([{ id: "missing", desc: true }]);
   const [view, setView] = useState<View>("table");
+  const ruleset = filters.ruleset;
+  const switchRuleset = (r: number) =>
+    // filters are pool-specific: switching mode resets them (like a drill-down)
+    setFilters({ ...DEFAULT_FILTERS, mode: filters.mode, ruleset: r });
 
   const drillDown = (f: Filters, s: SortSpec) => {
     setFilters(f);
@@ -62,6 +73,17 @@ export default function App() {
       </header>
 
       <nav className="tabs">
+        <div className="ruleset-tabs" title="Viewed ruleset">
+          {RULESET_TABS.map(([r, label]) => (
+            <button
+              key={r}
+              className={`rs-tab ${ruleset === r ? "active" : ""}`}
+              onClick={() => switchRuleset(r)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         {(
           [
             ["table", "Maps"],
@@ -100,7 +122,7 @@ export default function App() {
         />
       )}
       {view === "history" && <HistoryView />}
-      {view === "dashboard" && <Dashboard />}
+      {view === "dashboard" && <Dashboard ruleset={ruleset} />}
     </div>
   );
 }

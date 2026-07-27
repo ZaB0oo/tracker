@@ -2,6 +2,7 @@ import { Router } from "express";
 import { getDb } from "../db/db.js";
 import { mapWhere, scoreWhere, type MetricParams } from "../logic/metrics.js";
 import { ensureMissingFresh } from "../logic/scoreSql.js";
+import { parseRulesetParam, poolWhere } from "../logic/rulesets.js";
 import { getBeatmapsByIds } from "../osu/api.js";
 
 export const tableRouter = Router();
@@ -56,8 +57,9 @@ function buildFilters(
   q: Record<string, string | undefined>,
   missingSql: string
 ): { where: string[]; params: Record<string, string | number | null> } {
+  const ruleset = parseRulesetParam(q.ruleset);
   // defense in depth: never any graveyard/WIP diffs even if imported
-  const where: string[] = ["b.ruleset = 0", "b.status IN (1, 2, 4)"];
+  const where: string[] = [poolWhere(ruleset, q.pool), "b.status IN (1, 2, 4)"];
   const params: Record<string, string | number | null> = {};
 
   const num = (name: string, sql: string, cmp: string) => {
@@ -190,7 +192,7 @@ tableRouter.get("/table", (req, res) => {
   const baseSql = `
     FROM beatmaps b
     JOIN beatmapsets st ON st.id = b.beatmapset_id
-    LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = 0
+    LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${parseRulesetParam(q.ruleset)}
     LEFT JOIN scores s ON s.id = u.${bestCol}
     WHERE ${where.join(" AND ")}
   `;
@@ -252,23 +254,23 @@ tableRouter.get("/map/:id", (req, res) => {
     .prepare(
       `SELECT id, ended_at, rank, accuracy, max_combo, total_score,
          classic_total_score, pp, mods, fc_state, passed
-       FROM scores WHERE beatmap_id = ? ORDER BY ended_at DESC`
+       FROM scores WHERE beatmap_id = ? AND ruleset = ? ORDER BY ended_at DESC`
     )
-    .all(id);
+    .all(id, parseRulesetParam(req.query.ruleset));
   const user =
     db
       .prepare(
         `SELECT played, any_fc, country_first, country_checked_at, fetched_at,
            global_rank
-         FROM beatmap_user WHERE beatmap_id = ? AND ruleset = 0`
+         FROM beatmap_user WHERE beatmap_id = ? AND ruleset = ?`
       )
-      .get(id) ?? null;
+      .get(id, parseRulesetParam(req.query.ruleset)) ?? null;
   const countryEvents = db
     .prepare(
       `SELECT event, at, score_at, by_username
-       FROM country_events WHERE beatmap_id = ? ORDER BY at DESC`
+       FROM country_events WHERE beatmap_id = ? AND ruleset = ? ORDER BY at DESC`
     )
-    .all(id);
+    .all(id, parseRulesetParam(req.query.ruleset));
   res.json({ map, scores, user, countryEvents });
 });
 
@@ -318,7 +320,7 @@ export async function buildCollectionDb(
       `SELECT b.id, b.checksum
        FROM beatmaps b
        JOIN beatmapsets st ON st.id = b.beatmapset_id
-       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = 0
+       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${parseRulesetParam(q.ruleset)}
        LEFT JOIN scores s ON s.id = u.best_lazer_score_id
        WHERE ${where.join(" AND ")}`
     )

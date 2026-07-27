@@ -61,6 +61,8 @@ function buildTableQuery(
 ): string {
   const p = new URLSearchParams();
   p.set("mode", filters.mode);
+  if (filters.ruleset) p.set("ruleset", String(filters.ruleset));
+  if (filters.pool) p.set("pool", filters.pool);
   p.set("offset", String(offset));
   p.set("limit", String(limit));
   if (sort.length)
@@ -119,10 +121,13 @@ export interface ClearRow {
 export async function fetchClears(
   offset: number,
   limit: number,
-  day?: string
+  day?: string,
+  ruleset = 0
 ): Promise<{ rows: ClearRow[]; total: number }> {
   const dayQ = day ? `&day=${day}` : "";
-  const res = await fetch(`/api/clears?offset=${offset}&limit=${limit}${dayQ}`);
+  const res = await fetch(
+    `/api/clears?offset=${offset}&limit=${limit}&ruleset=${ruleset}${dayQ}`
+  );
   if (!res.ok) throw new Error(`clears: HTTP ${res.status}`);
   return res.json();
 }
@@ -134,8 +139,14 @@ export interface DailyStats {
   streak: { current: number; longest: number; best: { d: string; c: number } };
 }
 
-export async function fetchDaily(year?: number): Promise<DailyStats> {
-  const res = await fetch(`/api/daily${year ? `?year=${year}` : ""}`);
+export async function fetchDaily(
+  year?: number,
+  ruleset = 0,
+  pool: "" | "all" = ""
+): Promise<DailyStats> {
+  const res = await fetch(
+    `/api/daily?ruleset=${ruleset}&pool=${pool}${year ? `&year=${year}` : ""}`
+  );
   if (!res.ok) throw new Error(`daily: HTTP ${res.status}`);
   return res.json();
 }
@@ -230,8 +241,8 @@ export async function lazerImport(filters: Filters, name: string): Promise<Lazer
   return json;
 }
 
-export async function fetchStats(): Promise<Stats> {
-  const res = await fetch("/api/stats");
+export async function fetchStats(ruleset = 0, pool: "" | "all" = ""): Promise<Stats> {
+  const res = await fetch(`/api/stats?ruleset=${ruleset}&pool=${pool}`);
   if (!res.ok) throw new Error(`stats: HTTP ${res.status}`);
   return res.json();
 }

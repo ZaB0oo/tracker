@@ -293,19 +293,23 @@ const DistPanel = memo(function DistPanel({ title, rows }: { title: string; rows
 
 const statLabel = (b: number) => (b >= 10 ? "10" : `${b}–${b + 1}`);
 
-export function Dashboard() {
+export function Dashboard({ ruleset = 0 }: { ruleset?: number }) {
+  // non-std views: the time machine / skill curve / missing predictions are
+  // still std-only (per-ruleset curves land later) — hide them cleanly
+  const isStd = ruleset === 0;
   const country = useCountryCode();
   const prefs = useDisplayPrefs();
   const distHidden = useHidden("dashboard-dist");
   const { data, isLoading, error } = useQuery({
-    queryKey: ["stats"],
-    queryFn: fetchStats,
+    queryKey: ["stats", ruleset],
+    queryFn: () => fetchStats(ruleset),
     refetchInterval: 60_000,
   });
   const { data: timeline } = useQuery({
     queryKey: ["timeline"],
     queryFn: fetchTimeline,
     refetchInterval: 5 * 60_000,
+    enabled: isStd,
   });
   const [tmIdx, setTmIdx] = useState<number | null>(null);
   const tmDay =
@@ -539,6 +543,7 @@ export function Dashboard() {
             Standardised: {fmtNum(data.scoreSums.lazer)}
           </small>
         </div>
+        {isStd && (
         <div className={`hero-stat${past ? " tm-dim" : ""}`}>
           <h3>Missing score (estimate)</h3>
           <div className="big accent">
@@ -553,6 +558,7 @@ export function Dashboard() {
           )}
           <small>Standardised: {fmtNum(data.scoreSums.missing)}</small>
         </div>
+        )}
         <div className="hero-stat hero-grades">
           <h3>Grades</h3>
           <div className="grade-grid">
@@ -574,7 +580,7 @@ export function Dashboard() {
         </div>
       </div>
 
-      <HeatmapPanel cutoffDay={past?.day ?? null} />
+      <HeatmapPanel cutoffDay={past?.day ?? null} ruleset={ruleset} />
 
       <div className="view-toolbar">
         <VisibilityMenu
@@ -592,7 +598,7 @@ export function Dashboard() {
           ))}
       </div>
 
-      <SkillCurvePanel />
+      {isStd && <SkillCurvePanel />}
     </div>
   );
 }

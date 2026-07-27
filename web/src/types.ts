@@ -181,6 +181,10 @@ export interface SyncStatus {
 
 export interface Filters {
   mode: ScoreMode;
+  /** viewed ruleset (0 osu, 1 taiko, 2 catch, 3 mania) — set by the header switcher */
+  ruleset: number;
+  /** map pool for non-std rulesets: "" specific maps only, "all" + converts */
+  pool: "" | "all";
   played: "" | "played" | "unplayed";
   q: string;
   grades: string[];
@@ -206,6 +210,8 @@ export interface Filters {
 
 export const DEFAULT_FILTERS: Filters = {
   mode: "classic",
+  ruleset: 0,
+  pool: "",
   played: "",
   q: "",
   grades: [],
