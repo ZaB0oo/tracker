@@ -1,6 +1,6 @@
 # osu! Completionist Tracker
 
-Local, single-user web app that tracks your best score on **every ranked/approved/loved difficulty** of osu! standard — with advanced sorting/filters, a completion dashboard, custom metrics with milestones and evolution charts, country #1 and global tops tracking, a stream overlay for OBS, and near real-time pickup of new scores.
+Local, single-user desktop app that tracks your best score on **every ranked/approved/loved difficulty** of osu! standard — with advanced sorting/filters, a completion dashboard, custom metrics with milestones and evolution charts, country #1 and global tops tracking, a stream overlay for OBS, and near real-time pickup of new scores.
 
 ![Dashboard](docs/dashboard.png)
 
@@ -31,29 +31,29 @@ Local, single-user web app that tracks your best score on **every ranked/approve
 - **Stream overlay**: transparent browser source for OBS with live session gains.
 - **Polite syncing**: 60 req/min max against the osu! API, resumable backfill, automatic daily catch-up of newly ranked/loved maps.
 
-## Prerequisites
+## Installation
 
-- **Node.js ≥ 22.13** (the DB uses `node:sqlite`, built into Node: no native compilation). Check with `node --version`.
-- An osu! OAuth application: https://osu.ppy.sh/home/account/edit#oauth — set the callback URL to `http://localhost:3727/api/auth/callback`.
+Download the installer for your OS from the **[latest release](https://github.com/ZaB0oo/tracker/releases/latest)** — no Node, no git, nothing else to install:
 
-## Setup
+- **Windows**: `osu-completionist-Setup-x.y.z.exe` (one-click install)
+- **macOS**: `osu-completionist-x.y.z-mac.dmg` (unsigned build: right-click → Open the first time)
+- **Linux**: `osu-completionist-x.y.z.AppImage`
+
+On first launch the app offers to **import an existing `tracker.db`** (if you used the source version before — everything is preserved: scores, catalog, metrics, settings, credentials) or to start fresh. Then open **Settings** and fill in the **osu! OAuth** section: create an application at https://osu.ppy.sh/home/account/edit#oauth with the callback URL `http://localhost:3727/api/auth/callback`, paste the client id/secret and your user id. A step-by-step guide is built into the settings dialog.
+
+The app lives in the tray: closing the window keeps the tracker running (polling, sweeps, Discord). Data is stored in your user profile (`%AppData%\osu-completionist` on Windows) and **updates install themselves automatically** — a dialog offers to restart when a new version is ready; your database is never touched.
+
+## Running from source (developers)
+
+- **Node.js ≥ 22.13** (the DB uses `node:sqlite`, built into Node: no native compilation).
 
 ```bash
 npm install
-copy .env.example .env      # then edit .env: client id/secret + your user id
+copy .env.example .env      # or fill the credentials later in the UI settings
 npm run dev                 # API server (:3727) + UI (http://localhost:5173)
 ```
 
-Local "production" build (single URL, http://localhost:3727):
-
-```bash
-npm run build
-npm start
-```
-
-On Windows you can just double-click `start-tracker.bat` (builds on first run, then starts the server and opens the browser).
-
-OAuth credentials can also be entered later in the UI (settings menu) — they are stored in the local DB and take priority over `.env`.
+Local "production" build (single URL, http://localhost:3727): `npm run build && npm start` — on Windows, double-clicking `start-tracker.bat` does it for you. The desktop shell itself: `npm run desktop` (dev) and `npm run dist:win` (build the installer locally). OAuth credentials from the UI are stored in the local DB and take priority over `.env`.
 
 ## First launch — initial sync
 
@@ -148,9 +148,11 @@ server/
   routes.ts            # router aggregator
   routes/*.ts          # one module per domain (table, stats, metrics, sync…)
 web/                   # React + Vite + TanStack Query/Table/Virtual
+desktop/               # Electron shell: tray, first-launch DB import, auto-update
+.github/workflows/     # release CI: installers built on every version tag
 ```
 
-Database: `./data/tracker.db` (SQLite, WAL mode). Delete the file to start from scratch. One-click backup: settings menu → "Export database".
+Database: `./data/tracker.db` in source mode, `%AppData%\osu-completionist\data\tracker.db` in the desktop app (SQLite, WAL mode; tray menu → "Open the data folder"). Delete the file to start from scratch. One-click backup: settings menu → "Export database".
 
 ## Tests
 
