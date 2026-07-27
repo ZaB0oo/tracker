@@ -254,6 +254,23 @@ export function transaction<T>(fn: () => T): T {
   }
 }
 
+/**
+ * Rulesets the tracker is following. osu!std (0) is always active; the others
+ * are opted into from Settings (each one has real API cost: catalog
+ * enumeration + score backfill of its maps and converts).
+ */
+export function getActiveRulesets(): number[] {
+  const raw = getState("active_rulesets") ?? "0";
+  const set = new Set(
+    raw
+      .split(",")
+      .map(Number)
+      .filter((n) => [0, 1, 2, 3].includes(n))
+  );
+  set.add(0);
+  return [...set].sort();
+}
+
 export function getState(key: string): string | null {
   const row = getDb()
     .prepare("SELECT value FROM sync_state WHERE key = ?")

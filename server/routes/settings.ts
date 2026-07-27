@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { applyOAuthOverrides, config } from "../config.js";
-import { getDb, getState, setState } from "../db/db.js";
+import { getActiveRulesets, getDb, getState, setState } from "../db/db.js";
 import {
   applyApiRpm,
   getCurrentRpm,
@@ -76,6 +76,7 @@ settingsRouter.get("/settings", (_req, res) =>
     // desktop: set from the UI (stored in DB); .env stays the fallback
     lazerImporterPath:
       getState("lazer_importer_path") ?? config.lazerImporterPath ?? "",
+    activeRulesets: getActiveRulesets(),
     info: { port: config.port },
   })
 );
@@ -119,7 +120,26 @@ settingsRouter.post("/settings", (req, res) => {
     clientSecret?: unknown;
     userId?: unknown;
     lazerImporterPath?: unknown;
+    activeRulesets?: unknown;
   };
+  if (Array.isArray(body.activeRulesets)) {
+    const wanted = new Set(
+      body.activeRulesets.map(Number).filter((n) => [0, 1, 2, 3].includes(n))
+    );
+    wanted.add(0); // std can never be disabled
+    const before = new Set(getActiveRulesets());
+    setState("active_rulesets", [...wanted].sort().join(","));
+    const added = [...wanted].filter((r) => !before.has(r));
+    if (added.length > 0 && config.hasCredentials) {
+      // newly tracked ruleset: enumerate its catalog in the background — the
+      // backfill queues (specific + converts) follow automatically
+      void import("../sync/daemon.js").then((d) =>
+        d.ensureCatalogComplete(false).catch((e) =>
+          console.error("[sync] ruleset activation catalog:", e)
+        )
+      );
+    }
+  }
   // executable path: loopback only (see the lazer-import security model)
   if (body.lazerImporterPath != null) {
     if (!isLoopback(req))

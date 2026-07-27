@@ -384,11 +384,12 @@ export async function getUserBeatmapPosition(
 export async function getUserBeatmapScores(
   beatmapId: number,
   userId: number,
-  priority: Priority = "low"
+  priority: Priority = "low",
+  rulesetName = "osu" // converts: the played ruleset, not the map's mode
 ): Promise<SoloScore[]> {
   try {
     const res = await apiGet<{ scores: SoloScore[] }>(
-      `/beatmaps/${beatmapId}/scores/users/${userId}/all?ruleset=osu`,
+      `/beatmaps/${beatmapId}/scores/users/${userId}/all?ruleset=${rulesetName}`,
       priority
     );
     // beatmap_id missing from the items on this endpoint -> we reinject it
@@ -415,10 +416,11 @@ export async function getBestScores(
 export async function getRecentScores(
   userId: number,
   limit = 50,
-  offset = 0
+  offset = 0,
+  modeName = "osu"
 ): Promise<SoloScore[]> {
   return apiGet<SoloScore[]>(
-    `/users/${userId}/scores/recent?mode=osu&include_fails=0&limit=${limit}&offset=${offset}`,
+    `/users/${userId}/scores/recent?mode=${modeName}&include_fails=0&limit=${limit}&offset=${offset}`,
     "high"
   );
 }

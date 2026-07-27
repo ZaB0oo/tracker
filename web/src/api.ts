@@ -622,6 +622,8 @@ export interface Settings {
   oauth: { clientId: string; userId: number; secretSet: boolean };
   /** path to LazerCollectionImporter.exe ("" = not configured) */
   lazerImporterPath: string;
+  /** tracked rulesets (0 osu — always present —, 1 taiko, 2 catch, 3 mania) */
+  activeRulesets: number[];
   info: { port: number };
 }
 
@@ -663,6 +665,7 @@ export async function postSettings(payload: {
   clientSecret?: string | number;
   userId?: string | number;
   lazerImporterPath?: string;
+  activeRulesets?: number[];
 }): Promise<void> {
   const res = await fetch("/api/settings", {
     method: "POST",

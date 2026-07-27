@@ -5,7 +5,7 @@
  * follow-up enrichment pass via `/beatmaps?ids[]=` (50/req) fills in
  * max_combo and up-to-date star ratings.
  */
-import { getDb, setState, getState, transaction } from "../db/db.js";
+import { getActiveRulesets, getDb, setState, getState, transaction } from "../db/db.js";
 import { config } from "../config.js";
 import {
   getBeatmapsByIds,
@@ -65,30 +65,43 @@ export async function updateCatalogDelta(
 ): Promise<number[]> {
   const db = getDb();
   const known = db.prepare("SELECT 1 FROM beatmapsets WHERE id = ?");
+  const knownDiff = db.prepare("SELECT 1 FROM beatmaps WHERE id = ?");
   const setStmt = upsertSetStmt();
   const mapStmt = upsertMapStmt();
   const newBeatmapIds: number[] = [];
 
-  for (const category of ["ranked", "loved"] as const) {
-    let cursor: string | null = null;
-    for (let page = 0; page < 100; page++) {
-      const res = await searchBeatmapsets(category, cursor, "low", "ranked_desc");
-      let newInPage = 0;
-      transaction(() => {
-        for (const set of res.beatmapsets) {
-          const isNew = !known.get(set.id);
-          if (isNew) newInPage++;
-          setStmt.run(apiSetToRow(set));
-          for (const bm of set.beatmaps ?? []) {
-            if (bm.mode_int !== 0 || !KEEP_STATUSES.has(bm.ranked)) continue;
-            mapStmt.run(apiMapToRow(bm));
-            if (isNew) newBeatmapIds.push(bm.id);
+  // one delta walk per active ruleset (the search's mode filter also drives
+  // which diffs each page carries)
+  for (const mode of getActiveRulesets()) {
+    for (const category of ["ranked", "loved"] as const) {
+      let cursor: string | null = null;
+      for (let page = 0; page < 100; page++) {
+        const res = await searchBeatmapsets(
+          category,
+          cursor,
+          "low",
+          "ranked_desc",
+          undefined,
+          mode
+        );
+        let newInPage = 0;
+        transaction(() => {
+          for (const set of res.beatmapsets) {
+            const isNew = !known.get(set.id);
+            if (isNew) newInPage++;
+            setStmt.run(apiSetToRow(set));
+            for (const bm of set.beatmaps ?? []) {
+              if (bm.mode_int !== mode || !KEEP_STATUSES.has(bm.ranked)) continue;
+              const isNewDiff = isNew || !knownDiff.get(bm.id);
+              mapStmt.run(apiMapToRow(bm));
+              if (isNewDiff) newBeatmapIds.push(bm.id);
+            }
           }
-        }
-      });
-      cursor = res.cursor_string;
-      onProgress?.(`delta ${category}: +${newBeatmapIds.length} diffs...`);
-      if (newInPage === 0 || !cursor || res.beatmapsets.length === 0) break;
+        });
+        cursor = res.cursor_string;
+        onProgress?.(`delta ${category} m${mode}: +${newBeatmapIds.length} diffs...`);
+        if (newInPage === 0 || !cursor || res.beatmapsets.length === 0) break;
+      }
     }
   }
   setState("catalog_delta_at", new Date().toISOString());
@@ -130,9 +143,10 @@ function modeIntOf(bm: ApiBeatmap & { mode?: string }): number {
   return { osu: 0, taiko: 1, fruits: 2, mania: 3 }[bm.mode ?? ""] ?? -1;
 }
 
-/** Upsert a full set; returns the ids of the new std diffs. */
+/** Upsert a full set; returns the ids of the new diffs (active rulesets). */
 function upsertFullSet(set: ApiBeatmapset): number[] {
   const db = getDb();
+  const modes = new Set(getActiveRulesets());
   const setStmt = upsertSetStmt();
   const mapStmt = upsertMapStmt();
   const knownDiff = db.prepare("SELECT 1 FROM beatmaps WHERE id = ?");
@@ -140,7 +154,7 @@ function upsertFullSet(set: ApiBeatmapset): number[] {
   transaction(() => {
     setStmt.run(apiSetToRow(set));
     for (const bm of set.beatmaps ?? []) {
-      if (modeIntOf(bm) !== 0 || !KEEP_STATUSES.has(bm.ranked)) continue;
+      if (!modes.has(modeIntOf(bm)) || !KEEP_STATUSES.has(bm.ranked)) continue;
       const isNew = !knownDiff.get(bm.id);
       mapStmt.run(apiMapToRow(bm));
       if (bm.max_combo != null)
@@ -154,10 +168,11 @@ function upsertFullSet(set: ApiBeatmapset): number[] {
   return newIds;
 }
 
-/** Number of ranked/approved/loved std diffs in a set payload. */
+/** Number of ranked/approved/loved diffs of the ACTIVE rulesets in a set. */
 export function stdDiffCount(set: ApiBeatmapset | null): number {
+  const modes = new Set(getActiveRulesets());
   return (set?.beatmaps ?? []).filter(
-    (b) => modeIntOf(b) === 0 && KEEP_STATUSES.has(b.ranked)
+    (b) => modes.has(modeIntOf(b)) && KEEP_STATUSES.has(b.ranked)
   ).length;
 }
 
@@ -337,7 +352,8 @@ export async function importCatalogFromApi(
   const enumerateSlice = async (
     category: "ranked" | "loved",
     key: string,
-    query: string | null
+    query: string | null,
+    mode: number
   ): Promise<number> => {
     if (opts?.reset) setState(key, "");
     let cursor: string | null = opts?.reset ? null : getState(key);
@@ -350,7 +366,8 @@ export async function importCatalogFromApi(
         cursor,
         "low",
         "ranked_asc",
-        query ?? undefined
+        query ?? undefined,
+        mode
       );
       if (announced < 0) announced = page.total;
       transaction(() => {
@@ -358,7 +375,7 @@ export async function importCatalogFromApi(
           setStmt.run(apiSetToRow(set));
           counts.sets++;
           for (const bm of set.beatmaps ?? []) {
-            if (bm.mode_int !== 0 || !KEEP_STATUSES.has(bm.ranked)) continue;
+            if (bm.mode_int !== mode || !KEEP_STATUSES.has(bm.ranked)) continue;
             mapStmt.run(apiMapToRow(bm));
             counts.maps++;
           }
@@ -366,7 +383,9 @@ export async function importCatalogFromApi(
       });
       cursor = page.cursor_string;
       setState(key, cursor ?? "DONE");
-      onProgress?.(`${category} [${query ?? "base"}]: ${counts.sets} sets imported...`);
+      onProgress?.(
+        `${category} m${mode} [${query ?? "base"}]: ${counts.sets} sets imported...`
+      );
       if (!cursor || page.beatmapsets.length === 0) break;
     }
     return announced;
@@ -381,20 +400,31 @@ export async function importCatalogFromApi(
   const START_YEAR = 2007;
   const endYear = new Date().getUTCFullYear();
 
-  for (const category of ["ranked", "loved"] as const) {
-    await enumerateSlice(category, `catalog_api_cursor_${category}_base`, null);
-
-    for (let year = START_YEAR; year <= endYear; year++) {
-      const yearKey = `catalog_api_cursor_${category}_${year}`;
+  // one full enumeration per active ruleset; mode 0 keeps the historical
+  // cursor keys (existing installs must not re-enumerate their std catalog)
+  for (const mode of getActiveRulesets()) {
+    const suffix = mode === 0 ? "" : `_m${mode}`;
+    for (const category of ["ranked", "loved"] as const) {
       await enumerateSlice(
         category,
-        yearKey,
-        `ranked>=${year}-01-01 ranked<${year + 1}-01-01`
+        `catalog_api_cursor_${category}${suffix}_base`,
+        null,
+        mode
       );
-      // the current year (and the base pass) are re-scanned on the next pass
-      if (year === endYear) setState(yearKey, "");
+
+      for (let year = START_YEAR; year <= endYear; year++) {
+        const yearKey = `catalog_api_cursor_${category}${suffix}_${year}`;
+        await enumerateSlice(
+          category,
+          yearKey,
+          `ranked>=${year}-01-01 ranked<${year + 1}-01-01`,
+          mode
+        );
+        // the current year (and the base pass) are re-scanned on the next pass
+        if (year === endYear) setState(yearKey, "");
+      }
+      setState(`catalog_api_cursor_${category}${suffix}_base`, "");
     }
-    setState(`catalog_api_cursor_${category}_base`, "");
   }
   setState("catalog_imported_at", new Date().toISOString());
   return counts;
@@ -456,10 +486,11 @@ export async function enrichMaxCombo(
        checksum = COALESCE(@checksum, checksum)
      WHERE id = @id`
   );
+  const modesIn = getActiveRulesets().join(",");
   const total = (
     db
       .prepare(
-        "SELECT COUNT(*) AS c FROM beatmaps WHERE ruleset = 0 AND (max_combo IS NULL OR checksum IS NULL)"
+        `SELECT COUNT(*) AS c FROM beatmaps WHERE ruleset IN (${modesIn}) AND (max_combo IS NULL OR checksum IS NULL)`
       )
       .get() as { c: number }
   ).c;
@@ -469,7 +500,7 @@ export async function enrichMaxCombo(
     const ids = (
       db
         .prepare(
-          "SELECT id FROM beatmaps WHERE ruleset = 0 AND (max_combo IS NULL OR checksum IS NULL) LIMIT 50"
+          `SELECT id FROM beatmaps WHERE ruleset IN (${modesIn}) AND (max_combo IS NULL OR checksum IS NULL) LIMIT 50`
         )
         .all() as { id: number }[]
     ).map((r) => r.id);

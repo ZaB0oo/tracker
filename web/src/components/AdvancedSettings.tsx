@@ -70,6 +70,7 @@ export function AdvancedSettings({
   const [wither, setWither] = useState<boolean | null>(null);
   const [testMsg, setTestMsg] = useState<string | null>(null);
   const [importerPath, setImporterPath] = useState<string | null>(null);
+  const [rulesets, setRulesets] = useState<number[] | null>(null);
   const importInput = useRef<HTMLInputElement>(null);
   const [maintMsg, setMaintMsg] = useState<string | null>(null);
 
@@ -117,6 +118,7 @@ export function AdvancedSettings({
       if (secret !== "") payload.clientSecret = secret;
       if (userId != null && userId !== "") payload.userId = userId;
       if (importerPath != null) payload.lazerImporterPath = importerPath;
+      if (rulesets != null) payload.activeRulesets = rulesets;
       await postSettings(payload);
       return Boolean(payload.clientId || payload.clientSecret || payload.userId);
     },
@@ -232,6 +234,41 @@ export function AdvancedSettings({
               onChange={(e) => setGlobalH(e.target.value)}
             />
           </Field>
+        </div>
+
+        <h3>Rulesets</h3>
+        <p className="set-note">
+          Each extra ruleset enumerates its own catalog and backfills its maps
+          AND the converts (std maps played in that mode) — days of API budget
+          the first time, resumable. osu! is always tracked.
+        </p>
+        <div className="mb-inline">
+          {(
+            [
+              [0, "osu!"],
+              [1, "taiko"],
+              [2, "catch"],
+              [3, "mania"],
+            ] as const
+          ).map(([id, label]) => {
+            const cur = rulesets ?? data.activeRulesets;
+            const on = cur.includes(id);
+            return (
+              <label key={id} className="mb-check">
+                <input
+                  type="checkbox"
+                  checked={on}
+                  disabled={id === 0}
+                  onChange={() =>
+                    setRulesets(
+                      on ? cur.filter((r) => r !== id) : [...cur, id].sort()
+                    )
+                  }
+                />
+                {label}
+              </label>
+            );
+          })}
         </div>
 
         <h3>Display</h3>
