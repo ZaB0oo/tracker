@@ -174,6 +174,17 @@ metricsRouter.put("/metrics/:id", (req, res) => {
   res.json({ ok: true });
 });
 
+// Display order: the full id list in the desired order.
+metricsRouter.post("/metrics/reorder", (req, res) => {
+  const ids = (req.body as { ids?: unknown }).ids;
+  if (!Array.isArray(ids) || !ids.every((n) => Number.isInteger(n)))
+    return res.status(400).json({ ok: false, error: "ids must be integers" });
+  const db = getDb();
+  const upd = db.prepare("UPDATE metrics SET sort_order = ? WHERE id = ?");
+  ids.forEach((id, i) => upd.run(i + 1, id));
+  res.json({ ok: true });
+});
+
 metricsRouter.delete("/metrics/:id", (req, res) => {
   getDb().prepare("DELETE FROM metrics WHERE id = ?").run(Number(req.params.id));
   res.json({ ok: true });

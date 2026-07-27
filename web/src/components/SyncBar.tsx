@@ -341,7 +341,6 @@ export function SyncBar() {
               {s.sweeps.globalTracking || s.sweeps.global ? (
                 <button
                   onClick={() => act("global-pause")}
-                  title="Pause the sweep and disable the periodic re-checks"
                 >
                   Pause global tops sweep
                   {` (${fmtNum(s.sweeps.globalChecked)}/${fmtNum(

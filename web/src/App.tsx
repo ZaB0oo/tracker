@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { fetchVersion } from "./api";
 import { DEFAULT_FILTERS, type Filters } from "./types";
 import { FilterBar } from "./components/FilterBar";
 import { PresetBar } from "./components/PresetBar";
@@ -28,6 +30,14 @@ export default function App() {
     setView("table");
   };
 
+  // current version + update check (server caches the GitHub lookup daily)
+  const { data: ver } = useQuery({
+    queryKey: ["version"],
+    queryFn: fetchVersion,
+    staleTime: 6 * 3600_000,
+    refetchInterval: 6 * 3600_000,
+  });
+
   if (isActivityWindow) return <ActivityWindow />;
   if (isOverlayWindow) return <StreamOverlay />;
 
@@ -36,6 +46,18 @@ export default function App() {
       <header>
         <h1>
           osu!<span className="accent">completionist</span>
+          {ver && <span className="app-version">v{ver.current}</span>}
+          {ver?.update && (
+            <a
+              className="app-update"
+              href={ver.update.url}
+              target="_blank"
+              rel="noreferrer"
+              title="A new version is available — open the release page"
+            >
+              v{ver.update.version} available
+            </a>
+          )}
         </h1>
       </header>
 

@@ -554,6 +554,32 @@ export function startPolling(): void {
     void pollRecentScores().catch((e) =>
       logError(e, "poll of recent scores (will retry on the next tick)")
     );
+    // Self-healing sweeps: whenever tracking is on, the pass is idle and maps
+    // are queued (requeues, backfill catch-up, failure stop…), resume without
+    // waiting for the 6 h tick or a manual click. EXISTS check: ~free.
+    const queued = (cond: string) =>
+      getDb()
+        .prepare(
+          `SELECT 1 FROM beatmap_user u JOIN beatmaps b ON b.id = u.beatmap_id
+           WHERE u.played = 1 AND ${cond} AND b.ruleset = 0 LIMIT 1`
+        )
+        .get() != null;
+    const sweepsFree =
+      !status.backfill.running && !catalogRunning && status.phase !== "catalog";
+    if (
+      sweepsFree &&
+      isGlobalTrackingEnabled() &&
+      !globalRunning &&
+      queued("u.global_checked_at IS NULL")
+    )
+      void runGlobalSweep();
+    if (
+      sweepsFree &&
+      isUserConnected() &&
+      !countryRunning &&
+      queued("u.country_checked_at IS NULL")
+    )
+      void runCountrySweep();
   };
   tick();
   pollTimer = setInterval(tick, getPollMs());
@@ -736,6 +762,10 @@ export function startCatalogRefresh(): void {
 
 let countryWanted = false;
 let countryRunning = false;
+// Manual pause is sticky: automatic starts (poll auto-resume, 6 h tick, auth
+// callback…) respect it; only a manual start (force) lifts it. Without this,
+// the 30 s auto-resume would defeat the pause button entirely.
+let countryPaused = false;
 
 /**
  * Deferred confirmation after a new score: osu!'s leaderboard can take a
@@ -847,6 +877,8 @@ export function applyCountryCheck(
  */
 export async function runCountrySweep(force = false): Promise<void> {
   if (countryRunning) return;
+  if (countryPaused && !force) return;
+  if (force) countryPaused = false;
   // The full sweep and the backfill both consume the same 60 req/min budget:
   // interleaving them doubles the duration of BOTH. Automatic starts (periodic
   // tick, auth callback) are deferred while the backfill runs — the sweep is
@@ -911,6 +943,7 @@ export async function runCountrySweep(force = false): Promise<void> {
 
 export function pauseCountrySweep(): void {
   countryWanted = false;
+  countryPaused = true;
 }
 
 // ---------- Global leaderboard sweep: my top 1/8/15/25/50/100 positions ----------

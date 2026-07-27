@@ -66,6 +66,13 @@ header {
   display: flex; align-items: center; gap: 16px; padding: 8px 14px;
   background: var(--bg2); border-bottom: 1px solid var(--border); flex-wrap: wrap;
 }
+.app-version { color: var(--fg-dim); font-size: 12px; font-weight: 400; margin-left: 8px; }
+.app-update {
+  margin-left: 8px; font-size: 12px; font-weight: 600;
+  color: #7fe08a; text-decoration: none;
+  border: 1px solid #3c6a44; border-radius: 10px; padding: 1px 8px;
+}
+.app-update:hover { background: rgba(127, 224, 138, 0.12); }
 h1 { font-size: 21px; margin: 0; }
 .accent { color: var(--accent); }
 .presets { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -294,6 +301,7 @@ h1 { font-size: 21px; margin: 0; }
   font-weight: 700; letter-spacing: 0.06em; margin-right: 4px;
 }
 .chip-custom { display: inline-flex; border: 1px solid var(--accent2); border-radius: 13px; overflow: hidden; }
+.presetbar-empty { color: var(--fg-dim); font-size: 12px; }
 .chip-custom .chip-apply { border: none; border-radius: 0; padding: 4px 8px 4px 11px; }
 .chip-custom .chip-del { border: none; border-radius: 0; padding: 4px 8px; color: var(--fg-dim); }
 .chip-custom .chip-del:hover { color: var(--red); }
@@ -598,7 +606,27 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   align-items: start;
 }
 @media (max-width: 1100px) { .metrics-grid { grid-template-columns: 1fr; } }
-.metric-card { margin: 0; }
+/* uniform card height regardless of options (breakdown, curve, pp tops):
+   header/conds/bar are fixed (never squashed by overflow), everything below
+   scrolls if taller */
+.metric-card { margin: 0; display: flex; flex-direction: column; height: 680px; }
+.metric-card > * { flex: 0 0 auto; }
+.metric-card > .metric-content {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column;
+}
+.metric-content > * { flex: 0 0 auto; }
+/* curves pinned to the bottom so the x-axes line up across cards */
+.metric-content > .metric-evo { margin-top: auto; }
+/* drag & drop reorder: visible handle + drop-target highlight */
+.metric-drag {
+  cursor: grab; color: var(--fg-dim); font-size: 15px;
+  padding: 0 4px; user-select: none; line-height: 1;
+}
+.metric-drag:hover { color: var(--fg); }
+.metric-drag:active { cursor: grabbing; }
+.mc-dragging { opacity: 0.35; }
+.mc-drop { outline: 2px dashed var(--accent2); outline-offset: -2px; }
 /* Profile pp card (Metrics tab) */
 .pp-current { margin-left: auto; font-size: 15px; }
 .pp-current b { color: var(--accent); }

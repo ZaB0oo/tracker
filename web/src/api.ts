@@ -525,6 +525,26 @@ export async function putMetric(payload: {
   }
 }
 
+export interface VersionInfo {
+  current: string;
+  update: { version: string; url: string } | null;
+}
+export async function fetchVersion(): Promise<VersionInfo> {
+  const res = await fetch("/api/version");
+  if (!res.ok) throw new Error(`version: HTTP ${res.status}`);
+  return res.json();
+}
+
+/** Persists the display order (full id list, in order). */
+export async function reorderMetrics(ids: number[]): Promise<void> {
+  const res = await fetch("/api/metrics/reorder", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) throw new Error(`metrics: HTTP ${res.status}`);
+}
+
 export async function deleteMetric(id: number): Promise<void> {
   const res = await fetch(`/api/metrics/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error(`metrics: HTTP ${res.status}`);

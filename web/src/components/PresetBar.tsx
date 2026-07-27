@@ -1,23 +1,6 @@
 import { useState } from "react";
-import { DEFAULT_FILTERS, type Filters } from "../types";
+import type { Filters } from "../types";
 import type { SortSpec } from "../App";
-
-interface Preset {
-  label: string;
-  filters: Partial<Filters>;
-  sort: SortSpec;
-}
-
-/** Built-in presets: ready-made searches, not navigation. */
-const BUILTIN: Preset[] = [
-  { label: "Unplayed", filters: { played: "unplayed" }, sort: [{ id: "star_rating", desc: false }] },
-  { label: "Non-FC", filters: { played: "played", fcState: ["2"] }, sort: [{ id: "missing", desc: true }] },
-  { label: "Grades < S", filters: { played: "played", grades: ["A", "B", "C", "D"] }, sort: [{ id: "grade", desc: true }] },
-  { label: "My country #1", filters: { countryFirst: true }, sort: [{ id: "ended_at", desc: true }] },
-  { label: "Missing score", filters: {}, sort: [{ id: "missing", desc: true }] },
-  { label: "Best lazer", filters: { platform: "lazer" }, sort: [{ id: "ended_at", desc: true }] },
-  { label: "Best stable", filters: { platform: "stable" }, sort: [{ id: "ended_at", desc: true }] },
-];
 
 interface SavedPreset {
   label: string;
@@ -66,17 +49,11 @@ export function PresetBar({
       <span className="presetbar-label" title="Predefined searches: filters + sort in one click">
         Presets
       </span>
-      {BUILTIN.map((p) => (
-        <button
-          key={p.label}
-          className="chip"
-          onClick={() =>
-            onApply({ ...DEFAULT_FILTERS, mode: filters.mode, ...p.filters }, p.sort)
-          }
-        >
-          {p.label}
-        </button>
-      ))}
+      {custom.length === 0 && (
+        <span className="presetbar-empty">
+          none yet — set up filters and save them here
+        </span>
+      )}
       {custom.map((p) => (
         <span key={p.label} className="chip chip-custom">
           <button className="chip-apply" onClick={() => onApply({ ...p.filters, mode: filters.mode }, p.sort)}>

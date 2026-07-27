@@ -8,6 +8,7 @@ import { settingsRouter } from "./routes/settings.js";
 import { statsRouter } from "./routes/stats.js";
 import { syncRouter } from "./routes/sync.js";
 import { tableRouter } from "./routes/table.js";
+import { versionRouter } from "./routes/version.js";
 
 export const router = Router();
 router.use(tableRouter);
@@ -18,3 +19,4 @@ router.use(historyRouter);
 router.use(settingsRouter);
 router.use(authRouter);
 router.use(syncRouter);
+router.use(versionRouter);

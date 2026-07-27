@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   deleteMetric,
   fetchMetrics,
   fetchMetricPpTop,
+  reorderMetrics,
   type Metric,
   type MetricBreakdown,
 } from "../api";
@@ -117,6 +118,12 @@ function MetricCard({
   onEdit,
   onMissing,
   onCtx,
+  dragging,
+  dropTarget,
+  onDragStart,
+  onDragEnd,
+  onDragOverCard,
+  onDrop,
 }: {
   m: Metric;
   gran: "month" | "day";
@@ -124,6 +131,12 @@ function MetricCard({
   onEdit: (m: Metric) => void;
   onMissing: (m: Metric) => void;
   onCtx: OnMapContext;
+  dragging: boolean;
+  dropTarget: boolean;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  onDragOverCard: () => void;
+  onDrop: () => void;
 }) {
   const isRanked = m.params.kind === "ranked_score";
   const isPp = m.params.kind === "pp";
@@ -190,8 +203,33 @@ function MetricCard({
   }
 
   return (
-    <div className="panel metric-card">
+    <div
+      className={`panel metric-card${dragging ? " mc-dragging" : ""}${dropTarget ? " mc-drop" : ""}`}
+      onDragOver={(e) => {
+        e.preventDefault();
+        onDragOverCard();
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDrop();
+      }}
+    >
       <div className="metric-head">
+        <span
+          className="metric-drag"
+          title="Drag to reorder the metrics"
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.effectAllowed = "move";
+            // drag image = the whole card, not just the handle
+            const card = (e.target as HTMLElement).closest(".metric-card");
+            if (card) e.dataTransfer.setDragImage(card, 40, 20);
+            onDragStart();
+          }}
+          onDragEnd={onDragEnd}
+        >
+          ⠿
+        </span>
         <h3>{m.name}</h3>
         {isPp && m.pp && (
           <span className="pp-dim">
@@ -233,6 +271,7 @@ function MetricCard({
         <span>{label}</span>
       </div>
 
+      <div className="metric-content">
       <div className="metric-body">
         {!isRanked && !isPp && (
         <div className="metric-sr">
@@ -349,6 +388,7 @@ function MetricCard({
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }
@@ -372,6 +412,68 @@ export function MetricsView({
     mutationFn: deleteMetric,
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["metrics"] }),
   });
+  const reorder = useMutation({
+    mutationFn: reorderMetrics,
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["metrics"] }),
+  });
+  // drag & drop reorder: drag a card by its ⠿ handle onto another card
+  const [dragId, setDragId] = useState<number | null>(null);
+  const [overId, setOverId] = useState<number | null>(null);
+  const endDrag = () => {
+    setDragId(null);
+    setOverId(null);
+  };
+  // Native HTML5 drag only auto-scrolls right at the container edges (and
+  // fast). Gentle replacement over the REAL scroll container (the app scrolls
+  // an inner div, not the page): small dead zone around the middle, speed
+  // growing quadratically toward the edges.
+  const gridRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (dragId == null) return;
+    let scroller: HTMLElement | null = gridRef.current;
+    while (scroller) {
+      const st = getComputedStyle(scroller);
+      if (/(auto|scroll)/.test(st.overflowY) && scroller.scrollHeight > scroller.clientHeight)
+        break;
+      scroller = scroller.parentElement;
+    }
+    if (!scroller) scroller = document.scrollingElement as HTMLElement | null;
+    if (!scroller) return;
+    const el = scroller;
+    const box = el === document.scrollingElement
+      ? { top: 0, bottom: window.innerHeight }
+      : el.getBoundingClientRect();
+    let y = -1;
+    const onMove = (e: DragEvent) => {
+      y = e.clientY;
+    };
+    window.addEventListener("dragover", onMove);
+    const timer = setInterval(() => {
+      if (y < 0) return;
+      const h = box.bottom - box.top;
+      const half = h / 2;
+      const dead = h * 0.12;
+      const d = y - (box.top + half);
+      if (Math.abs(d) <= dead) return;
+      const f = Math.min((Math.abs(d) - dead) / (half - dead), 1); // 0..1
+      el.scrollTop += Math.sign(d) * Math.ceil(f * f * 10);
+    }, 16);
+    return () => {
+      window.removeEventListener("dragover", onMove);
+      clearInterval(timer);
+    };
+  }, [dragId]);
+  const dropOn = (targetId: number) => {
+    const ids = (data?.metrics ?? []).map((m) => m.id);
+    const from = dragId != null ? ids.indexOf(dragId) : -1;
+    const to = ids.indexOf(targetId);
+    endDrag();
+    if (dragId == null || from < 0 || to < 0 || from === to) return;
+    ids.splice(from, 1);
+    // forward: land after the target; backward: land before it
+    ids.splice(ids.indexOf(targetId) + (from < to ? 1 : 0), 0, dragId);
+    reorder.mutate(ids);
+  };
   const [ctx, setCtx] = useState<{ x: number; y: number; row: CtxMapInfo } | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
   const onCtx: OnMapContext = (e, row) => {
@@ -402,12 +504,18 @@ export function MetricsView({
       {data.metrics.length === 0 && (
         <p className="goal-note">No metric yet — create one with “+ New metric”.</p>
       )}
-      <div className="metrics-grid">
+      <div className="metrics-grid" ref={gridRef}>
         {data.metrics.map((m) => (
           <MetricCard
             key={m.id}
             m={m}
             gran={gran}
+            dragging={dragId === m.id}
+            dropTarget={overId === m.id && dragId !== m.id}
+            onDragStart={() => setDragId(m.id)}
+            onDragEnd={endDrag}
+            onDragOverCard={() => setOverId(m.id)}
+            onDrop={() => dropOn(m.id)}
             onDelete={(id) => del.mutate(id)}
             onEdit={(metric) => setEditing(metric)}
             onMissing={(metric) =>
