@@ -22,8 +22,10 @@ import {
 import path from "node:path";
 import fs from "node:fs";
 
-// Fixed port so OBS browser-source URLs (?overlay=1) stay stable.
-const PORT = Number(process.env.TRACKER_PORT ?? 41100);
+// Fixed port so OBS browser-source URLs (?overlay=1) stay stable. Same
+// default as the source install: existing osu! OAuth callback URLs and OBS
+// browser sources keep working after migrating to the desktop app.
+const PORT = Number(process.env.TRACKER_PORT ?? 3727);
 // Repo root in dev (desktop/..); phase 3 will adapt for the packaged asar.
 const ROOT = path.join(import.meta.dirname, "..");
 const ICON = path.join(import.meta.dirname, "icon.png");

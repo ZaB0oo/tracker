@@ -7,7 +7,7 @@ function required(name: string): string {
   const v = process.env[name];
   if (!v) {
     throw new Error(
-      `Missing environment variable: ${name}. Copy .env.example to .env and fill it in (or configure it in the UI, Settings menu).`
+      `osu! API credentials are not set (${name}). Open Settings (menu) and fill in the osu! OAuth section — Client ID, secret and user id. (Source installs can also use a .env file.)`
     );
   }
   return v;
