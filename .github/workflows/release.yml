@@ -13,7 +13,20 @@ permissions:
   contents: write
 
 jobs:
+  # The draft release must exist BEFORE the parallel builds start, otherwise
+  # each OS job races to create its own draft and the assets end up split.
+  draft:
+    runs-on: ubuntu-latest
+    steps:
+      - run: >
+          gh release create "$GITHUB_REF_NAME" --draft
+          --repo "$GITHUB_REPOSITORY" --title "${GITHUB_REF_NAME#v}"
+          --notes "Draft — notes added before publishing." || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build:
+    needs: draft
     strategy:
       fail-fast: false
       matrix:
