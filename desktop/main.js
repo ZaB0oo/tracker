@@ -21,6 +21,9 @@ import {
 } from "electron";
 import path from "node:path";
 import fs from "node:fs";
+import updater from "electron-updater"; // CJS package
+
+const { autoUpdater } = updater;
 
 // Fixed port so OBS browser-source URLs (?overlay=1) stay stable. Same
 // default as the source install: existing osu! OAuth callback URLs and OBS
@@ -229,8 +232,44 @@ function createTray() {
   refreshTrayMenu();
 }
 
+// ---------- auto-update ----------
+/**
+ * electron-updater against the GitHub releases of ZaB0oo/tracker (publish
+ * config in package.json). Downloads in the background; a single dialog when
+ * ready. Packaged builds only — dev runs skip it entirely.
+ */
+function setupAutoUpdate() {
+  if (!app.isPackaged) return;
+  autoUpdater.autoDownload = true;
+  autoUpdater.on("error", (e) => {
+    // offline / GitHub unreachable: silent, next periodic check will retry
+    console.error("[updater]", e instanceof Error ? e.message : e);
+  });
+  autoUpdater.on("update-downloaded", (info) => {
+    const choice = dialog.showMessageBoxSync({
+      type: "info",
+      title: "osu!completionist",
+      message: `Update v${info.version} is ready`,
+      detail:
+        "It will be applied the next time the app starts — or restart now. " +
+        "Your database is never touched by updates.",
+      buttons: ["Restart now", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (choice === 0) {
+      quitting = true; // bypass close-to-tray so the installer can run
+      autoUpdater.quitAndInstall();
+    }
+  });
+  const check = () => void autoUpdater.checkForUpdates().catch(() => {});
+  check();
+  setInterval(check, 6 * 3600 * 1000);
+}
+
 // ---------- lifecycle ----------
 app.whenReady().then(async () => {
+  setupAutoUpdate();
   maybeImportDb();
   startServer();
   createTray();

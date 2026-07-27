@@ -1,0 +1,29 @@
+# Builds the desktop installers on every version tag (v1.8.0, …) and uploads
+# them (plus the latest*.yml files electron-updater needs) to a DRAFT GitHub
+# release: check the assets, write the notes, publish.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx electron-builder --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # unsigned macOS build: skip the code-signing discovery
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
