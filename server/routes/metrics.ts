@@ -49,7 +49,7 @@ metricsRouter.get("/metrics/filter-bounds", (_req, res) => {
     )
     .get() as { y: string | null };
   const g = db
-    .prepare("SELECT MAX(global_rank) r FROM beatmap_user")
+    .prepare("SELECT MAX(global_rank) r FROM beatmap_user WHERE ruleset = 0")
     .get() as { r: number | null };
   const pp = db
     .prepare("SELECT MAX(pp) p, MAX(total_score) std FROM scores")
@@ -218,7 +218,7 @@ metricsRouter.get("/metrics/:id/pp-top", (req, res) => {
        FROM scores s
        JOIN beatmaps b ON b.id = s.beatmap_id
        JOIN beatmapsets st ON st.id = b.beatmapset_id
-       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
+       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = 0
        WHERE ${mapWhere(p.map)} AND ${scoreWhere(p.score)}
          AND s.pp IS NOT NULL AND s.passed = 1 AND ${bound}
        GROUP BY s.beatmap_id

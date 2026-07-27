@@ -190,7 +190,7 @@ tableRouter.get("/table", (req, res) => {
   const baseSql = `
     FROM beatmaps b
     JOIN beatmapsets st ON st.id = b.beatmapset_id
-    LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
+    LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = 0
     LEFT JOIN scores s ON s.id = u.${bestCol}
     WHERE ${where.join(" AND ")}
   `;
@@ -260,7 +260,7 @@ tableRouter.get("/map/:id", (req, res) => {
       .prepare(
         `SELECT played, any_fc, country_first, country_checked_at, fetched_at,
            global_rank
-         FROM beatmap_user WHERE beatmap_id = ?`
+         FROM beatmap_user WHERE beatmap_id = ? AND ruleset = 0`
       )
       .get(id) ?? null;
   const countryEvents = db
@@ -318,7 +318,7 @@ export async function buildCollectionDb(
       `SELECT b.id, b.checksum
        FROM beatmaps b
        JOIN beatmapsets st ON st.id = b.beatmapset_id
-       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
+       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = 0
        LEFT JOIN scores s ON s.id = u.best_lazer_score_id
        WHERE ${where.join(" AND ")}`
     )

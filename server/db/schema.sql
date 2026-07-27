@@ -66,9 +66,12 @@ CREATE TABLE IF NOT EXISTS scores (
 CREATE INDEX IF NOT EXISTS idx_scores_beatmap_user ON scores(beatmap_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_scores_ended ON scores(ended_at);
 
--- Per-beatmap sync state + pointers to the bests (denormalised for fast queries).
+-- Per-(beatmap, ruleset) sync state + pointers to the bests (denormalised for
+-- fast queries). `ruleset` is the ruleset the map is PLAYED in: for converts
+-- (std maps played in taiko/catch/mania) it differs from beatmaps.ruleset.
 CREATE TABLE IF NOT EXISTS beatmap_user (
-  beatmap_id INTEGER PRIMARY KEY REFERENCES beatmaps(id),
+  beatmap_id INTEGER NOT NULL REFERENCES beatmaps(id),
+  ruleset INTEGER NOT NULL DEFAULT 0,
   fetched_at TEXT,                    -- last backfill of this map (NULL = never fetched)
   played INTEGER NOT NULL DEFAULT 0,
   any_fc INTEGER NOT NULL DEFAULT 0,  -- at least one FC (any mods)
@@ -83,10 +86,24 @@ CREATE TABLE IF NOT EXISTS beatmap_user (
   best_lazer_score_id INTEGER REFERENCES scores(id),
   global_rank INTEGER,                -- my global leaderboard position
   global_checked_at TEXT,             -- last position check (NULL = queued)
-  global_seen INTEGER NOT NULL DEFAULT 0 -- ever position-checked (survives re-queues)
+  global_seen INTEGER NOT NULL DEFAULT 0, -- ever position-checked (survives re-queues)
+  PRIMARY KEY (beatmap_id, ruleset)
 );
-CREATE INDEX IF NOT EXISTS idx_bu_played ON beatmap_user(played);
-CREATE INDEX IF NOT EXISTS idx_bu_fetched ON beatmap_user(fetched_at);
+CREATE INDEX IF NOT EXISTS idx_bu_played ON beatmap_user(ruleset, played);
+CREATE INDEX IF NOT EXISTS idx_bu_fetched ON beatmap_user(ruleset, fetched_at);
+
+-- Per-ruleset attributes of CONVERTS (std maps played in taiko/catch/mania):
+-- star rating and max combo differ from the original mode. Filled lazily via
+-- the attributes endpoint (played converts first, background trickle for the
+-- rest) — predictions/SR filters on a convert need this row.
+CREATE TABLE IF NOT EXISTS convert_attrs (
+  beatmap_id INTEGER NOT NULL,
+  ruleset INTEGER NOT NULL,
+  star_rating REAL,
+  max_combo INTEGER,
+  fetched_at TEXT,
+  PRIMARY KEY (beatmap_id, ruleset)
+);
 
 -- Key/value for global state (checkpoints, cursors, timestamps).
 CREATE TABLE IF NOT EXISTS sync_state (

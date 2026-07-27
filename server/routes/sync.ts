@@ -52,7 +52,9 @@ syncRouter.post("/sync/global-pause", (_req, res) => {
 // (~25 h for ~90k maps, resumable). Also (re)enables the tracking.
 syncRouter.post("/sync/global-recheck-all", (_req, res) => {
   const n = getDb()
-    .prepare("UPDATE beatmap_user SET global_checked_at = NULL WHERE played = 1")
+    .prepare(
+      "UPDATE beatmap_user SET global_checked_at = NULL WHERE ruleset = 0 AND played = 1"
+    )
     .run().changes;
   setState("global_tracking", "1");
   void runGlobalSweep(true);
@@ -101,7 +103,7 @@ syncRouter.post("/sync/refresh-top-pp", async (_req, res) => {
     // keep going with the local top only
   }
   const upd = db.prepare(
-    "UPDATE beatmap_user SET fetched_at = NULL WHERE beatmap_id = ?"
+    "UPDATE beatmap_user SET fetched_at = NULL WHERE beatmap_id = ? AND ruleset = 0"
   );
   let n = 0;
   for (const id of ids) n += Number(upd.run(id).changes);
@@ -113,10 +115,13 @@ syncRouter.post("/sync/refresh-top-pp", async (_req, res) => {
 // is lost, ~40h). Use it if the app stayed off for > 24h while you played.
 syncRouter.post("/sync/rebackfill", (_req, res) => {
   const db = getDb();
-  db.exec("UPDATE beatmap_user SET fetched_at = NULL");
+  // std only for now: the multi-ruleset backfills get their own controls (M3)
+  db.exec("UPDATE beatmap_user SET fetched_at = NULL WHERE ruleset = 0");
   // integrated country re-sweep: all played maps go back to the #1 check
   // (also catches "inherited" #1s without replaying)
-  db.exec("UPDATE beatmap_user SET country_checked_at = NULL WHERE played = 1");
+  db.exec(
+    "UPDATE beatmap_user SET country_checked_at = NULL WHERE ruleset = 0 AND played = 1"
+  );
   void resumeBackfill();
   if (isUserConnected()) void runCountrySweep();
   res.json({

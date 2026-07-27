@@ -163,7 +163,7 @@ export function getDaemonStatus(): DaemonStatus & {
     db
       .prepare(
         `SELECT COUNT(*) c FROM beatmaps b
-         JOIN beatmap_user u ON u.beatmap_id = b.id
+         JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = 0
          WHERE b.ruleset = 0 AND u.fetched_at IS NOT NULL`
       )
       .get() as { c: number }
@@ -192,7 +192,7 @@ export function getDaemonStatus(): DaemonStatus & {
       db
         .prepare(
           `SELECT COUNT(*) c FROM beatmap_user u
-           JOIN beatmaps b ON b.id = u.beatmap_id
+           JOIN beatmaps b ON b.id = u.beatmap_id AND u.ruleset = 0
            WHERE u.played = 1 AND b.ruleset = 0 AND b.status IN (1, 2, 4)
              AND ${cond}`
         )
@@ -322,7 +322,7 @@ export async function pollRecentScores(): Promise<number> {
   // nothing "fresh" on it and its best would never notify.
   const exists = db.prepare("SELECT 1 FROM scores WHERE id = ?");
   const preStateStmt = db.prepare(
-    "SELECT played, best_lazer_score_id AS best FROM beatmap_user WHERE beatmap_id = ?"
+    "SELECT played, best_lazer_score_id AS best FROM beatmap_user WHERE beatmap_id = ? AND ruleset = 0"
   );
   const freshByMap = new Map<number, SoloScore[]>();
   const preState = new Map<
@@ -450,7 +450,7 @@ export async function pollRecentScores(): Promise<number> {
   // it, the map would wait its turn behind the whole initial sweep).
   if (freshBeatmapIds.length > 0 && isUserConnected()) {
     const invalidateCountry = db.prepare(
-      "UPDATE beatmap_user SET country_checked_at = NULL WHERE beatmap_id = ?"
+      "UPDATE beatmap_user SET country_checked_at = NULL WHERE beatmap_id = ? AND ruleset = 0"
     );
     for (const id of freshBeatmapIds) {
       try {
@@ -459,7 +459,7 @@ export async function pollRecentScores(): Promise<number> {
         const wasFirst =
           (
             db
-              .prepare("SELECT country_first FROM beatmap_user WHERE beatmap_id = ?")
+              .prepare("SELECT country_first FROM beatmap_user WHERE beatmap_id = ? AND ruleset = 0")
               .get(id) as { country_first: number } | undefined
           )?.country_first === 1;
         const countryScores = await getCountryTopScores(id, "high");
@@ -518,7 +518,7 @@ export async function pollRecentScores(): Promise<number> {
         // failed check: back into the sweep queue, it will retry
         logError(err, `position check map ${e.beatmapId}`);
         db.prepare(
-          "UPDATE beatmap_user SET global_checked_at = NULL WHERE beatmap_id = ?"
+          "UPDATE beatmap_user SET global_checked_at = NULL WHERE beatmap_id = ? AND ruleset = 0"
         ).run(e.beatmapId);
       }
     }
@@ -560,7 +560,7 @@ export function startPolling(): void {
     const queued = (cond: string) =>
       getDb()
         .prepare(
-          `SELECT 1 FROM beatmap_user u JOIN beatmaps b ON b.id = u.beatmap_id
+          `SELECT 1 FROM beatmap_user u JOIN beatmaps b ON b.id = u.beatmap_id AND u.ruleset = 0
            WHERE u.played = 1 AND ${cond} AND b.ruleset = 0 LIMIT 1`
         )
         .get() != null;
@@ -717,7 +717,7 @@ export function startCatalogRefresh(): void {
         getDb()
           .prepare(
             `UPDATE beatmap_user SET country_checked_at = NULL
-             WHERE country_first = 1
+             WHERE ruleset = 0 AND country_first = 1
                AND country_checked_at < datetime('now', '-' || ? || ' hours')`
           )
           .run(getCountryRecheckHours());
@@ -730,7 +730,7 @@ export function startCatalogRefresh(): void {
         gdb
           .prepare(
             `UPDATE beatmap_user SET global_checked_at = NULL
-             WHERE global_rank IS NOT NULL AND global_rank <= 100
+             WHERE ruleset = 0 AND global_rank IS NOT NULL AND global_rank <= 100
                AND global_checked_at < datetime('now', '-' || ? || ' hours')`
           )
           .run(getGlobalRecheckHours());
@@ -739,9 +739,9 @@ export function startCatalogRefresh(): void {
         // update — and the deferred-confirm timer does not survive a restart.
         gdb.exec(
           `UPDATE beatmap_user SET global_checked_at = NULL
-           WHERE global_checked_at IS NOT NULL AND EXISTS (
+           WHERE ruleset = 0 AND global_checked_at IS NOT NULL AND EXISTS (
              SELECT 1 FROM scores s
-             WHERE s.beatmap_id = beatmap_user.beatmap_id
+             WHERE s.beatmap_id = beatmap_user.beatmap_id AND s.ruleset = 0
                AND datetime(s.ended_at) >= datetime('now', '-2 days')
                AND datetime(beatmap_user.global_checked_at) <= datetime(s.ended_at, '+15 minutes'))`
         );
@@ -797,7 +797,7 @@ export async function confirmRecentCountryChecks(): Promise<void> {
   const rows = getDb()
     .prepare(
       `SELECT u.beatmap_id AS id FROM beatmap_user u
-       JOIN beatmaps b ON b.id = u.beatmap_id
+       JOIN beatmaps b ON b.id = u.beatmap_id AND u.ruleset = 0
        WHERE u.played = 1 AND u.country_checked_at IS NULL AND b.ruleset = 0
          AND EXISTS (
            SELECT 1 FROM scores s
@@ -839,7 +839,7 @@ export function applyCountryCheck(
   const db = getDb();
   const prev = db
     .prepare(
-      "SELECT country_first, country_checked_at FROM beatmap_user WHERE beatmap_id = ?"
+      "SELECT country_first, country_checked_at FROM beatmap_user WHERE beatmap_id = ? AND ruleset = 0"
     )
     .get(beatmapId) as
     | { country_first: number; country_checked_at: string | null }
@@ -866,7 +866,7 @@ export function applyCountryCheck(
     );
   }
   db.prepare(
-    "UPDATE beatmap_user SET country_first = ?, country_checked_at = datetime('now') WHERE beatmap_id = ?"
+    "UPDATE beatmap_user SET country_first = ?, country_checked_at = datetime('now') WHERE beatmap_id = ? AND ruleset = 0"
   ).run(isFirst, beatmapId);
 }
 
@@ -896,7 +896,7 @@ export async function runCountrySweep(force = false): Promise<void> {
     const db = getDb();
     const nextBatch = db.prepare(
       `SELECT u.beatmap_id AS id FROM beatmap_user u
-       JOIN beatmaps b ON b.id = u.beatmap_id
+       JOIN beatmaps b ON b.id = u.beatmap_id AND u.ruleset = 0
        WHERE u.played = 1 AND u.country_checked_at IS NULL AND b.ruleset = 0
        ORDER BY u.country_first DESC, u.beatmap_id
        LIMIT 200`
@@ -979,7 +979,7 @@ export function applyGlobalCheck(
   const db = getDb();
   const prev = db
     .prepare(
-      "SELECT global_rank, global_checked_at, global_seen FROM beatmap_user WHERE beatmap_id = ?"
+      "SELECT global_rank, global_checked_at, global_seen FROM beatmap_user WHERE beatmap_id = ? AND ruleset = 0"
     )
     .get(beatmapId) as
     | {
@@ -1008,7 +1008,7 @@ export function applyGlobalCheck(
     );
   }
   db.prepare(
-    "UPDATE beatmap_user SET global_rank = ?, global_checked_at = datetime('now'), global_seen = 1 WHERE beatmap_id = ?"
+    "UPDATE beatmap_user SET global_rank = ?, global_checked_at = datetime('now'), global_seen = 1 WHERE beatmap_id = ? AND ruleset = 0"
   ).run(pos, beatmapId);
 }
 
@@ -1058,7 +1058,7 @@ export async function runGlobalSweep(force = false): Promise<void> {
     const db = getDb();
     const nextBatch = db.prepare(
       `SELECT u.beatmap_id AS id FROM beatmap_user u
-       JOIN beatmaps b ON b.id = u.beatmap_id
+       JOIN beatmaps b ON b.id = u.beatmap_id AND u.ruleset = 0
        WHERE u.played = 1 AND u.global_checked_at IS NULL AND b.ruleset = 0
        ORDER BY (u.global_rank IS NOT NULL) DESC, u.global_rank, u.beatmap_id
        LIMIT 200`
@@ -1250,7 +1250,7 @@ async function runBackfill(): Promise<void> {
   try {
     const nextBatch = db.prepare(
       `SELECT b.id FROM beatmaps b
-       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
+       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = 0
        WHERE b.ruleset = 0 AND u.fetched_at IS NULL
        ORDER BY b.id
        LIMIT 200`

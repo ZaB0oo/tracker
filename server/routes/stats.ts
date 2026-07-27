@@ -44,7 +44,7 @@ statsRouter.get("/stats", (_req, res) => {
       SUM(COALESCE(u.any_fc, 0)) fc,
       SUM(CASE WHEN b.status IN (1, 2) THEN COALESCE(u.any_fc, 0) ELSE 0 END) fc_ranked,
       SUM(CASE WHEN b.status = 4 THEN COALESCE(u.any_fc, 0) ELSE 0 END) fc_loved
-    FROM beatmaps b LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
+    FROM beatmaps b LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = 0
     WHERE b.ruleset = 0 AND b.status IN (1, 2, 4)`);
 
   const scoreSums = one<{
@@ -59,7 +59,7 @@ statsRouter.get("/stats", (_req, res) => {
         THEN ${witherSql("s.total_score")}
         ELSE s.total_score END), 0) wither
     FROM beatmap_user u
-    JOIN beatmaps b ON b.id = u.beatmap_id
+    JOIN beatmaps b ON b.id = u.beatmap_id AND u.ruleset = 0
     LEFT JOIN scores s ON s.id = u.best_lazer_score_id
     WHERE u.played = 1`);
 
@@ -75,7 +75,7 @@ statsRouter.get("/stats", (_req, res) => {
       COALESCE(SUM(u.missing_classic), 0) missingClassic,
       COALESCE(SUM(u.missing_wither), 0) missingWither
     FROM beatmaps b
-    LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
+    LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = 0
     WHERE b.ruleset = 0 AND b.status IN (1, 2, 4)`);
 
   // Global tops counters (cumulative: top8 includes top1, etc.). All zeros
@@ -94,7 +94,7 @@ statsRouter.get("/stats", (_req, res) => {
       COALESCE(SUM(u.global_rank <= 100), 0) top100,
       COUNT(*) checked
     FROM beatmap_user u
-    JOIN beatmaps b ON b.id = u.beatmap_id
+    JOIN beatmaps b ON b.id = u.beatmap_id AND u.ruleset = 0
     WHERE b.ruleset = 0 AND b.status IN (1, 2, 4) AND u.global_rank IS NOT NULL`);
 
   // osu! leaderboard semantics: the map's grade/FC state = that of the score
@@ -103,7 +103,7 @@ statsRouter.get("/stats", (_req, res) => {
     .prepare(
       `SELECT s.rank AS grade, COUNT(*) c
        FROM beatmap_user u
-       JOIN beatmaps b ON b.id = u.beatmap_id
+       JOIN beatmaps b ON b.id = u.beatmap_id AND u.ruleset = 0
        JOIN scores s ON s.id = u.best_lazer_score_id
        WHERE b.ruleset = 0 AND b.status IN (1, 2, 4)
        GROUP BY s.rank`
@@ -114,7 +114,7 @@ statsRouter.get("/stats", (_req, res) => {
     .prepare(
       `SELECT s.fc_state, COUNT(*) c
        FROM beatmap_user u
-       JOIN beatmaps b ON b.id = u.beatmap_id
+       JOIN beatmaps b ON b.id = u.beatmap_id AND u.ruleset = 0
        JOIN scores s ON s.id = u.best_lazer_score_id
        WHERE b.ruleset = 0 AND b.status IN (1, 2, 4)
        GROUP BY s.fc_state`
@@ -127,7 +127,7 @@ statsRouter.get("/stats", (_req, res) => {
         COUNT(*) total, SUM(CASE WHEN u.played = 1 THEN 1 ELSE 0 END) played,
         SUM(COALESCE(u.country_first, 0)) country,
         SUM(COALESCE(u.any_fc, 0)) fc
-       FROM beatmaps b LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
+       FROM beatmaps b LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = 0
        WHERE b.ruleset = 0 AND b.status IN (1, 2, 4) AND b.star_rating IS NOT NULL
        GROUP BY sr ORDER BY sr`
     )
@@ -141,7 +141,7 @@ statsRouter.get("/stats", (_req, res) => {
         SUM(COALESCE(u.any_fc, 0)) fc
        FROM beatmaps b
        JOIN beatmapsets st ON st.id = b.beatmapset_id
-       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
+       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = 0
        WHERE b.ruleset = 0 AND st.ranked_date IS NOT NULL
        GROUP BY year ORDER BY year`
     )
@@ -155,7 +155,7 @@ statsRouter.get("/stats", (_req, res) => {
           COUNT(*) total, SUM(CASE WHEN u.played = 1 THEN 1 ELSE 0 END) played,
           SUM(COALESCE(u.country_first, 0)) country,
           SUM(COALESCE(u.any_fc, 0)) fc
-         FROM beatmaps b LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
+         FROM beatmaps b LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = 0
          WHERE b.ruleset = 0 AND b.status IN (1, 2, 4) AND ${expr} IS NOT NULL
          GROUP BY bucket ORDER BY bucket`
       )
@@ -191,7 +191,7 @@ statsRouter.get("/skill-curve", (_req, res) => {
         SUM(u.missing_classic) missing_classic,
         SUM(u.missing_wither) missing_wither
        FROM beatmaps b
-       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
+       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = 0
        LEFT JOIN scores s ON s.id = u.best_lazer_score_id
        WHERE b.ruleset = 0 AND b.status IN (1, 2, 4) AND b.star_rating IS NOT NULL
        GROUP BY q ORDER BY q`
@@ -364,7 +364,7 @@ statsRouter.get("/timeline", (_req, res) => {
     .prepare(
       `SELECT u.beatmap_id AS bid, s.ended_at AS at, b.status AS status
        FROM beatmap_user u
-       JOIN beatmaps b ON b.id = u.beatmap_id
+       JOIN beatmaps b ON b.id = u.beatmap_id AND u.ruleset = 0
        JOIN scores s ON s.id = u.best_lazer_score_id
        WHERE u.country_first = 1 AND b.ruleset = 0`
     )
@@ -539,7 +539,7 @@ function buildSnapshotIndex(db: ReturnType<typeof getDb>): NonNullable<typeof sn
     .prepare(
       `SELECT u.beatmap_id AS bid, s.ended_at AS at
        FROM beatmap_user u
-       JOIN beatmaps b ON b.id = u.beatmap_id
+       JOIN beatmaps b ON b.id = u.beatmap_id AND u.ruleset = 0
        JOIN scores s ON s.id = u.best_lazer_score_id
        WHERE u.country_first = 1 AND b.ruleset = 0`
     )
@@ -639,7 +639,7 @@ statsRouter.get("/overlay", (_req, res) => {
           THEN ${witherSql("s.total_score")}
           ELSE s.total_score END), 0) ranked_wither
       FROM beatmaps b
-      LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
+      LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = 0
       LEFT JOIN scores s ON s.id = u.best_lazer_score_id
       WHERE b.ruleset = 0 AND b.status IN (1, 2, 4)`
     )

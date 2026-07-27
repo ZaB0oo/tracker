@@ -80,9 +80,10 @@ export function ensureMissingFresh(): void {
   if (stamp === missingStamp) return;
 
   // every catalog map needs a row to carry its missing value (unplayed = full
-  // prediction); harmless for the backfill, which keys off fetched_at
+  // prediction); harmless for the backfill, which keys off fetched_at.
+  // std only for now (multi-ruleset missing lands with the per-ruleset curves)
   db.exec(
-    "INSERT OR IGNORE INTO beatmap_user (beatmap_id) SELECT id FROM beatmaps WHERE ruleset = 0"
+    "INSERT OR IGNORE INTO beatmap_user (beatmap_id, ruleset) SELECT id, 0 FROM beatmaps WHERE ruleset = 0"
   );
   const lazer = missingExprs("lazer").missingSql;
   const classic = missingExprs("classic").missingSql;
@@ -95,11 +96,11 @@ export function ensureMissingFresh(): void {
          ${classic} AS mc,
          ${witherMissingSql()} AS mw
        FROM beatmaps b
-       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
+       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = 0
        LEFT JOIN scores s ON s.id = u.best_lazer_score_id
        WHERE b.ruleset = 0
      ) AS x
-     WHERE beatmap_user.beatmap_id = x.bid`
+     WHERE beatmap_user.beatmap_id = x.bid AND beatmap_user.ruleset = 0`
   );
   missingStamp = stamp;
 }
@@ -133,7 +134,7 @@ export function computeSkillCurve(): {
        FROM beatmap_user u
        JOIN scores s ON s.id = u.best_lazer_score_id
        JOIN beatmaps b ON b.id = u.beatmap_id
-       WHERE b.ruleset = 0 AND b.star_rating IS NOT NULL`
+       WHERE u.ruleset = 0 AND b.ruleset = 0 AND b.star_rating IS NOT NULL`
     )
     .all() as { q: number; ts: number }[];
   const byQ = new Map<number, number[]>();

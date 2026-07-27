@@ -178,6 +178,44 @@ function migrate(d: DatabaseSync): void {
     `);
   }
 
+  // Multi-ruleset: beatmap_user gains a `ruleset` column and a composite
+  // primary key (beatmap_id, ruleset). Existing rows are all osu!std (0).
+  // Rebuild required: SQLite cannot alter a primary key in place.
+  const buCols3 = d.prepare("PRAGMA table_info(beatmap_user)").all() as { name: string }[];
+  if (!buCols3.some((c) => c.name === "ruleset")) {
+    d.exec(`
+      CREATE TABLE beatmap_user_mr (
+        beatmap_id INTEGER NOT NULL REFERENCES beatmaps(id),
+        ruleset INTEGER NOT NULL DEFAULT 0,
+        fetched_at TEXT,
+        played INTEGER NOT NULL DEFAULT 0,
+        any_fc INTEGER NOT NULL DEFAULT 0,
+        country_first INTEGER NOT NULL DEFAULT 0,
+        country_checked_at TEXT,
+        missing_lazer INTEGER,
+        missing_classic INTEGER,
+        missing_wither INTEGER,
+        best_lazer_score_id INTEGER REFERENCES scores(id),
+        global_rank INTEGER,
+        global_checked_at TEXT,
+        global_seen INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (beatmap_id, ruleset)
+      );
+      INSERT INTO beatmap_user_mr
+        SELECT beatmap_id, 0, fetched_at, played, any_fc, country_first,
+               country_checked_at, missing_lazer, missing_classic,
+               missing_wither, best_lazer_score_id, global_rank,
+               global_checked_at, global_seen
+        FROM beatmap_user;
+      DROP TABLE beatmap_user;
+      ALTER TABLE beatmap_user_mr RENAME TO beatmap_user;
+      DROP INDEX IF EXISTS idx_bu_played;
+      DROP INDEX IF EXISTS idx_bu_fetched;
+      CREATE INDEX IF NOT EXISTS idx_bu_played ON beatmap_user(ruleset, played);
+      CREATE INDEX IF NOT EXISTS idx_bu_fetched ON beatmap_user(ruleset, fetched_at);
+    `);
+  }
+
   seedDefaultMetrics(d);
   // Startup repair: the immediate country check after a new score can race
   // osu!'s leaderboard update and stamp a false "not #1" (and the deferred

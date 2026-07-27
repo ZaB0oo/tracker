@@ -94,7 +94,7 @@ function baseFrom(p: MetricParams, bestOnly: boolean): string {
   return `FROM scores s
     JOIN beatmaps b ON b.id = s.beatmap_id
     JOIN beatmapsets st ON st.id = b.beatmapset_id
-    LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
+    LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = 0
     WHERE ${bestOnly ? "s.id = u.best_lazer_score_id AND " : ""}${mapWhere(p.map)} AND ${scoreWhere(p.score)}`;
 }
 
@@ -110,7 +110,7 @@ function mapTotal(p: MetricParams): number {
       .prepare(
         `SELECT COUNT(*) c FROM beatmaps b
          JOIN beatmapsets st ON st.id = b.beatmapset_id
-         LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
+         LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = 0
          WHERE ${mapWhere(p.map, { ignoreCountry1: true })}`
       )
       .get() as { c: number }
@@ -135,7 +135,7 @@ function countByBucket(p: MetricParams): MetricResult["byBucket"] {
       `SELECT ${dim.expr} AS bucket, COUNT(*) AS total
        FROM beatmaps b
        JOIN beatmapsets st ON st.id = b.beatmapset_id
-       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
+       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = 0
        WHERE ${mapWhere(p.map, { ignoreCountry1: true })} AND ${dim.notNull} IS NOT NULL
        GROUP BY bucket ORDER BY bucket`
     )
@@ -162,7 +162,7 @@ function evalCount(p: MetricParams, gran: "month" | "day"): MetricResult {
        FROM scores s
        JOIN beatmaps b ON b.id = s.beatmap_id
        JOIN beatmapsets st ON st.id = b.beatmapset_id
-       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
+       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = 0
        WHERE ${mapWhere(p.map)} AND s.passed = 1
        ORDER BY s.ended_at`
     )
