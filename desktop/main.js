@@ -30,6 +30,11 @@ const ICON = path.join(import.meta.dirname, "icon.png");
 
 const startHidden = process.argv.includes("--hidden");
 
+// Explicit, stable data location (%AppData%\osu-completionist) — otherwise
+// dev runs ("electron desktop/main.js") default to %AppData%\Electron.
+app.setName("osu-completionist");
+app.setPath("userData", path.join(app.getPath("appData"), "osu-completionist"));
+
 /** @type {ReturnType<typeof utilityProcess.fork> | null} */
 let serverProc = null;
 /** @type {BrowserWindow | null} */
