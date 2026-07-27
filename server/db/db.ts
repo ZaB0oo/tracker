@@ -236,6 +236,7 @@ function migrate(d: DatabaseSync): void {
        AND EXISTS (
          SELECT 1 FROM scores s
          WHERE s.beatmap_id = beatmap_user.beatmap_id
+           AND s.ruleset = beatmap_user.ruleset
            AND datetime(s.ended_at) >= datetime(country_checked_at, '-15 minutes'))`
   );
   // Graveyard/WIP diffs attached to ranked sets may have been imported by

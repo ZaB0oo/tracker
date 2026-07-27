@@ -1,6 +1,6 @@
 # osu! Completionist Tracker
 
-Local, single-user desktop app that tracks your best score on **every ranked/approved/loved difficulty** of osu! standard — with advanced sorting/filters, a completion dashboard, custom metrics with milestones and evolution charts, country #1 and global tops tracking, a stream overlay for OBS, and near real-time pickup of new scores.
+Local, single-user desktop app that tracks your best score on **every ranked/approved/loved difficulty** of osu! — all four rulesets (standard, taiko, catch, mania), converts included — with advanced sorting/filters, a completion dashboard, custom metrics with milestones and evolution charts, country #1 and global tops tracking, a stream overlay for OBS, and near real-time pickup of new scores.
 
 ![Dashboard](docs/dashboard.png)
 
@@ -14,6 +14,20 @@ Local, single-user desktop app that tracks your best score on **every ranked/app
 ![History](docs/history.png)
 
 </details>
+
+## Rulesets
+
+osu! standard is always tracked. taiko / catch / mania are opt-in
+(Settings → Rulesets), each with the same features: own catalog, score
+backfill, country #1 and global tops sweeps, metrics, history, dashboard and
+overlay — plus the **converts** (std maps played in that mode, included by
+default with a "specific only" toggle). Enabling a ruleset only unlocks its
+views: nothing hits the API before you press its **Start initial sync** button
+(each mode costs days of polite API budget the first time — specific maps
+first, the converts grind runs behind). Per-mode subtleties are honored from
+the ppy/osu source: hit results, FC semantics, classic score formulas (mania's
+classic IS the standardised score), grade rules (mania SS without 100% acc),
+per-mode star ratings for played converts.
 
 ## Features
 
