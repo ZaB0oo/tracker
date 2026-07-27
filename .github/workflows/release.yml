@@ -7,6 +7,11 @@ on:
   push:
     tags: ["v*"]
 
+# electron-builder creates the draft release and uploads the installers:
+# the default workflow token is read-only, write access must be granted
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
