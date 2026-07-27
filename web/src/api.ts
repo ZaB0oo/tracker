@@ -445,6 +445,8 @@ export interface MetricScoreConds {
     nSliderEnd: Range;
     imperfections: Range;
   };
+  /** generic per-statistic bounds (non-std hit results, osu-web keys) */
+  hits?: Record<string, Range>;
 }
 export interface MetricMapConds {
   srMin: number | null; srMax: number | null;
@@ -628,8 +630,8 @@ export interface FilterBounds {
   /** highest standardized score (mod multipliers push it past 1M) */
   stdMax: number | null;
 }
-export async function fetchFilterBounds(): Promise<FilterBounds> {
-  const res = await fetch("/api/metrics/filter-bounds");
+export async function fetchFilterBounds(ruleset = 0): Promise<FilterBounds> {
+  const res = await fetch(`/api/metrics/filter-bounds?ruleset=${ruleset}`);
   if (!res.ok) throw new Error(`filter-bounds: HTTP ${res.status}`);
   return res.json();
 }

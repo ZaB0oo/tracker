@@ -58,6 +58,9 @@ function buildFilters(
   missingSql: string
 ): { where: string[]; params: Record<string, string | number | null> } {
   const ruleset = parseRulesetParam(q.ruleset);
+  // converts: per-mode SR / max combo from convert_attrs when fetched
+  const SR = ruleset === 0 ? "b.star_rating" : "COALESCE(ca.star_rating, b.star_rating)";
+  const COMBO = ruleset === 0 ? "b.max_combo" : "COALESCE(ca.max_combo, b.max_combo)";
   // defense in depth: never any graveyard/WIP diffs even if imported
   const where: string[] = [poolWhere(ruleset, q.pool), "b.status IN (1, 2, 4)"];
   const params: Record<string, string | number | null> = {};
@@ -129,7 +132,7 @@ function buildFilters(
     );
     params.text = `%${q.q}%`;
   }
-  num("srMin", "b.star_rating", ">="); num("srMax", "b.star_rating", "<=");
+  num("srMin", SR, ">="); num("srMax", SR, "<=");
   num("arMin", "b.ar", ">="); num("arMax", "b.ar", "<=");
   num("odMin", "b.od", ">="); num("odMax", "b.od", "<=");
   num("csMin", "b.cs", ">="); num("csMax", "b.cs", "<=");
@@ -175,13 +178,19 @@ tableRouter.get("/table", (req, res) => {
       ? "COALESCE(s.classic_total_score, s.total_score, 0)"
       : "COALESCE(s.total_score, 0)";
   const predExpr = `(${missingSql} + ${bestExpr})`;
+  const R = parseRulesetParam(q.ruleset);
+  // converts: per-mode SR / max combo from convert_attrs when fetched
+  const SRX = R === 0 ? "b.star_rating" : "COALESCE(ca.star_rating, b.star_rating)";
+  const COMBOX = R === 0 ? "b.max_combo" : "COALESCE(ca.max_combo, b.max_combo)";
 
   const { where, params } = buildFilters(db, q, missingSql);
 
   const sortParts: string[] = [];
   for (const part of (q.sort ?? "missing:desc").split(",")) {
     const [col, dir] = part.split(":");
-    const sqlCol = SORT_COLUMNS[col];
+    let sqlCol = SORT_COLUMNS[col];
+    if (sqlCol === "b.star_rating") sqlCol = SRX;
+    if (sqlCol === "b.max_combo") sqlCol = COMBOX;
     if (sqlCol) sortParts.push(`${sqlCol} ${dir === "asc" ? "ASC" : "DESC"} NULLS LAST`);
   }
   if (sortParts.length === 0) sortParts.push("missing_value DESC");
@@ -192,7 +201,8 @@ tableRouter.get("/table", (req, res) => {
   const baseSql = `
     FROM beatmaps b
     JOIN beatmapsets st ON st.id = b.beatmapset_id
-    LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${parseRulesetParam(q.ruleset)}
+    LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}
+    LEFT JOIN convert_attrs ca ON ca.beatmap_id = b.id AND ca.ruleset = ${R} AND b.ruleset != ${R}
     LEFT JOIN scores s ON s.id = u.${bestCol}
     WHERE ${where.join(" AND ")}
   `;
@@ -201,8 +211,9 @@ tableRouter.get("/table", (req, res) => {
     .prepare(
       `SELECT
         b.id AS beatmap_id, b.beatmapset_id, b.version, b.status,
-        b.total_length, b.bpm, b.cs, b.ar, b.od, b.hp, b.star_rating,
-        b.max_combo AS map_max_combo,
+        b.total_length, b.bpm, b.cs, b.ar, b.od, b.hp,
+        ${SRX} AS star_rating,
+        ${COMBOX} AS map_max_combo,
         st.artist, st.title, st.creator, st.ranked_date,
         st.download_disabled AS dmca,
         s.id AS score_id, s.ended_at, s.rank AS grade, s.accuracy,
@@ -321,6 +332,7 @@ export async function buildCollectionDb(
        FROM beatmaps b
        JOIN beatmapsets st ON st.id = b.beatmapset_id
        LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${parseRulesetParam(q.ruleset)}
+       LEFT JOIN convert_attrs ca ON ca.beatmap_id = b.id AND ca.ruleset = ${parseRulesetParam(q.ruleset)} AND b.ruleset != ${parseRulesetParam(q.ruleset)}
        LEFT JOIN scores s ON s.id = u.best_lazer_score_id
        WHERE ${where.join(" AND ")}`
     )

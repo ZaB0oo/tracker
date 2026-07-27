@@ -3,6 +3,7 @@ import { getDb } from "../db/db.js";
 import { evalMetric, previewMetric } from "../logic/metricEval.js";
 import { mapWhere, scoreWhere, type MetricParams } from "../logic/metrics.js";
 import { getModdedStarRating } from "../osu/api.js";
+import { parseRulesetParam } from "../logic/rulesets.js";
 
 const KINDS = ["count", "ranked_score", "pp"] as const;
 
@@ -33,13 +34,21 @@ export const metricsRouter = Router();
 // Real maxima of the catalog, used as slider bounds in the metric builder
 // (instead of arbitrary caps / ∞). Loved maps are excluded: their broken SR /
 // BPM outliers would stretch the sliders into uselessness.
-metricsRouter.get("/metrics/filter-bounds", (_req, res) => {
+metricsRouter.get("/metrics/filter-bounds", (req, res) => {
   const db = getDb();
+  const R = parseRulesetParam(req.query.ruleset);
+  const pool = R === 0 ? "b.ruleset = 0" : `(b.ruleset = ${R} OR b.ruleset = 0)`;
+  const caJoin =
+    R === 0
+      ? ""
+      : `LEFT JOIN convert_attrs ca ON ca.beatmap_id = b.id AND ca.ruleset = ${R} AND b.ruleset != ${R}`;
+  const srX = R === 0 ? "b.star_rating" : "COALESCE(ca.star_rating, b.star_rating)";
+  const comboX = R === 0 ? "b.max_combo" : "COALESCE(ca.max_combo, b.max_combo)";
   const b = db
     .prepare(
-      `SELECT MAX(star_rating) sr, MAX(total_length) len, MAX(max_combo) combo,
-         MAX(bpm) bpm
-       FROM beatmaps WHERE ruleset = 0 AND status IN (1, 2)`
+      `SELECT MAX(${srX}) sr, MAX(b.total_length) len, MAX(${comboX}) combo,
+         MAX(b.bpm) bpm
+       FROM beatmaps b ${caJoin} WHERE ${pool} AND b.status IN (1, 2)`
     )
     .get() as { sr: number | null; len: number | null; combo: number | null; bpm: number | null };
   const yr = db
@@ -49,10 +58,10 @@ metricsRouter.get("/metrics/filter-bounds", (_req, res) => {
     )
     .get() as { y: string | null };
   const g = db
-    .prepare("SELECT MAX(global_rank) r FROM beatmap_user WHERE ruleset = 0")
+    .prepare(`SELECT MAX(global_rank) r FROM beatmap_user WHERE ruleset = ${R}`)
     .get() as { r: number | null };
   const pp = db
-    .prepare("SELECT MAX(pp) p, MAX(total_score) std FROM scores")
+    .prepare(`SELECT MAX(pp) p, MAX(total_score) std FROM scores WHERE ruleset = ${R}`)
     .get() as { p: number | null; std: number | null };
   res.json({
     sr: b.sr,

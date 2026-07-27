@@ -11,6 +11,7 @@ import {
   type Range,
 } from "../api";
 import { displayGrade, fmtNum } from "../format";
+import { RULESET_HIT_FIELDS, RULESET_NAMES } from "../rulesets";
 
 // osu!std mods grouped by the in-game categories (lazer). AT/CN can't submit a
 // score so they're excluded. Fun mods are std-only.
@@ -235,9 +236,10 @@ export function MetricBuilder({
     setP((s) => ({ ...s, map: { ...s.map, [key]: v } }));
 
   // slider bounds = real catalog maxima (highest map SR, longest map, …)
+  const rsMetric = p.ruleset ?? 0;
   const { data: bounds } = useQuery({
-    queryKey: ["filter-bounds"],
-    queryFn: fetchFilterBounds,
+    queryKey: ["filter-bounds", rsMetric],
+    queryFn: () => fetchFilterBounds(rsMetric),
     staleTime: 60 * 60_000,
   });
   const mapFields = useMemo<MapField[]>(() => {
@@ -309,7 +311,12 @@ export function MetricBuilder({
       <div className="menu-overlay modal-overlay" onClick={onClose} />
       <div className="adv-modal mb-modal">
         <div className="adv-head">
-          <h2>{edit ? "Edit metric" : "New metric"}</h2>
+          <h2>
+            {edit ? "Edit metric" : "New metric"}
+            {rsMetric !== 0 && (
+              <span className="pp-dim"> — {RULESET_NAMES[rsMetric]}</span>
+            )}
+          </h2>
           <button className="mm-close" onClick={onClose}>✕</button>
         </div>
 
@@ -435,15 +442,35 @@ export function MetricBuilder({
               ))}
             </Section>
 
-            <Section title="Hit counts (100s, 50s, misses, slider ends)">
-              {COUNT_FIELDS.map((f) => (
-                <RangeRow
-                  key={f.key} label={f.label}
-                  value={p.score.counts[f.key]}
-                  onChange={(r) => setCount(f.key, r)}
-                />
-              ))}
-            </Section>
+            {rsMetric === 0 ? (
+              <Section title="Hit counts (100s, 50s, misses, slider ends)">
+                {COUNT_FIELDS.map((f) => (
+                  <RangeRow
+                    key={f.key} label={f.label}
+                    value={p.score.counts[f.key]}
+                    onChange={(r) => setCount(f.key, r)}
+                  />
+                ))}
+              </Section>
+            ) : (
+              <Section title="Hit counts">
+                {(RULESET_HIT_FIELDS[rsMetric] ?? []).map((f) => (
+                  <RangeRow
+                    key={f.key} label={f.label}
+                    value={p.score.hits?.[f.key] ?? { min: null, max: null }}
+                    onChange={(r) =>
+                      setP((s) => ({
+                        ...s,
+                        score: {
+                          ...s.score,
+                          hits: { ...s.score.hits, [f.key]: r },
+                        },
+                      }))
+                    }
+                  />
+                ))}
+              </Section>
+            )}
           </>
         )}
 

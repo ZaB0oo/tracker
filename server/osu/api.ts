@@ -432,6 +432,46 @@ export async function getRecentScores(
  * Star rating with specific mods (POST /beatmaps/{id}/attributes).
  * null on failure — callers fall back to the nomod SR.
  */
+/**
+ * Nomod attributes of a CONVERT (std map played in taiko/catch/mania):
+ * per-mode star rating and max combo, cached forever in convert_attrs by the
+ * caller. null on failure.
+ */
+export async function getConvertAttrs(
+  beatmapId: number,
+  rulesetName: string,
+  priority: Priority = "low"
+): Promise<{ starRating: number | null; maxCombo: number | null } | null> {
+  try {
+    return await limiter.schedule(async () => {
+      const auth = await getToken();
+      const res = await netFetch(
+        `${config.apiBase}/beatmaps/${beatmapId}/attributes`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${auth}`,
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": config.userAgent,
+          },
+          body: JSON.stringify({ ruleset: rulesetName }),
+        }
+      );
+      if (!res.ok) throw new Error(`attributes: HTTP ${res.status}`);
+      const j = (await res.json()) as {
+        attributes?: { star_rating?: number; max_combo?: number };
+      };
+      return {
+        starRating: j.attributes?.star_rating ?? null,
+        maxCombo: j.attributes?.max_combo ?? null,
+      };
+    }, priority);
+  } catch {
+    return null;
+  }
+}
+
 export async function getModdedStarRating(
   beatmapId: number,
   modAcronyms: string[],

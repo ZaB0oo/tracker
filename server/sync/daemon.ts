@@ -13,6 +13,7 @@ import { getActiveRulesets, getDb, getStartedRulesets, getState, setState } from
 import { rulesetDef } from "../logic/rulesets.js";
 import {
   getBeatmapsByIds,
+  getConvertAttrs,
   getCountryTop,
   getCountryTopScores,
   getModdedStarRating,
@@ -321,6 +322,52 @@ async function backfillMap(
   } catch (e) {
     logError(e, errCtx);
     return null;
+  }
+}
+
+/**
+ * Background fill of convert_attrs: per-mode star rating and max combo of the
+ * PLAYED converts (1 request each, low priority, resumable — unplayed
+ * converts keep the std values as approximation until played). Kicked by the
+ * periodic tick and after each backfill completion.
+ */
+let convertAttrsRunning = false;
+export async function fillConvertAttrs(): Promise<void> {
+  if (convertAttrsRunning) return;
+  const modes = getStartedRulesets().filter((r) => r !== 0);
+  if (modes.length === 0) return;
+  convertAttrsRunning = true;
+  try {
+    const db = getDb();
+    const next = db.prepare(
+      `SELECT u.beatmap_id AS id, u.ruleset AS r FROM beatmap_user u
+       JOIN beatmaps b ON b.id = u.beatmap_id
+       WHERE u.played = 1 AND u.ruleset IN (${modes.join(",")}) AND b.ruleset = 0
+         AND NOT EXISTS (SELECT 1 FROM convert_attrs ca
+                         WHERE ca.beatmap_id = u.beatmap_id AND ca.ruleset = u.ruleset)
+       LIMIT 100`
+    );
+    const ins = db.prepare(
+      `INSERT OR REPLACE INTO convert_attrs (beatmap_id, ruleset, star_rating, max_combo, fetched_at)
+       VALUES (?, ?, ?, ?, datetime('now'))`
+    );
+    let done = 0;
+    for (;;) {
+      const rows = next.all() as { id: number; r: number }[];
+      if (rows.length === 0) break;
+      for (const { id, r } of rows) {
+        const a = await getConvertAttrs(id, rulesetDef(r).apiName, "low");
+        if (!a) return; // API down: the next tick retries
+        ins.run(id, r, a.starRating, a.maxCombo);
+        done++;
+      }
+      logActivity(
+        "convert attrs",
+        `${done} played convert(s) enriched (per-mode SR / max combo)`
+      );
+    }
+  } finally {
+    convertAttrsRunning = false;
   }
 }
 
@@ -836,6 +883,7 @@ export function startCatalogRefresh(): void {
         );
         void runGlobalSweep();
       }
+      if (!status.backfill.running && !catalogRunning) void fillConvertAttrs();
       const last = getState("catalog_delta_at");
       if (last && Date.now() - Date.parse(last) < MIN_INTERVAL_MS) return;
       await refreshCatalogDelta();
@@ -1420,6 +1468,7 @@ async function runBackfill(): Promise<void> {
       void (async () => {
         if (isUserConnected()) await runCountrySweep();
         if (isGlobalTrackingEnabled()) await runGlobalSweep();
+        await fillConvertAttrs();
       })();
     }
   } finally {

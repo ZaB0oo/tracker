@@ -31,6 +31,9 @@ export interface MetricScoreConds {
     nSliderEnd: Range;
     imperfections: Range; // n100 + missed slider ends
   };
+  /** generic per-statistic bounds (non-std rulesets: taiko/catch/mania hit
+   * results, keyed by the osu-web statistics name, e.g. "large_tick_hit") */
+  hits?: Record<string, Range>;
 }
 
 export interface MetricMapConds {
@@ -144,6 +147,15 @@ export function scoreWhere(c: MetricScoreConds): string {
     if (or.length) w.push(`(${or.join(" OR ")})`);
   }
   const co = c.counts ?? ({} as MetricScoreConds["counts"]);
+  if (c.hits)
+    for (const [key, r] of Object.entries(c.hits)) {
+      if (!/^[a-z_]{2,32}$/.test(key)) continue;
+      range(
+        `COALESCE(CAST(json_extract(s.statistics,'$.${key}') AS INTEGER),0)`,
+        r,
+        w
+      );
+    }
   range(N100, co.n100, w);
   range(N50, co.n50, w);
   range(NMISS, co.nMiss, w);
