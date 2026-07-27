@@ -20,6 +20,10 @@ const METRIC_IDS = (new URLSearchParams(window.location.search).get("metrics") ?
 
 const delta = (cur: number, base: number) => cur - base;
 
+// ruleset scoped by the browser-source URL (?overlay=1&ruleset=N)
+const OVERLAY_RULESET =
+  Number(new URLSearchParams(window.location.search).get("ruleset")) || 0;
+
 /**
  * Stream overlay (OBS browser source, /?overlay=1): transparent background,
  * session stats (since the source was loaded) + total stats.
@@ -27,7 +31,7 @@ const delta = (cur: number, base: number) => cur - base;
 export function StreamOverlay() {
   const { data } = useQuery({
     queryKey: ["overlay"],
-    queryFn: fetchOverlayStats,
+    queryFn: () => fetchOverlayStats(OVERLAY_RULESET),
     refetchInterval: 5000,
   });
   const { data: sync } = useQuery({

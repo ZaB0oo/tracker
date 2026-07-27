@@ -52,6 +52,9 @@ const actionLabels = (
     start: "Re-scanning catalog…",
     done: () => "Catalog re-scan started (tracked in the bar)",
   },
+  "start-ruleset/1": { start: "Starting taiko sync…", done: () => "taiko sync started (catalog → backfill, tracked in the bar)" },
+  "start-ruleset/2": { start: "Starting catch sync…", done: () => "catch sync started (catalog → backfill, tracked in the bar)" },
+  "start-ruleset/3": { start: "Starting mania sync…", done: () => "mania sync started (catalog → backfill, tracked in the bar)" },
 });
 
 const PHASE_LABELS: Record<string, string> = {
@@ -63,7 +66,7 @@ const PHASE_LABELS: Record<string, string> = {
   enrich: "enrichment",
 };
 
-export function SyncBar() {
+export function SyncBar({ ruleset = 0 }: { ruleset?: number }) {
   const qc = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
   const [errOpen, setErrOpen] = useState(false);
@@ -219,6 +222,19 @@ export function SyncBar() {
             Start initial sync
           </button>
         )}
+        {(() => {
+          // per-mode start: nothing runs for taiko/catch/mania before this
+          const rs = s.rulesets?.find((r) => r.ruleset === ruleset);
+          return rs && !rs.started ? (
+            <button
+              className="primary"
+              title={`Enumerate the ${rs.name} catalog and backfill its maps and converts (days of API budget, resumable)`}
+              onClick={() => act(`start-ruleset/${rs.ruleset}`)}
+            >
+              Start initial {rs.name} sync
+            </button>
+          ) : null;
+        })()}
         {s.backfill.running ? (
           <button onClick={() => act("pause")}>Pause backfill</button>
         ) : (
@@ -387,7 +403,7 @@ export function SyncBar() {
       {advancedOpen && (
         <AdvancedSettings onClose={() => setAdvancedOpen(false)} notify={toast} />
       )}
-      {overlayOpen && <OverlayConfig onClose={() => setOverlayOpen(false)} />}
+      {overlayOpen && <OverlayConfig onClose={() => setOverlayOpen(false)} ruleset={ruleset} />}
       {shareOpen && <ShareCard onClose={() => setShareOpen(false)} />}
     </div>
   );

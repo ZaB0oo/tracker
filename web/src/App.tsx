@@ -102,7 +102,7 @@ export default function App() {
         ))}
       </nav>
 
-      <SyncBar />
+      <SyncBar ruleset={ruleset} />
 
       {view === "table" && (
         <>
@@ -113,15 +113,22 @@ export default function App() {
       )}
       {view === "metrics" && (
         <MetricsView
-          onMissingMaps={(id, name, matching) =>
+          ruleset={ruleset}
+          onMissingMaps={(id, name, matching, mRuleset, mPool) =>
             drillDown(
-              { ...DEFAULT_FILTERS, mode: filters.mode, metricMissing: { id, name, matching } },
+              {
+                ...DEFAULT_FILTERS,
+                mode: filters.mode,
+                ruleset: mRuleset ?? 0,
+                pool: mPool ?? "all",
+                metricMissing: { id, name, matching },
+              },
               [{ id: "star_rating", desc: false }]
             )
           }
         />
       )}
-      {view === "history" && <HistoryView />}
+      {view === "history" && <HistoryView ruleset={ruleset} />}
       {view === "dashboard" && <Dashboard ruleset={ruleset} />}
     </div>
   );

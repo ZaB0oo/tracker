@@ -5,7 +5,7 @@
  * follow-up enrichment pass via `/beatmaps?ids[]=` (50/req) fills in
  * max_combo and up-to-date star ratings.
  */
-import { getActiveRulesets, getDb, setState, getState, transaction } from "../db/db.js";
+import { getActiveRulesets, getDb, getStartedRulesets, setState, getState, transaction } from "../db/db.js";
 import { config } from "../config.js";
 import {
   getBeatmapsByIds,
@@ -70,9 +70,9 @@ export async function updateCatalogDelta(
   const mapStmt = upsertMapStmt();
   const newBeatmapIds: number[] = [];
 
-  // one delta walk per active ruleset (the search's mode filter also drives
+  // one delta walk per STARTED ruleset (the search's mode filter also drives
   // which diffs each page carries)
-  for (const mode of getActiveRulesets()) {
+  for (const mode of getStartedRulesets()) {
     for (const category of ["ranked", "loved"] as const) {
       let cursor: string | null = null;
       for (let page = 0; page < 100; page++) {
@@ -400,9 +400,9 @@ export async function importCatalogFromApi(
   const START_YEAR = 2007;
   const endYear = new Date().getUTCFullYear();
 
-  // one full enumeration per active ruleset; mode 0 keeps the historical
+  // one full enumeration per STARTED ruleset; mode 0 keeps the historical
   // cursor keys (existing installs must not re-enumerate their std catalog)
-  for (const mode of getActiveRulesets()) {
+  for (const mode of getStartedRulesets()) {
     const suffix = mode === 0 ? "" : `_m${mode}`;
     for (const category of ["ranked", "loved"] as const) {
       await enumerateSlice(
@@ -486,7 +486,7 @@ export async function enrichMaxCombo(
        checksum = COALESCE(@checksum, checksum)
      WHERE id = @id`
   );
-  const modesIn = getActiveRulesets().join(",");
+  const modesIn = getStartedRulesets().join(",");
   const total = (
     db
       .prepare(

@@ -397,8 +397,16 @@ function MetricCard({
 /** Metrics tab: user-defined metrics as milestones + optional evolution. */
 export function MetricsView({
   onMissingMaps,
+  ruleset = 0,
 }: {
-  onMissingMaps: (id: number, name: string, matching: boolean) => void;
+  onMissingMaps: (
+    id: number,
+    name: string,
+    matching: boolean,
+    ruleset?: number,
+    pool?: "all" | "specific"
+  ) => void;
+  ruleset?: number;
 }) {
   const qc = useQueryClient();
   const [gran, setGran] = useState<"month" | "day">("month");
@@ -506,7 +514,9 @@ export function MetricsView({
         <p className="goal-note">No metric yet — create one with “+ New metric”.</p>
       )}
       <div className="metrics-grid" ref={gridRef}>
-        {data.metrics.map((m) => (
+        {data.metrics
+          .filter((m) => (m.params.ruleset ?? 0) === ruleset)
+          .map((m) => (
           <MetricCard
             key={m.id}
             m={m}
@@ -523,7 +533,9 @@ export function MetricsView({
               onMissingMaps(
                 metric.id,
                 metric.name,
-                metric.params.kind === "count" && !!metric.params.descending
+                metric.params.kind === "count" && !!metric.params.descending,
+                metric.params.ruleset ?? 0,
+                metric.params.pool
               )
             }
             onCtx={onCtx}
@@ -595,7 +607,7 @@ export function MetricsView({
       )}
 
       {(builderOpen || editing) && (
-        <MetricBuilder
+        <MetricBuilder ruleset={ruleset}
           edit={editing ? { id: editing.id, name: editing.name, params: editing.params } : undefined}
           onClose={() => {
             setBuilderOpen(false);

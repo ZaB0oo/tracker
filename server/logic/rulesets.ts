@@ -106,12 +106,12 @@ export function parseRulesetParam(v: unknown): RulesetId {
 }
 
 /**
- * SQL map-pool condition (alias b) for a ruleset view:
- * - specific: only maps native to the ruleset;
- * - all (non-std only): + the converts (std maps playable in that mode).
+ * SQL map-pool condition (alias b) for a ruleset view. Converts (std maps
+ * playable in a non-std mode) are INCLUDED by default — official profiles
+ * count them; pool=specific opts out.
  */
 export function poolWhere(ruleset: number, pool: string | undefined): string {
-  if (ruleset === 0 || pool !== "all") return `b.ruleset = ${ruleset}`;
+  if (ruleset === 0 || pool === "specific") return `b.ruleset = ${ruleset}`;
   return `(b.ruleset = ${ruleset} OR b.ruleset = 0)`;
 }
 

@@ -88,8 +88,9 @@ historyRouter.get("/clears", (req, res) => {
 historyRouter.get("/country-history", (req, res) => {
   const db = getDb();
   const q = req.query as Record<string, string | undefined>;
+  const R = parseRulesetParam(q.ruleset);
   const ev = q.event === "gained" || q.event === "lost" ? q.event : null;
-  const where = ev ? "WHERE e.event = ?" : "";
+  const where = `WHERE e.ruleset = ${R}` + (ev ? " AND e.event = ?" : "");
   const evParams = ev ? [ev] : [];
   const { limit, offset } = paging(q);
 
@@ -121,13 +122,11 @@ historyRouter.get("/country-history", (req, res) => {
 historyRouter.get("/global-history", (req, res) => {
   const db = getDb();
   const q = req.query as Record<string, string | undefined>;
+  const R = parseRulesetParam(q.ruleset);
   const GAINED = "(e.new_rank IS NOT NULL AND (e.old_rank IS NULL OR e.new_rank < e.old_rank))";
   const where =
-    q.event === "gained"
-      ? `WHERE ${GAINED}`
-      : q.event === "lost"
-        ? `WHERE NOT ${GAINED}`
-        : "";
+    `WHERE e.ruleset = ${R}` +
+    (q.event === "gained" ? ` AND ${GAINED}` : q.event === "lost" ? ` AND NOT ${GAINED}` : "");
   const { limit, offset } = paging(q);
 
   const rows = db

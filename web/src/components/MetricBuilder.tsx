@@ -185,10 +185,13 @@ export function MetricBuilder({
   onClose,
   onSaved,
   edit,
+  ruleset = 0,
 }: {
   onClose: () => void;
   onSaved: () => void;
   edit?: { id: number; name: string; params: MetricParams };
+  /** ruleset the metric is created in (edit keeps the metric's own) */
+  ruleset?: number;
 }) {
   const [name, setName] = useState(edit?.name ?? "");
   // deep-merge with defaults so older metrics (missing new fields) still work
@@ -210,7 +213,7 @@ export function MetricBuilder({
           progressMode: edit.params.progressMode ?? "milestone",
           step: edit.params.step || 1000,
         }
-      : DEFAULT_METRIC_PARAMS
+      : { ...DEFAULT_METRIC_PARAMS, ruleset, pool: "all" as const }
   );
   // the step input is kept as text so it can be emptied while typing
   const [stepStr, setStepStr] = useState(String(edit?.params.step || 1000));

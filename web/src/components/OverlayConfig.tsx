@@ -48,7 +48,7 @@ function Section({
  * encoded in the URL (?hide=…&metrics=…) because OBS browser sources don't
  * share localStorage with the app.
  */
-export function OverlayConfig({ onClose }: { onClose: () => void }) {
+export function OverlayConfig({ onClose, ruleset = 0 }: { onClose: () => void; ruleset?: number }) {
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [metricIds, setMetricIds] = useState<Set<number>>(new Set());
   const [copied, setCopied] = useState(false);
@@ -62,6 +62,7 @@ export function OverlayConfig({ onClose }: { onClose: () => void }) {
   // Same origin as the app (works both in dev on :5173 and in prod on :3727).
   const url =
     `${window.location.origin}/?overlay=1` +
+    (ruleset ? `&ruleset=${ruleset}` : "") +
     (hideParam ? `&hide=${hideParam}` : "") +
     (metricsParam ? `&metrics=${metricsParam}` : "");
 

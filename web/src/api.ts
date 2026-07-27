@@ -21,8 +21,8 @@ export interface OverlayStats {
   rankedWither: number;
 }
 
-export async function fetchOverlayStats(): Promise<OverlayStats> {
-  const res = await fetch("/api/overlay");
+export async function fetchOverlayStats(ruleset = 0): Promise<OverlayStats> {
+  const res = await fetch(`/api/overlay?ruleset=${ruleset}`);
   if (!res.ok) throw new Error(`overlay: HTTP ${res.status}`);
   return res.json();
 }
@@ -142,7 +142,7 @@ export interface DailyStats {
 export async function fetchDaily(
   year?: number,
   ruleset = 0,
-  pool: "" | "all" = ""
+  pool: "all" | "specific" = "all"
 ): Promise<DailyStats> {
   const res = await fetch(
     `/api/daily?ruleset=${ruleset}&pool=${pool}${year ? `&year=${year}` : ""}`
@@ -241,7 +241,7 @@ export async function lazerImport(filters: Filters, name: string): Promise<Lazer
   return json;
 }
 
-export async function fetchStats(ruleset = 0, pool: "" | "all" = ""): Promise<Stats> {
+export async function fetchStats(ruleset = 0, pool: "all" | "specific" = "all"): Promise<Stats> {
   const res = await fetch(`/api/stats?ruleset=${ruleset}&pool=${pool}`);
   if (!res.ok) throw new Error(`stats: HTTP ${res.status}`);
   return res.json();
@@ -266,6 +266,7 @@ export async function postSync(
     | "global-pause"
     | "global-recheck-all"
     | "recompute"
+    | `start-ruleset/${number}`
     | "refresh-top-pp"
     | "rebackfill"
     | "catalog-full?force=1"
@@ -342,9 +343,14 @@ export interface CountryEvent {
 export async function fetchCountryHistory(
   offset: number,
   limit: number,
-  event?: "gained" | "lost"
+  event?: "gained" | "lost",
+  ruleset = 0
 ): Promise<{ rows: CountryEvent[]; total: number }> {
-  const p = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+  const p = new URLSearchParams({
+    offset: String(offset),
+    limit: String(limit),
+    ruleset: String(ruleset),
+  });
   if (event) p.set("event", event);
   const res = await fetch(`/api/country-history?${p.toString()}`);
   if (!res.ok) throw new Error(`country-history: HTTP ${res.status}`);
@@ -366,9 +372,14 @@ export interface GlobalEvent {
 export async function fetchGlobalHistory(
   offset: number,
   limit: number,
-  event?: "gained" | "lost"
+  event?: "gained" | "lost",
+  ruleset = 0
 ): Promise<{ rows: GlobalEvent[]; total: number }> {
-  const p = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+  const p = new URLSearchParams({
+    offset: String(offset),
+    limit: String(limit),
+    ruleset: String(ruleset),
+  });
   if (event) p.set("event", event);
   const res = await fetch(`/api/global-history?${p.toString()}`);
   if (!res.ok) throw new Error(`global-history: HTTP ${res.status}`);
@@ -458,6 +469,10 @@ export type MetricBreakdown =
 
 export interface MetricParams {
   kind: "count" | "ranked_score" | "pp";
+  /** ruleset the metric lives in (default 0 = osu!std) */
+  ruleset?: number;
+  /** map pool for non-std rulesets (converts included by default) */
+  pool?: "all" | "specific";
   score: MetricScoreConds;
   map: MetricMapConds;
   /** dimension of the per-bucket completion on the card (default sr) */

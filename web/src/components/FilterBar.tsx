@@ -178,7 +178,7 @@ export function FilterBar({
             <input
               type="checkbox"
               checked={local.pool === "all"}
-              onChange={(e) => set("pool", e.target.checked ? "all" : "")}
+              onChange={(e) => set("pool", e.target.checked ? "all" : "specific")}
             />
             Include converts
           </label>

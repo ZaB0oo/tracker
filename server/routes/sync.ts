@@ -131,6 +131,32 @@ syncRouter.post("/sync/rebackfill", (_req, res) => {
   });
 });
 
+// Per-mode initial sync (taiko/catch/mania): the ruleset must be active in
+// Settings; nothing runs for a mode before this explicit start. Chains like
+// the std pipeline: catalog enumeration → enrichment → backfill (the shared
+// backfill picks up the new specific + converts queues) → sweeps follow.
+syncRouter.post("/sync/start-ruleset/:r", (req, res) => {
+  const r = Number(req.params.r);
+  if (![1, 2, 3].includes(r))
+    return res.status(400).json({ ok: false, error: "ruleset must be 1, 2 or 3" });
+  if (!getActiveRulesets().includes(r))
+    return res
+      .status(400)
+      .json({ ok: false, error: "activate this ruleset in Settings first" });
+  if (!config.hasCredentials)
+    return res.status(400).json({ ok: false, error: "osu! API credentials are not set" });
+  setState(`ruleset_started_${r}`, "1");
+  void (async () => {
+    try {
+      await ensureCatalogComplete(false);
+      await resumeBackfill();
+    } catch (e) {
+      console.error(`[sync] start ruleset ${r}:`, e);
+    }
+  })();
+  res.json({ ok: true, started: true });
+});
+
 syncRouter.post("/sync/clear-errors", (_req, res) => {
   clearSyncErrors();
   res.json({ ok: true });

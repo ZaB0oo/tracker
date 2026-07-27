@@ -127,18 +127,9 @@ settingsRouter.post("/settings", (req, res) => {
       body.activeRulesets.map(Number).filter((n) => [0, 1, 2, 3].includes(n))
     );
     wanted.add(0); // std can never be disabled
-    const before = new Set(getActiveRulesets());
+    // activation only unlocks the views: every process (catalog, backfill,
+    // polling, sweeps) waits for the per-mode "Start initial sync" button
     setState("active_rulesets", [...wanted].sort().join(","));
-    const added = [...wanted].filter((r) => !before.has(r));
-    if (added.length > 0 && config.hasCredentials) {
-      // newly tracked ruleset: enumerate its catalog in the background — the
-      // backfill queues (specific + converts) follow automatically
-      void import("../sync/daemon.js").then((d) =>
-        d.ensureCatalogComplete(false).catch((e) =>
-          console.error("[sync] ruleset activation catalog:", e)
-        )
-      );
-    }
   }
   // executable path: loopback only (see the lazer-import security model)
   if (body.lazerImporterPath != null) {

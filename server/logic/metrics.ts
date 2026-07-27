@@ -58,6 +58,10 @@ export type MetricBreakdown =
 
 export interface MetricParams {
   kind: "count" | "ranked_score" | "pp";
+  /** ruleset the metric lives in (default 0 = osu!std) */
+  ruleset?: number;
+  /** map pool for non-std rulesets (converts included by default) */
+  pool?: "all" | "specific";
   score: MetricScoreConds;
   map: MetricMapConds;
   /** dimension of the per-bucket completion shown on the card (default sr) */
@@ -156,9 +160,14 @@ export function scoreWhere(c: MetricScoreConds): string {
  */
 export function mapWhere(
   c: MetricMapConds,
-  opts: { ignoreCountry1?: boolean } = {}
+  opts: { ignoreCountry1?: boolean; ruleset?: number; pool?: "all" | "specific" } = {}
 ): string {
-  const w: string[] = ["b.ruleset = 0"];
+  const R = opts.ruleset ?? 0;
+  const w: string[] = [
+    R === 0 || opts.pool === "specific"
+      ? `b.ruleset = ${R}`
+      : `(b.ruleset = ${R} OR b.ruleset = 0)`,
+  ];
   const sts = (c.statuses ?? []).filter((n) => [1, 2, 4].includes(n));
   w.push(`b.status IN (${(sts.length ? sts : [1, 2, 4]).join(",")})`);
   const r = (expr: string, lo: unknown, hi: unknown) => {

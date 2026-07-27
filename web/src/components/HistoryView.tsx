@@ -26,10 +26,10 @@ const fmtDate = (at: string) => {
 };
 const fmtInt = (n: number | null | undefined) => (n == null ? "—" : fmtNum(n));
 
-function ClearsList({ onCtx }: { onCtx: OnMapContext }) {
+function ClearsList({ onCtx, ruleset }: { onCtx: OnMapContext; ruleset: number }) {
   const query = useInfiniteQuery({
-    queryKey: ["clears"],
-    queryFn: ({ pageParam }) => fetchClears(pageParam, PAGE),
+    queryKey: ["clears", ruleset],
+    queryFn: ({ pageParam }) => fetchClears(pageParam, PAGE, undefined, ruleset),
     initialPageParam: 0,
     getNextPageParam: (last, all) => {
       const loaded = all.reduce((n, p) => n + p.rows.length, 0);
@@ -97,14 +97,16 @@ function ClearsList({ onCtx }: { onCtx: OnMapContext }) {
 function CountryList({
   filter,
   onCtx,
+  ruleset,
 }: {
   filter: "" | "gained" | "lost";
   onCtx: OnMapContext;
+  ruleset: number;
 }) {
   const query = useInfiniteQuery({
-    queryKey: ["country-history", filter],
+    queryKey: ["country-history", filter, ruleset],
     queryFn: ({ pageParam }) =>
-      fetchCountryHistory(pageParam, PAGE, filter || undefined),
+      fetchCountryHistory(pageParam, PAGE, filter || undefined, ruleset),
     initialPageParam: 0,
     getNextPageParam: (last, all) => {
       const loaded = all.reduce((n, p) => n + p.rows.length, 0);
@@ -192,14 +194,16 @@ function CountryList({
 function GlobalList({
   filter,
   onCtx,
+  ruleset,
 }: {
   filter: "" | "gained" | "lost";
   onCtx: OnMapContext;
+  ruleset: number;
 }) {
   const query = useInfiniteQuery({
-    queryKey: ["global-history", filter],
+    queryKey: ["global-history", filter, ruleset],
     queryFn: ({ pageParam }) =>
-      fetchGlobalHistory(pageParam, PAGE, filter || undefined),
+      fetchGlobalHistory(pageParam, PAGE, filter || undefined, ruleset),
     initialPageParam: 0,
     getNextPageParam: (last, all) => {
       const loaded = all.reduce((n, p) => n + p.rows.length, 0);
@@ -284,7 +288,7 @@ function GlobalList({
   );
 }
 
-export function HistoryView() {
+export function HistoryView({ ruleset = 0 }: { ruleset?: number }) {
   const country = useCountryCode();
   const [src, setSrc] = useState<"country" | "global">("country");
   const [frFilter, setFrFilter] = useState<"" | "gained" | "lost">("");
@@ -300,7 +304,7 @@ export function HistoryView() {
       <div className="history-cols">
         <div className="panel history-panel">
           <h3>Clears</h3>
-          <ClearsList onCtx={onCtx} />
+          <ClearsList onCtx={onCtx} ruleset={ruleset} />
         </div>
         <div className="panel history-panel">
           <div className="hist-col-head">
@@ -331,9 +335,9 @@ export function HistoryView() {
             </div>
           </div>
           {src === "country" ? (
-            <CountryList filter={frFilter} onCtx={onCtx} />
+            <CountryList filter={frFilter} onCtx={onCtx} ruleset={ruleset} />
           ) : (
-            <GlobalList filter={frFilter} onCtx={onCtx} />
+            <GlobalList filter={frFilter} onCtx={onCtx} ruleset={ruleset} />
           )}
         </div>
       </div>

@@ -109,7 +109,7 @@ function buildFilters(
       .get(Number(q.metricMissing)) as { params: string } | undefined;
     if (row) {
       const p = JSON.parse(row.params) as MetricParams;
-      where.push(mapWhere(p.map));
+      where.push(mapWhere(p.map, { ruleset: p.ruleset ?? 0, pool: p.pool }));
       where.push(
         `${q.metricMatching === "1" ? "EXISTS" : "NOT EXISTS"} (SELECT 1 FROM scores s
            WHERE s.id = u.best_lazer_score_id AND ${scoreWhere(p.score)})`

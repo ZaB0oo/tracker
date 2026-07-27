@@ -278,6 +278,18 @@ export function getActiveRulesets(): number[] {
   return [...set].sort();
 }
 
+/**
+ * Rulesets whose sync has been EXPLICITLY started (per-mode "Start initial
+ * sync" button). Activation in Settings only unlocks the views: no catalog
+ * enumeration, backfill, polling or sweep runs for a mode before its start.
+ * std (0) is always started.
+ */
+export function getStartedRulesets(): number[] {
+  return getActiveRulesets().filter(
+    (r) => r === 0 || getState(`ruleset_started_${r}`) === "1"
+  );
+}
+
 export function getState(key: string): string | null {
   const row = getDb()
     .prepare("SELECT value FROM sync_state WHERE key = ?")

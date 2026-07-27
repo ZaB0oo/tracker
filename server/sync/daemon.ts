@@ -9,7 +9,7 @@
  *  - daily delta: timestamp persisted (catalog_delta_at)
  */
 import { config } from "../config.js";
-import { getActiveRulesets, getDb, getState, setState } from "../db/db.js";
+import { getActiveRulesets, getDb, getStartedRulesets, getState, setState } from "../db/db.js";
 import { rulesetDef } from "../logic/rulesets.js";
 import {
   getBeatmapsByIds,
@@ -156,6 +156,7 @@ export function getDaemonStatus(): DaemonStatus & {
   rulesets: {
     ruleset: number;
     name: string;
+    started: boolean;
     specificTotal: number;
     specificFetched: number;
     convertsTotal: number;
@@ -203,7 +204,7 @@ export function getDaemonStatus(): DaemonStatus & {
           `SELECT COUNT(*) c FROM beatmap_user u
            JOIN beatmaps b ON b.id = u.beatmap_id
            WHERE u.played = 1 AND b.status IN (1, 2, 4)
-             AND u.ruleset IN (${getActiveRulesets().join(",")})
+             AND u.ruleset IN (${getStartedRulesets().join(",")})
              AND (b.ruleset = u.ruleset OR b.ruleset = 0)
              AND ${cond}`
         )
@@ -255,6 +256,7 @@ export function getDaemonStatus(): DaemonStatus & {
       return {
         ruleset: r,
         name: rulesetDef(r).apiName,
+        started: getState(`ruleset_started_${r}`) === "1",
         specificTotal: cnt(r, false),
         specificFetched: cnt(r, true),
         convertsTotal: cnt(0, false),
@@ -340,7 +342,7 @@ const unimportableMapIds = new Set<number>();
 export async function pollRecentScores(): Promise<number> {
   // one pass per active ruleset — the recent endpoint is per mode
   let total = 0;
-  for (const mode of getActiveRulesets())
+  for (const mode of getStartedRulesets())
     total += await pollRecentScoresForMode(mode);
   return total;
 }
@@ -633,7 +635,7 @@ export function startPolling(): void {
         .prepare(
           `SELECT 1 FROM beatmap_user u JOIN beatmaps b ON b.id = u.beatmap_id
            WHERE u.played = 1 AND ${cond}
-             AND u.ruleset IN (${getActiveRulesets().join(",")})
+             AND u.ruleset IN (${getStartedRulesets().join(",")})
              AND (b.ruleset = u.ruleset OR b.ruleset = 0) LIMIT 1`
         )
         .get() != null;
@@ -688,7 +690,7 @@ export async function ensureCatalogComplete(force = false): Promise<number> {
   if (before === 0) return 0;
   // a freshly activated ruleset has an (almost) empty catalog: the std
   // completeness shortcut must not skip its first enumeration
-  const hasUnstartedMode = getActiveRulesets().some(
+  const hasUnstartedMode = getStartedRulesets().some(
     (m) =>
       m !== 0 &&
       (
@@ -801,7 +803,7 @@ export function startCatalogRefresh(): void {
         getDb()
           .prepare(
             `UPDATE beatmap_user SET country_checked_at = NULL
-             WHERE ruleset IN (${getActiveRulesets().join(",")}) AND country_first = 1
+             WHERE ruleset IN (${getStartedRulesets().join(",")}) AND country_first = 1
                AND country_checked_at < datetime('now', '-' || ? || ' hours')`
           )
           .run(getCountryRecheckHours());
@@ -814,7 +816,7 @@ export function startCatalogRefresh(): void {
         gdb
           .prepare(
             `UPDATE beatmap_user SET global_checked_at = NULL
-             WHERE ruleset IN (${getActiveRulesets().join(",")})
+             WHERE ruleset IN (${getStartedRulesets().join(",")})
                AND global_rank IS NOT NULL AND global_rank <= 100
                AND global_checked_at < datetime('now', '-' || ? || ' hours')`
           )
@@ -824,7 +826,7 @@ export function startCatalogRefresh(): void {
         // update — and the deferred-confirm timer does not survive a restart.
         gdb.exec(
           `UPDATE beatmap_user SET global_checked_at = NULL
-           WHERE ruleset IN (${getActiveRulesets().join(",")})
+           WHERE ruleset IN (${getStartedRulesets().join(",")})
              AND global_checked_at IS NOT NULL AND EXISTS (
              SELECT 1 FROM scores s
              WHERE s.beatmap_id = beatmap_user.beatmap_id
@@ -881,7 +883,7 @@ function scheduleCountryConfirm(beatmapId: number, ruleset = 0): void {
  */
 export async function confirmRecentCountryChecks(): Promise<void> {
   if (!isUserConnected()) return;
-  const modes = getActiveRulesets().join(",");
+  const modes = getStartedRulesets().join(",");
   const rows = getDb()
     .prepare(
       `SELECT u.beatmap_id AS id, u.ruleset AS r FROM beatmap_user u
@@ -992,7 +994,7 @@ export async function runCountrySweep(force = false): Promise<void> {
       `SELECT u.beatmap_id AS id, u.ruleset AS r FROM beatmap_user u
        JOIN beatmaps b ON b.id = u.beatmap_id
        WHERE u.played = 1 AND u.country_checked_at IS NULL
-         AND u.ruleset IN (${getActiveRulesets().join(",")})
+         AND u.ruleset IN (${getStartedRulesets().join(",")})
          AND (b.ruleset = u.ruleset OR b.ruleset = 0)
        ORDER BY u.country_first DESC, u.ruleset, u.beatmap_id
        LIMIT 200`
@@ -1164,7 +1166,7 @@ export async function runGlobalSweep(force = false): Promise<void> {
       `SELECT u.beatmap_id AS id, u.ruleset AS r FROM beatmap_user u
        JOIN beatmaps b ON b.id = u.beatmap_id
        WHERE u.played = 1 AND u.global_checked_at IS NULL
-         AND u.ruleset IN (${getActiveRulesets().join(",")})
+         AND u.ruleset IN (${getStartedRulesets().join(",")})
          AND (b.ruleset = u.ruleset OR b.ruleset = 0)
        ORDER BY (u.global_rank IS NOT NULL) DESC, u.global_rank, u.ruleset, u.beatmap_id
        LIMIT 200`
@@ -1364,13 +1366,13 @@ async function runBackfill(): Promise<void> {
     // the cheap high-value passes go before the huge convert grind. Each pass
     // is resumable independently (fetched_at NULL per (map, ruleset) row).
     const passes: { ruleset: number; mapMode: number; label: string }[] = [];
-    for (const r of getActiveRulesets())
+    for (const r of getStartedRulesets())
       passes.push({
         ruleset: r,
         mapMode: r,
         label: r === 0 ? "backfill" : `backfill ${rulesetDef(r).apiName}`,
       });
-    for (const r of getActiveRulesets())
+    for (const r of getStartedRulesets())
       if (r !== 0)
         passes.push({
           ruleset: r,

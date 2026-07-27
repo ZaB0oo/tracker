@@ -177,14 +177,24 @@ export interface SyncStatus {
     globalChecked: number;
     globalPending: number;
   };
+  /** active non-std rulesets: per-mode sync state and backfill progress */
+  rulesets: {
+    ruleset: number;
+    name: string;
+    started: boolean;
+    specificTotal: number;
+    specificFetched: number;
+    convertsTotal: number;
+    convertsFetched: number;
+  }[];
 }
 
 export interface Filters {
   mode: ScoreMode;
   /** viewed ruleset (0 osu, 1 taiko, 2 catch, 3 mania) — set by the header switcher */
   ruleset: number;
-  /** map pool for non-std rulesets: "" specific maps only, "all" + converts */
-  pool: "" | "all";
+  /** map pool for non-std rulesets: converts included by default */
+  pool: "all" | "specific";
   played: "" | "played" | "unplayed";
   q: string;
   grades: string[];
@@ -211,7 +221,7 @@ export interface Filters {
 export const DEFAULT_FILTERS: Filters = {
   mode: "classic",
   ruleset: 0,
-  pool: "",
+  pool: "all",
   played: "",
   q: "",
   grades: [],
