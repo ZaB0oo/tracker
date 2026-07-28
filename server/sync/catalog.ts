@@ -5,7 +5,7 @@
  * follow-up enrichment pass via `/beatmaps?ids[]=` (50/req) fills in
  * max_combo and up-to-date star ratings.
  */
-import { getDb, setState, getState, transaction } from "../db/db.js";
+import { catalogRulesets, getDb, getStartedRulesets, setState, getState, sqlIn, transaction } from "../db/db.js";
 import { config } from "../config.js";
 import {
   getBeatmapsByIds,
@@ -14,9 +14,36 @@ import {
   searchBeatmapsets,
 } from "../osu/api.js";
 import { RetryableError } from "../osu/rateLimiter.js";
+import { poolGrowth, poolWhere, shortModeName } from "../logic/rulesets.js";
 import type { ApiBeatmap, ApiBeatmapset } from "../osu/types.js";
 
 const KEEP_STATUSES = new Set([1, 2, 4]); // ranked, approved, loved
+
+// A set payload this big is probably truncated by the API's ~100-diff cap
+// (the cap counts ALL modes, so a mixed set truncates below its own total).
+const TRUNCATION_SUSPECT = 80;
+
+/**
+ * Pool size per STARTED ruleset, counted exactly like the UI totals
+ * (poolWhere => converts included, ranked/approved/loved only). Index-only
+ * COUNTs (idx_beatmaps_ruleset_status), so calling this inside a per-set loop
+ * costs nothing next to the API request it reports on. Feed the snapshot to
+ * poolGrowth() to report what really entered the pools.
+ */
+export function poolCounts(): Map<number, number> {
+  const db = getDb();
+  const counts = new Map<number, number>();
+  for (const m of getStartedRulesets()) {
+    const row = db
+      .prepare(
+        `SELECT COUNT(*) c FROM beatmaps b
+         WHERE ${poolWhere(m, undefined)} AND b.status IN (1, 2, 4)`
+      )
+      .get() as { c: number };
+    counts.set(m, row.c);
+  }
+  return counts;
+}
 
 // ---------- Common upserts ----------
 
@@ -64,31 +91,51 @@ export async function updateCatalogDelta(
   onProgress?: (msg: string) => void
 ): Promise<number[]> {
   const db = getDb();
-  const known = db.prepare("SELECT 1 FROM beatmapsets WHERE id = ?");
+  const knownDiff = db.prepare("SELECT 1 FROM beatmaps WHERE id = ?");
   const setStmt = upsertSetStmt();
   const mapStmt = upsertMapStmt();
   const newBeatmapIds: number[] = [];
+  const before = poolCounts();
 
-  for (const category of ["ranked", "loved"] as const) {
-    let cursor: string | null = null;
-    for (let page = 0; page < 100; page++) {
-      const res = await searchBeatmapsets(category, cursor, "low", "ranked_desc");
-      let newInPage = 0;
-      transaction(() => {
-        for (const set of res.beatmapsets) {
-          const isNew = !known.get(set.id);
-          if (isNew) newInPage++;
-          setStmt.run(apiSetToRow(set));
-          for (const bm of set.beatmaps ?? []) {
-            if (bm.mode_int !== 0 || !KEEP_STATUSES.has(bm.ranked)) continue;
-            mapStmt.run(apiMapToRow(bm));
-            if (isNew) newBeatmapIds.push(bm.id);
+  // one delta walk per CATALOG ruleset — std included when it only feeds the
+  // converts of another mode, otherwise newly ranked converts never arrive
+  for (const mode of catalogRulesets()) {
+    for (const category of ["ranked", "loved"] as const) {
+      let cursor: string | null = null;
+      for (let page = 0; page < 100; page++) {
+        const res = await searchBeatmapsets(
+          category,
+          cursor,
+          "low",
+          "ranked_desc",
+          undefined,
+          mode
+        );
+        // "already-known territory" is measured on THIS mode's DIFFS, never on
+        // the sets: the walks run one mode after another, so the first walk
+        // already stored every new hybrid set — a set-level test made every
+        // later mode stop on its first page and skip its own new diffs.
+        let newInPage = 0;
+        transaction(() => {
+          for (const set of res.beatmapsets) {
+            setStmt.run(apiSetToRow(set));
+            for (const bm of set.beatmaps ?? []) {
+              if (bm.mode_int !== mode || !KEEP_STATUSES.has(bm.ranked)) continue;
+              const isNewDiff = !knownDiff.get(bm.id);
+              mapStmt.run(apiMapToRow(bm));
+              if (isNewDiff) {
+                newBeatmapIds.push(bm.id);
+                newInPage++;
+              }
+            }
           }
-        }
-      });
-      cursor = res.cursor_string;
-      onProgress?.(`delta ${category}: +${newBeatmapIds.length} diffs...`);
-      if (newInPage === 0 || !cursor || res.beatmapsets.length === 0) break;
+        });
+        cursor = res.cursor_string;
+        onProgress?.(
+          `new ${shortModeName(mode)} ${category} maps: ${poolGrowth(before, poolCounts()).label}`
+        );
+        if (newInPage === 0 || !cursor || res.beatmapsets.length === 0) break;
+      }
     }
   }
   setState("catalog_delta_at", new Date().toISOString());
@@ -130,7 +177,16 @@ function modeIntOf(bm: ApiBeatmap & { mode?: string }): number {
   return { osu: 0, taiko: 1, fruits: 2, mania: 3 }[bm.mode ?? ""] ?? -1;
 }
 
-/** Upsert a full set; returns the ids of the new std diffs. */
+/**
+ * Upsert a full set; returns the ids of the newly stored diffs.
+ * Stores the ranked/approved/loved diffs of EVERY ruleset, not just the active
+ * ones: nothing ever revisits a set that already has a row, so a diff dropped
+ * because its mode was inactive at lookup time stayed missing forever (that is
+ * how ~100 catch/mania diffs went absent while their sets looked imported).
+ * A std diff also IS a convert for the other modes, so dropping it while std is
+ * deactivated would hollow out their pools. Rows of non-started modes cost a
+ * few bytes and no API call — every reader filters by ruleset anyway.
+ */
 function upsertFullSet(set: ApiBeatmapset): number[] {
   const db = getDb();
   const setStmt = upsertSetStmt();
@@ -140,7 +196,7 @@ function upsertFullSet(set: ApiBeatmapset): number[] {
   transaction(() => {
     setStmt.run(apiSetToRow(set));
     for (const bm of set.beatmaps ?? []) {
-      if (modeIntOf(bm) !== 0 || !KEEP_STATUSES.has(bm.ranked)) continue;
+      if (modeIntOf(bm) < 0 || !KEEP_STATUSES.has(bm.ranked)) continue;
       const isNew = !knownDiff.get(bm.id);
       mapStmt.run(apiMapToRow(bm));
       if (bm.max_combo != null)
@@ -154,10 +210,13 @@ function upsertFullSet(set: ApiBeatmapset): number[] {
   return newIds;
 }
 
-/** Number of ranked/approved/loved std diffs in a set payload. */
-export function stdDiffCount(set: ApiBeatmapset | null): number {
+/**
+ * Number of diffs a channel returned that we would store (ranked/approved/loved,
+ * any ruleset) — i.e. "did this channel see anything usable for this set?".
+ */
+export function keptDiffCount(set: ApiBeatmapset | null): number {
   return (set?.beatmaps ?? []).filter(
-    (b) => modeIntOf(b) === 0 && KEEP_STATUSES.has(b.ranked)
+    (b) => modeIntOf(b) >= 0 && KEEP_STATUSES.has(b.ranked)
   ).length;
 }
 
@@ -171,9 +230,19 @@ export async function importOneSet(
 ): Promise<{ source: "api" | "web" | null; newIds: number[] }> {
   let set = await getBeatmapsetById(setId);
   let source: "api" | "web" | null = set ? "api" : null;
-  if (!set || stdDiffCount(set) === 0) {
+  // The ~100-diff payload cap also hits the LOOKUP: a mega-collab comes back
+  // truncated and its cut-off diffs then look like they do not exist at all
+  // (they came back "missing" on every dump run). Cross-check the web page
+  // whenever the payload is that big — same threshold as repairOversizedSets.
+  const maybeTruncated = (set?.beatmaps?.length ?? 0) >= TRUNCATION_SUSPECT;
+  if (!set || maybeTruncated || keptDiffCount(set) === 0) {
     const webSet = await fetchBeatmapsetFromWeb(setId);
-    if (webSet && stdDiffCount(webSet) > 0) {
+    // keep the web version only when it sees at least as much as the API did
+    if (
+      webSet &&
+      keptDiffCount(webSet) > 0 &&
+      (webSet.beatmaps?.length ?? 0) >= (set?.beatmaps?.length ?? 0)
+    ) {
       set = webSet;
       source = "web";
     }
@@ -195,15 +264,18 @@ export async function repairOversizedSets(
   onProgress?: (msg: string) => void
 ): Promise<number[]> {
   const db = getDb();
+  // the ~100-diff API cap applies to the WHOLE set payload (all modes): a
+  // mixed 60 std + 50 catch set truncates too — suspect anything close
   const suspects = db
     .prepare(
       `SELECT beatmapset_id AS id, COUNT(*) n FROM beatmaps
-       WHERE ruleset = 0 GROUP BY beatmapset_id HAVING n >= 100`
+       GROUP BY beatmapset_id HAVING n >= ${TRUNCATION_SUSPECT}`
     )
     .all() as { id: number; n: number }[];
   if (suspects.length === 0) return [];
   onProgress?.(`Mega-collabs: ${suspects.length} set(s) to check via the web page...`);
 
+  const before = poolCounts();
   const newIds: number[] = [];
   for (const s of suspects) {
     try {
@@ -211,13 +283,52 @@ export async function repairOversizedSets(
       if (!set) continue;
       newIds.push(...upsertFullSet(set));
       onProgress?.(
-        `Mega-collabs: set ${s.id} → ${set.beatmaps?.length ?? 0} diffs (${newIds.length} new in total)`
+        `Mega-collabs: set ${s.id} → ${set.beatmaps?.length ?? 0} diffs (${poolGrowth(before, poolCounts()).label} so far)`
       );
     } catch (e) {
       console.error(`[big-sets] set ${s.id}:`, e instanceof Error ? e.message : e);
     }
   }
   return newIds;
+}
+
+// ---------- Delisted-sets re-check (part of the catalog repair) ----------
+// Hybrid sets whose non-std diffs were dropped while only std was active, or
+// whose diff list changed since: re-lookup every locally-known DMCA set
+// (download_disabled only: the search enumeration cannot see them, so the
+// normal delta/full-scan never fixes them). The truly-unknown delisted sets
+// are covered by the data-dump verification (dump.ts).
+export async function recheckDelistedSets(
+  onProgress?: (msg: string) => void
+): Promise<number> {
+  const db = getDb();
+  const modes = getStartedRulesets();
+  const suspects = db
+    .prepare("SELECT id FROM beatmapsets WHERE download_disabled = 1 ORDER BY id")
+    .all() as { id: number }[];
+  const seedStmt = db.prepare(
+    `INSERT OR IGNORE INTO beatmap_user (beatmap_id, ruleset)
+     SELECT id, ? FROM beatmaps
+     WHERE beatmapset_id = ? AND (ruleset = ? OR ruleset = 0)`
+  );
+  const before = poolCounts();
+  let done = 0;
+  for (const s of suspects) {
+    try {
+      const r = await importOneSet(s.id);
+      if (r.newIds.length) for (const m of modes) seedStmt.run(m, s.id, m);
+    } catch (e) {
+      console.error(`[repair] set ${s.id}:`, e instanceof Error ? e.message : e);
+    }
+    done++;
+    if (done % 50 === 0)
+      onProgress?.(
+        `delisted re-check: ${done}/${suspects.length} sets (${poolGrowth(before, poolCounts()).label})`
+      );
+  }
+  const g = poolGrowth(before, poolCounts());
+  onProgress?.(`delisted re-check done: ${done} sets (${g.label})`);
+  return g.total;
 }
 
 // ---------- Targeted year verification (fast, no dump) ----------
@@ -321,9 +432,15 @@ export async function verifyYear(
 
 // ---------- Source 2: API /beatmapsets/search ----------
 
+// Mode currently being enumerated (sync-bar busy label); null outside runs.
+let enumMode: number | null = null;
+export function currentEnumMode(): number | null {
+  return enumMode;
+}
+
 export async function importCatalogFromApi(
   onProgress?: (msg: string) => void,
-  opts?: { reset?: boolean }
+  opts?: { reset?: boolean; modes?: number[] }
 ): Promise<{ sets: number; maps: number }> {
   const setStmt = upsertSetStmt();
   const mapStmt = upsertMapStmt();
@@ -337,8 +454,12 @@ export async function importCatalogFromApi(
   const enumerateSlice = async (
     category: "ranked" | "loved",
     key: string,
-    query: string | null
+    query: string | null,
+    mode: number,
+    /** what the user sees for this slice: "all years" or "2015" */
+    slice: string
   ): Promise<number> => {
+    enumMode = mode;
     if (opts?.reset) setState(key, "");
     let cursor: string | null = opts?.reset ? null : getState(key);
     if (cursor === "") cursor = null;
@@ -350,7 +471,8 @@ export async function importCatalogFromApi(
         cursor,
         "low",
         "ranked_asc",
-        query ?? undefined
+        query ?? undefined,
+        mode
       );
       if (announced < 0) announced = page.total;
       transaction(() => {
@@ -358,7 +480,7 @@ export async function importCatalogFromApi(
           setStmt.run(apiSetToRow(set));
           counts.sets++;
           for (const bm of set.beatmaps ?? []) {
-            if (bm.mode_int !== 0 || !KEEP_STATUSES.has(bm.ranked)) continue;
+            if (bm.mode_int !== mode || !KEEP_STATUSES.has(bm.ranked)) continue;
             mapStmt.run(apiMapToRow(bm));
             counts.maps++;
           }
@@ -366,7 +488,9 @@ export async function importCatalogFromApi(
       });
       cursor = page.cursor_string;
       setState(key, cursor ?? "DONE");
-      onProgress?.(`${category} [${query ?? "base"}]: ${counts.sets} sets imported...`);
+      onProgress?.(
+        `${shortModeName(mode)} ${category}, ${slice}: ${counts.sets} sets read`
+      );
       if (!cursor || page.beatmapsets.length === 0) break;
     }
     return announced;
@@ -380,23 +504,80 @@ export async function importCatalogFromApi(
   //  2) slices by rank year (`ranked>=Y ranked<Y+1`).
   const START_YEAR = 2007;
   const endYear = new Date().getUTCFullYear();
+  const SEARCH_CAP = 10_000;
 
-  for (const category of ["ranked", "loved"] as const) {
-    await enumerateSlice(category, `catalog_api_cursor_${category}_base`, null);
-
-    for (let year = START_YEAR; year <= endYear; year++) {
-      const yearKey = `catalog_api_cursor_${category}_${year}`;
-      await enumerateSlice(
+  // one full enumeration per CATALOG ruleset; mode 0 keeps the historical
+  // cursor keys (existing installs must not re-enumerate their std catalog).
+  // Order: the modes the user actually plays first, emptiest first (a freshly
+  // started mode must not wait behind a base-slice re-scan before its first
+  // maps appear), then a std catalog kept only as a convert source, last.
+  const db2 = getDb();
+  const modeCount = (m: number) =>
+    (
+      db2.prepare("SELECT COUNT(*) c FROM beatmaps WHERE ruleset = ?").get(m) as {
+        c: number;
+      }
+    ).c;
+  const started = new Set(getStartedRulesets());
+  const wanted = opts?.modes?.length
+    ? catalogRulesets().filter((m) => opts.modes!.includes(m))
+    : catalogRulesets();
+  const orderedModes = [...wanted].sort(
+    (a, b) =>
+      Number(started.has(b)) - Number(started.has(a)) || modeCount(a) - modeCount(b)
+  );
+  for (const mode of orderedModes) {
+    const suffix = mode === 0 ? "" : `_m${mode}`;
+    for (const category of ["ranked", "loved"] as const) {
+      const setsBefore = counts.sets;
+      const baseTotal = await enumerateSlice(
         category,
-        yearKey,
-        `ranked>=${year}-01-01 ranked<${year + 1}-01-01`
+        `catalog_api_cursor_${category}${suffix}_base`,
+        null,
+        mode,
+        "all years"
       );
-      // the current year (and the base pass) are re-scanned on the next pass
-      if (year === endYear) setState(yearKey, "");
+      const walked = counts.sets - setsBefore;
+
+      // The base pass has NO date filter: when it stays under the search cap it
+      // just enumerated the WHOLE category, and the yearly slices below would
+      // re-walk the very same sets (taiko/catch/mania all sit far under the cap
+      // — ~300 duplicate requests per mode per pass). Only std needs slicing.
+      // Any doubt keeps the slices: -1 = base finished on an earlier run (total
+      // unknown), and the walked count is checked too so a surprising `total`
+      // can never skip them.
+      const needsSlices =
+        baseTotal < 0 || baseTotal >= SEARCH_CAP || walked >= SEARCH_CAP;
+      // Probe, and the answer to "are the slices needed for std at all?": the
+      // announced total is itself clamped to the cap (Search::total() returns
+      // min(hits, maxResults)), so only the WALKED count can tell whether a
+      // cursor escapes the 10k window. walked > cap here = it does, and the
+      // base pass alone would be exhaustive.
+      if (needsSlices)
+        onProgress?.(
+          `${shortModeName(mode)} ${category}: ${walked} sets in one pass ` +
+            `(search caps at ${SEARCH_CAP}), reading year by year`
+        );
+      for (let year = START_YEAR; needsSlices && year <= endYear; year++) {
+        const yearKey = `catalog_api_cursor_${category}${suffix}_${year}`;
+        await enumerateSlice(
+          category,
+          yearKey,
+          `ranked>=${year}-01-01 ranked<${year + 1}-01-01`,
+          mode,
+          String(year)
+        );
+        // the current year (and the base pass) are re-scanned on the next pass
+        if (year === endYear) setState(yearKey, "");
+      }
+      setState(`catalog_api_cursor_${category}${suffix}_base`, "");
     }
-    setState(`catalog_api_cursor_${category}_base`, "");
+    // both categories (ranked AND loved) fully enumerated for this mode:
+    // the self-heal resume keys off this flag
+    if (mode !== 0) setState(`catalog_done_m${mode}`, "1");
   }
   setState("catalog_imported_at", new Date().toISOString());
+  enumMode = null;
   return counts;
 }
 
@@ -443,7 +624,30 @@ function apiMapToRow(b: ApiBeatmap) {
 
 // ---------- max_combo enrichment (50 maps / request) ----------
 
+/**
+ * Every import path ends with an enrichment, and they overlap (a repair while
+ * the periodic tick enriches, a dump verify while a delta finishes…). Without
+ * this guard each pass pulled the SAME `LIMIT 50` rows and re-fetched them:
+ * three concurrent passes = three times the API budget for one job. Skipping is
+ * safe — the running pass re-queries every iteration, so it picks up whatever
+ * the caller just imported.
+ */
+let enrichRunning = false;
+
 export async function enrichMaxCombo(
+  onProgress?: (done: number, total: number) => void,
+  shouldStop?: () => boolean
+): Promise<number> {
+  if (enrichRunning) return 0;
+  enrichRunning = true;
+  try {
+    return await enrichMaxComboInner(onProgress, shouldStop);
+  } finally {
+    enrichRunning = false;
+  }
+}
+
+async function enrichMaxComboInner(
   onProgress?: (done: number, total: number) => void,
   shouldStop?: () => boolean
 ): Promise<number> {
@@ -456,10 +660,12 @@ export async function enrichMaxCombo(
        checksum = COALESCE(@checksum, checksum)
      WHERE id = @id`
   );
+  // catalog modes: a convert's own std row still needs its max_combo/checksum
+  const modesIn = sqlIn(catalogRulesets());
   const total = (
     db
       .prepare(
-        "SELECT COUNT(*) AS c FROM beatmaps WHERE ruleset = 0 AND (max_combo IS NULL OR checksum IS NULL)"
+        `SELECT COUNT(*) AS c FROM beatmaps WHERE ruleset IN (${modesIn}) AND (max_combo IS NULL OR checksum IS NULL)`
       )
       .get() as { c: number }
   ).c;
@@ -469,7 +675,7 @@ export async function enrichMaxCombo(
     const ids = (
       db
         .prepare(
-          "SELECT id FROM beatmaps WHERE ruleset = 0 AND (max_combo IS NULL OR checksum IS NULL) LIMIT 50"
+          `SELECT id FROM beatmaps WHERE ruleset IN (${modesIn}) AND (max_combo IS NULL OR checksum IS NULL) LIMIT 50`
         )
         .all() as { id: number }[]
     ).map((r) => r.id);
@@ -495,7 +701,9 @@ export async function enrichMaxCombo(
           update.run({ id, max_combo: 0, sr: null, cc: null, cs: null, csp: null });
     });
     done += ids.length;
-    onProgress?.(done, total);
+    // rows imported after `total` was measured can push done past it: report the
+    // larger of the two rather than "40000/37057"
+    onProgress?.(done, Math.max(total, done));
   }
   return done;
 }

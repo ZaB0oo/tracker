@@ -45,9 +45,13 @@ export class RateLimiter {
     return this._minIntervalMs;
   }
 
-  /** Change the rate on the fly (UI setting). Capped at 60 req/min max. */
-  setRpm(rpm: number): void {
-    const clamped = Math.min(Math.max(rpm, 1), 60);
+  /**
+   * Change the rate on the fly (UI setting). Capped at `maxRpm`, 60 by default:
+   * anything above the documented osu! limit requires the caller to pass the
+   * ceiling it is allowed to use (see maxAllowedRpm in osu/api.ts).
+   */
+  setRpm(rpm: number, maxRpm = 60): void {
+    const clamped = Math.min(Math.max(rpm, 1), Math.max(maxRpm, 1));
     this._minIntervalMs = Math.ceil(60_000 / clamped);
   }
 

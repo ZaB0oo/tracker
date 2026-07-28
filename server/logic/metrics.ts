@@ -4,6 +4,8 @@
  * SQLite JSON functions for mods and hit counts), so everything stays fast.
  */
 
+import { poolWhere, type PoolMode } from "./rulesets.js";
+
 export interface Range {
   min: number | null;
   max: number | null;
@@ -31,6 +33,9 @@ export interface MetricScoreConds {
     nSliderEnd: Range;
     imperfections: Range; // n100 + missed slider ends
   };
+  /** generic per-statistic bounds (non-std rulesets: taiko/catch/mania hit
+   * results, keyed by the osu-web statistics name, e.g. "large_tick_hit") */
+  hits?: Record<string, Range>;
 }
 
 export interface MetricMapConds {
@@ -58,6 +63,10 @@ export type MetricBreakdown =
 
 export interface MetricParams {
   kind: "count" | "ranked_score" | "pp";
+  /** ruleset the metric lives in (default 0 = osu!std) */
+  ruleset?: number;
+  /** map pool for non-std rulesets (converts included by default) */
+  pool?: PoolMode;
   score: MetricScoreConds;
   map: MetricMapConds;
   /** dimension of the per-bucket completion shown on the card (default sr) */
@@ -76,7 +85,7 @@ const GRADE_IN: Record<string, string> = {
   S: "'S','SH','X','XH'",
 };
 const GRADES_ALL = ["XH", "X", "SH", "S", "A", "B", "C", "D"];
-const MOD_RE = /^[A-Z0-9]{2}$/;
+const MOD_RE = /^[A-Z0-9]{2,3}$/;
 const num = (v: unknown): number | null =>
   typeof v === "number" && Number.isFinite(v) ? v : null;
 
@@ -140,6 +149,15 @@ export function scoreWhere(c: MetricScoreConds): string {
     if (or.length) w.push(`(${or.join(" OR ")})`);
   }
   const co = c.counts ?? ({} as MetricScoreConds["counts"]);
+  if (c.hits)
+    for (const [key, r] of Object.entries(c.hits)) {
+      if (!/^[a-z_]{2,32}$/.test(key)) continue;
+      range(
+        `COALESCE(CAST(json_extract(s.statistics,'$.${key}') AS INTEGER),0)`,
+        r,
+        w
+      );
+    }
   range(N100, co.n100, w);
   range(N50, co.n50, w);
   range(NMISS, co.nMiss, w);
@@ -156,9 +174,11 @@ export function scoreWhere(c: MetricScoreConds): string {
  */
 export function mapWhere(
   c: MetricMapConds,
-  opts: { ignoreCountry1?: boolean } = {}
+  opts: { ignoreCountry1?: boolean; ruleset?: number; pool?: PoolMode } = {}
 ): string {
-  const w: string[] = ["b.ruleset = 0"];
+  const R = opts.ruleset ?? 0;
+  // same three-way pool rule as the views (see poolWhere)
+  const w: string[] = [poolWhere(R, opts.pool)];
   const sts = (c.statuses ?? []).filter((n) => [1, 2, 4].includes(n));
   w.push(`b.status IN (${(sts.length ? sts : [1, 2, 4]).join(",")})`);
   const r = (expr: string, lo: unknown, hi: unknown) => {

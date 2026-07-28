@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchMetrics } from "../api";
+import type { PoolMode } from "../types";
+import { KeysChips } from "./KeysChips";
+import { PoolSeg } from "./PoolSeg";
 
 // Per-section items: hidden entries are encoded as "section.item" in ?hide=
 // (a bare "section" hides the whole row).
@@ -48,7 +51,20 @@ function Section({
  * encoded in the URL (?hide=…&metrics=…) because OBS browser sources don't
  * share localStorage with the app.
  */
-export function OverlayConfig({ onClose }: { onClose: () => void }) {
+export function OverlayConfig({
+  onClose,
+  ruleset = 0,
+  pool: initialPool = "all",
+  keys: initialKeys = [],
+}: {
+  onClose: () => void;
+  ruleset?: number;
+  /** defaults taken from the app's current view, editable here */
+  pool?: PoolMode;
+  keys?: string[];
+}) {
+  const [pool, setPool] = useState<PoolMode>(initialPool);
+  const [keys, setKeys] = useState<string[]>(initialKeys);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [metricIds, setMetricIds] = useState<Set<number>>(new Set());
   const [copied, setCopied] = useState(false);
@@ -57,11 +73,20 @@ export function OverlayConfig({ onClose }: { onClose: () => void }) {
     queryFn: () => fetchMetrics("month"),
   });
 
+  // a metric belongs to ONE ruleset: offering osu! metrics on a mania overlay
+  // would put unrelated counters on stream
+  const modeMetrics = (metricsData?.metrics ?? []).filter(
+    (m) => (m.params.ruleset ?? 0) === ruleset
+  );
   const hideParam = [...hidden].join(",");
   const metricsParam = [...metricIds].join(",");
   // Same origin as the app (works both in dev on :5173 and in prod on :3727).
   const url =
     `${window.location.origin}/?overlay=1` +
+    (ruleset ? `&ruleset=${ruleset}` : "") +
+    // only when they narrow something: keeps the URL readable
+    (ruleset && pool !== "all" ? `&pool=${pool}` : "") +
+    (ruleset === 3 && keys.length ? `&keys=${keys.join(",")}` : "") +
     (hideParam ? `&hide=${hideParam}` : "") +
     (metricsParam ? `&metrics=${metricsParam}` : "");
 
@@ -117,6 +142,12 @@ export function OverlayConfig({ onClose }: { onClose: () => void }) {
           URL (transparent background).
         </p>
 
+        {ruleset !== 0 && (
+          <div className="ov-pool">
+            <PoolSeg value={pool} onChange={setPool} />
+            {ruleset === 3 && <KeysChips value={keys} onChange={setKeys} />}
+          </div>
+        )}
         <div className="ov-items">
           {STAT_ITEMS.map((it) => (
             <label key={it.id} className="mb-check">
@@ -133,10 +164,10 @@ export function OverlayConfig({ onClose }: { onClose: () => void }) {
           {itemList("grades", GRADE_ITEMS)}
         </Section>
 
-        {(metricsData?.metrics.length ?? 0) > 0 && (
+        {modeMetrics.length > 0 && (
           <Section title="Custom metrics">
             <div className="ov-items">
-              {metricsData!.metrics.map((m) => (
+              {modeMetrics.map((m) => (
                 <label key={m.id} className="mb-check">
                   <input
                     type="checkbox"

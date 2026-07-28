@@ -1,4 +1,5 @@
 import type { SoloScore } from "../osu/types.js";
+import { RULESET_OSU } from "./rulesets.js";
 
 /**
  * FC state exposed to the UI:
@@ -10,7 +11,12 @@ import type { SoloScore } from "../osu/types.js";
  * Sources, in decreasing reliability:
  *  - stable/legacy score : `legacy_perfect` (stable's "Perfect" flag)
  *  - lazer score         : `is_perfect_combo`
- *  - fallback            : statistics (miss / large_tick_miss) + map max_combo
+ *  - fallback            : statistics + map max_combo
+ *
+ * Combo semantics are UNIVERSAL across rulesets (ppy/osu HitResult.cs): the
+ * combo breaks on `miss`, `large_tick_miss` and `combo_break`, and never on
+ * `small_tick_miss` (catch tiny droplets, std small slider ticks). Only the
+ * std-stable slider-end refinement is ruleset-specific.
  */
 export const FC_PERFECT = 0;
 export const FC_NO_MISS = 1;
@@ -21,7 +27,8 @@ export function computeFcState(
     SoloScore,
     "is_perfect_combo" | "legacy_perfect" | "statistics" | "max_combo"
   > & { legacy_score_id?: number | null },
-  beatmapMaxCombo: number | null
+  beatmapMaxCombo: number | null,
+  ruleset: number = RULESET_OSU
 ): number {
   const stats = score.statistics ?? {};
   const misses = stats.miss ?? 0;
@@ -36,23 +43,26 @@ export function computeFcState(
 
   if (misses > 0) return FC_NONE;
 
-  // No miss. large_tick_miss (missed tick/repeat in lazer) breaks the combo.
-  const largeTickMiss = stats.large_tick_miss ?? 0;
-  if (largeTickMiss > 0) return FC_NONE;
+  // No miss. large_tick_miss breaks the combo in every ruleset (std slider
+  // ticks/repeats, catch droplets); combo_break is its own explicit result.
+  if ((stats.large_tick_miss ?? 0) > 0) return FC_NONE;
+  if ((stats.combo_break ?? 0) > 0) return FC_NONE;
 
-  if (isLegacy) {
-    // Stable rule: dropping a sliderend gives a 100 and removes exactly
+  if (isLegacy && ruleset === RULESET_OSU) {
+    // Stable std rule: dropping a sliderend gives a 100 and removes exactly
     // 1 combo. So no-miss is an FC iff the missing combo is fully explained
     // by sliderends, i.e. missing_combo <= number of 100s.
     // Beyond that, there was necessarily a slider break => non-FC.
+    // (taiko/catch/mania stable have no equivalent: their combo-breaking
+    // results are all folded into `miss`/`large_tick_miss` above.)
     if (beatmapMaxCombo == null) return FC_NO_MISS; // no reference
     const missingCombo = beatmapMaxCombo - score.max_combo;
     const count100 = stats.ok ?? 0;
     return missingCombo <= count100 ? FC_NO_MISS : FC_NONE;
   }
 
-  // Native lazer no-miss score without large_tick_miss: dropped sliderends
-  // don't break the combo there => FC.
+  // No combo-breaking result recorded => FC (dropped slider ends / tiny
+  // droplets don't break the combo).
   return FC_NO_MISS;
 }
 

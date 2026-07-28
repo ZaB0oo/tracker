@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { getDb } from "../db/db.js";
+import { parseRulesetParam } from "../logic/rulesets.js";
 
 export const historyRouter = Router();
 
@@ -27,6 +28,7 @@ const CLEARS_SELECT = `SELECT s.id, s.ended_at, s.rank, s.accuracy, s.total_scor
 historyRouter.get("/clears", (req, res) => {
   const db = getDb();
   const q = req.query as Record<string, string | undefined>;
+  const R = parseRulesetParam(q.ruleset);
   const { limit, offset } = paging(q);
   // Optional day filter (heatmap day card): one row per map, the day's best
   // (classic) play on it, oldest first.
@@ -36,9 +38,11 @@ historyRouter.get("/clears", (req, res) => {
     const rows = db
       .prepare(
         `${CLEARS_SELECT}
-         WHERE b.status IN (1, 2, 4) AND date(s.ended_at) = @day AND s.id = (
+         WHERE b.status IN (1, 2, 4) AND s.ruleset = ${R}
+           AND date(s.ended_at) = @day AND s.id = (
            SELECT s2.id FROM scores s2
-           WHERE s2.beatmap_id = s.beatmap_id AND date(s2.ended_at) = @day
+           WHERE s2.beatmap_id = s.beatmap_id AND s2.ruleset = ${R}
+             AND date(s2.ended_at) = @day
            ORDER BY COALESCE(s2.classic_total_score, s2.total_score) DESC
            LIMIT 1)
          ORDER BY s.ended_at
@@ -50,7 +54,7 @@ historyRouter.get("/clears", (req, res) => {
         .prepare(
           `SELECT COUNT(DISTINCT s.beatmap_id) c FROM scores s
            JOIN beatmaps b ON b.id = s.beatmap_id
-           WHERE b.status IN (1, 2, 4) AND date(s.ended_at) = ?`
+           WHERE b.status IN (1, 2, 4) AND s.ruleset = ${R} AND date(s.ended_at) = ?`
         )
         .get(day) as { c: number }
     ).c;
@@ -60,7 +64,7 @@ historyRouter.get("/clears", (req, res) => {
   const rows = db
     .prepare(
       `${CLEARS_SELECT}
-       WHERE b.status IN (1, 2, 4)
+       WHERE b.status IN (1, 2, 4) AND s.ruleset = ${R}
        ORDER BY s.ended_at DESC, s.id DESC
        LIMIT ? OFFSET ?`
     )
@@ -70,7 +74,7 @@ historyRouter.get("/clears", (req, res) => {
       .prepare(
         `SELECT COUNT(*) c FROM scores s
          JOIN beatmaps b ON b.id = s.beatmap_id
-         WHERE b.status IN (1, 2, 4)`
+         WHERE b.status IN (1, 2, 4) AND s.ruleset = ${R}`
       )
       .get() as { c: number }
   ).c;
@@ -84,8 +88,9 @@ historyRouter.get("/clears", (req, res) => {
 historyRouter.get("/country-history", (req, res) => {
   const db = getDb();
   const q = req.query as Record<string, string | undefined>;
+  const R = parseRulesetParam(q.ruleset);
   const ev = q.event === "gained" || q.event === "lost" ? q.event : null;
-  const where = ev ? "WHERE e.event = ?" : "";
+  const where = `WHERE e.ruleset = ${R}` + (ev ? " AND e.event = ?" : "");
   const evParams = ev ? [ev] : [];
   const { limit, offset } = paging(q);
 
@@ -117,13 +122,11 @@ historyRouter.get("/country-history", (req, res) => {
 historyRouter.get("/global-history", (req, res) => {
   const db = getDb();
   const q = req.query as Record<string, string | undefined>;
+  const R = parseRulesetParam(q.ruleset);
   const GAINED = "(e.new_rank IS NOT NULL AND (e.old_rank IS NULL OR e.new_rank < e.old_rank))";
   const where =
-    q.event === "gained"
-      ? `WHERE ${GAINED}`
-      : q.event === "lost"
-        ? `WHERE NOT ${GAINED}`
-        : "";
+    `WHERE e.ruleset = ${R}` +
+    (q.event === "gained" ? ` AND ${GAINED}` : q.event === "lost" ? ` AND NOT ${GAINED}` : "");
   const { limit, offset } = paging(q);
 
   const rows = db

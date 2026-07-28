@@ -2,7 +2,7 @@
  * Shared SQL expression builders (required aliases: b = beatmaps, s = best
  * score, u = beatmap_user) + the auto-calibrated skill curve.
  */
-import { getDb } from "../db/db.js";
+import { getDb, getStartedRulesets } from "../db/db.js";
 
 // ---------- Shared SQL expressions (required aliases: b = beatmaps, s = best) ----------
 
@@ -15,6 +15,39 @@ const CLASSIC_MAX = `CASE WHEN ${N_OBJ} > 0 THEN CAST(ROUND(32.57 * ${N_OBJ} * $
 /** standardised -> classic conversion (proportional to the map's max). */
 function classicFromStd(stdExpr: string): string {
   return `CAST(ROUND(${CLASSIC_MAX} * (${stdExpr}) / ${FULL_BASE}.0) AS INTEGER)`;
+}
+
+// n for taiko/catch = the map's BASIC judgement count (what lazer feeds into
+// convertStandardisedToClassic): NOT circles+sliders+spinners — in catch every
+// juice-stream fruit counts, so that would underestimate marathons ~2x
+// (squared in the formula). Exact when a best score exists (sum of the basic
+// keys of maximum_statistics), else max_combo: exact for taiko (combo = hits),
+// slight overestimate for catch (combo = fruits + large droplets, ~+10%).
+const N_BASIC = `NULLIF(
+  COALESCE(json_extract(s.maximum_statistics,'$.perfect'),0)
+  + COALESCE(json_extract(s.maximum_statistics,'$.great'),0)
+  + COALESCE(json_extract(s.maximum_statistics,'$.good'),0)
+  + COALESCE(json_extract(s.maximum_statistics,'$.ok'),0)
+  + COALESCE(json_extract(s.maximum_statistics,'$.meh'),0)
+  + COALESCE(json_extract(s.maximum_statistics,'$.miss'),0), 0)`;
+/** Basic-judgement count as seen from a non-std ruleset (needs s + ca + b). */
+const N_MODE = `COALESCE(${N_BASIC}, ca.max_combo, b.max_combo, ${N_OBJ})`;
+
+/**
+ * Per-ruleset classic conversion (ppy/osu ScoreInfoExtensions formulas).
+ * mania: classic IS the standardised score.
+ */
+function classicFromStdRuleset(ruleset: number, stdExpr: string): string {
+  switch (ruleset) {
+    case 1:
+      return `CAST(ROUND((1109.0 * ${N_MODE} + 100000) * (${stdExpr}) / ${FULL_BASE}.0) AS INTEGER)`;
+    case 2:
+      return `CAST(ROUND(pow((${stdExpr}) / ${FULL_BASE}.0 * ${N_MODE}, 2) * 21.62 + (${stdExpr}) / 10.0) AS INTEGER)`;
+    case 3:
+      return `CAST(ROUND(${stdExpr}) AS INTEGER)`;
+    default:
+      return classicFromStd(stdExpr);
+  }
 }
 
 // Witherscore (proposal ppy/osu#38224):
@@ -30,14 +63,16 @@ export function witherSql(stdExpr: string, nExpr: string = N_OBJ): string {
  * Realistic missing of a map: skill-curve prediction minus the current best,
  * in the requested metric (0 = nothing to grab given MY level).
  */
-export function missingExprs(mode: "classic" | "lazer"): {
+export function missingExprs(
+  mode: "classic" | "lazer",
+  ruleset = 0
+): {
   predExpr: string;
   missingSql: string;
 } {
+  const curve = `(${skillCurveCase(ruleset)})`;
   const pred =
-    mode === "classic"
-      ? classicFromStd(skillCurveCase())
-      : `(${skillCurveCase()})`;
+    mode === "classic" ? classicFromStdRuleset(ruleset, curve) : curve;
   const best =
     mode === "classic"
       ? "COALESCE(s.classic_total_score, s.total_score, 0)"
@@ -75,32 +110,44 @@ export function scoresVersion(): string {
 
 export function ensureMissingFresh(): void {
   const db = getDb();
-  const curve = computeSkillCurve(); // refreshes its own 10-min cache if needed
-  const stamp = `${scoresVersion()}-${curve.until}`;
+  const modes = getStartedRulesets();
+  const untils = modes.map((r) => computeSkillCurve(r).until).join("/");
+  const stamp = `${scoresVersion()}-${untils}-${modes.join(",")}`;
   if (stamp === missingStamp) return;
 
-  // every catalog map needs a row to carry its missing value (unplayed = full
-  // prediction); harmless for the backfill, which keys off fetched_at
-  db.exec(
-    "INSERT OR IGNORE INTO beatmap_user (beatmap_id) SELECT id FROM beatmaps WHERE ruleset = 0"
-  );
-  const lazer = missingExprs("lazer").missingSql;
-  const classic = missingExprs("classic").missingSql;
-  db.exec(
-    `UPDATE beatmap_user SET
-       missing_lazer = x.ml, missing_classic = x.mc, missing_wither = x.mw
-     FROM (
-       SELECT b.id AS bid,
-         ${lazer} AS ml,
-         ${classic} AS mc,
-         ${witherMissingSql()} AS mw
-       FROM beatmaps b
-       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
-       LEFT JOIN scores s ON s.id = u.best_lazer_score_id
-       WHERE b.ruleset = 0
-     ) AS x
-     WHERE beatmap_user.beatmap_id = x.bid`
-  );
+  for (const R of modes) {
+    // every pool map needs a row to carry its missing value (unplayed = full
+    // prediction); harmless for the backfill, which keys off fetched_at
+    const pool = R === 0 ? "b.ruleset = 0" : `(b.ruleset = ${R} OR b.ruleset = 0)`;
+    db.exec(
+      `INSERT OR IGNORE INTO beatmap_user (beatmap_id, ruleset)
+       SELECT id, ${R} FROM beatmaps b WHERE ${pool}`
+    );
+    const lazer = missingExprs("lazer", R).missingSql;
+    const classic = missingExprs("classic", R).missingSql;
+    // wither is a std-only display; other modes keep NULL
+    const wither = R === 0 ? witherMissingSql() : "NULL";
+    const caJoin =
+      R === 0
+        ? ""
+        : `LEFT JOIN convert_attrs ca ON ca.beatmap_id = b.id AND ca.ruleset = ${R} AND b.ruleset != ${R}`;
+    db.exec(
+      `UPDATE beatmap_user SET
+         missing_lazer = x.ml, missing_classic = x.mc, missing_wither = x.mw
+       FROM (
+         SELECT b.id AS bid,
+           ${lazer} AS ml,
+           ${classic} AS mc,
+           ${wither} AS mw
+         FROM beatmaps b
+         LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}
+         ${caJoin}
+         LEFT JOIN scores s ON s.id = u.best_lazer_score_id
+         WHERE ${pool}
+       ) AS x
+       WHERE beatmap_user.beatmap_id = x.bid AND beatmap_user.ruleset = ${R}`
+    );
+  }
   missingStamp = stamp;
 }
 
@@ -118,22 +165,40 @@ interface CurveBucket {
   value: number; // retained prediction (after carry-over + monotonicity)
   samples: number; // number of bests in the slice
 }
-let curveCache: { until: number; caseSql: string; buckets: CurveBucket[] } | null =
-  null;
-export function computeSkillCurve(): {
+const curveCaches = new Map<
+  number,
+  { until: number; caseSql: string; buckets: CurveBucket[] }
+>();
+/** SR expression of a map as seen from `ruleset` (converts: per-mode attrs). */
+function curveSr(ruleset: number): string {
+  return ruleset === 0
+    ? "b.star_rating"
+    : "COALESCE(ca.star_rating, b.star_rating)";
+}
+export function computeSkillCurve(ruleset = 0): {
   until: number;
   caseSql: string;
   buckets: CurveBucket[];
 } {
-  if (curveCache && Date.now() < curveCache.until) return curveCache;
+  const cached = curveCaches.get(ruleset);
+  if (cached && Date.now() < cached.until) return cached;
   const db = getDb();
+  const pool =
+    ruleset === 0
+      ? "b.ruleset = 0"
+      : `(b.ruleset = ${ruleset} OR b.ruleset = 0)`;
+  const caJoin =
+    ruleset === 0
+      ? ""
+      : `LEFT JOIN convert_attrs ca ON ca.beatmap_id = b.id AND ca.ruleset = ${ruleset} AND b.ruleset != ${ruleset}`;
   const rows = db
     .prepare(
-      `SELECT MIN(CAST(b.star_rating * 10 AS INTEGER), ${CURVE_STEPS}) AS q, s.total_score AS ts
+      `SELECT MIN(CAST(${curveSr(ruleset)} * 10 AS INTEGER), ${CURVE_STEPS}) AS q, s.total_score AS ts
        FROM beatmap_user u
        JOIN scores s ON s.id = u.best_lazer_score_id
        JOIN beatmaps b ON b.id = u.beatmap_id
-       WHERE b.ruleset = 0 AND b.star_rating IS NOT NULL`
+       ${caJoin}
+       WHERE u.ruleset = ${ruleset} AND ${pool} AND ${curveSr(ruleset)} IS NOT NULL`
     )
     .all() as { q: number; ts: number }[];
   const byQ = new Map<number, number[]>();
@@ -194,10 +259,11 @@ export function computeSkillCurve(): {
     });
   }
   const parts = buckets.map((b) => `WHEN ${b.q} THEN ${b.value}`);
-  const caseSql = `CASE MIN(CAST(b.star_rating * 10 AS INTEGER), ${CURVE_STEPS}) ${parts.join(" ")} ELSE ${buckets[buckets.length - 1].value} END`;
-  curveCache = { until: Date.now() + 10 * 60_000, caseSql, buckets };
-  return curveCache;
+  const caseSql = `CASE MIN(CAST(${curveSr(ruleset)} * 10 AS INTEGER), ${CURVE_STEPS}) ${parts.join(" ")} ELSE ${buckets[buckets.length - 1].value} END`;
+  const entry = { until: Date.now() + 10 * 60_000, caseSql, buckets };
+  curveCaches.set(ruleset, entry);
+  return entry;
 }
-function skillCurveCase(): string {
-  return computeSkillCurve().caseSql;
+function skillCurveCase(ruleset = 0): string {
+  return computeSkillCurve(ruleset).caseSql;
 }

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { mapUrl } from "../rulesets";
 import { useQuery } from "@tanstack/react-query";
 import {
   fetchClears,
@@ -8,6 +9,7 @@ import {
   type TimelinePoint,
 } from "../api";
 import { ctxMenuStyle } from "../ctxmenu";
+import type { PoolMode } from "../types";
 import { fmtCompact, fmtDate, fmtNum } from "../format";
 import { GradeBadge } from "./GradeBadge";
 import { MapModal } from "./MapModal";
@@ -72,25 +74,35 @@ function dayStats(
  * GitHub-style clears-per-day heatmap + streak stats. When the time machine
  * selects a past day, later days are dimmed.
  */
-export function HeatmapPanel({ cutoffDay = null }: { cutoffDay?: string | null }) {
+export function HeatmapPanel({
+  cutoffDay = null,
+  ruleset = 0,
+  pool = "all",
+  keys = [],
+}: {
+  cutoffDay?: string | null;
+  ruleset?: number;
+  pool?: PoolMode;
+  keys?: string[];
+}) {
   const [year, setYear] = useState(new Date().getUTCFullYear());
   const todayIso = new Date().toISOString().slice(0, 10);
   const [selDay, setSelDay] = useState(todayIso);
   const { data } = useQuery({
-    queryKey: ["daily", year],
-    queryFn: () => fetchDaily(year),
+    queryKey: ["daily", year, ruleset, pool, keys],
+    queryFn: () => fetchDaily(year, ruleset, pool, keys),
     refetchInterval: 5 * 60_000,
   });
   // same key as the dashboard's time machine -> shared cache, no extra request
   const { data: tl } = useQuery({
-    queryKey: ["timeline"],
-    queryFn: fetchTimeline,
+    queryKey: ["timeline", ruleset, pool, keys],
+    queryFn: () => fetchTimeline(ruleset, pool, keys),
     refetchInterval: 5 * 60_000,
   });
   // maps played on the selected day (one row per map, day's best play)
   const { data: dayClears } = useQuery({
-    queryKey: ["day-clears", selDay],
-    queryFn: () => fetchClears(0, 500, selDay),
+    queryKey: ["day-clears", selDay, ruleset],
+    queryFn: () => fetchClears(0, 500, selDay, ruleset),
     refetchInterval: 5 * 60_000,
   });
   const [modalId, setModalId] = useState<number | null>(null);
@@ -226,7 +238,7 @@ export function HeatmapPanel({ cutoffDay = null }: { cutoffDay?: string | null }
       </div>
       </div>
 
-        {sel && (
+        {(sel != null || ruleset !== 0) && (
           <div className="hm-day">
             <div className="hm-day-head">
               <b>{selDay === todayIso ? "Today" : fmtDate(selDay)}</b>
@@ -236,7 +248,7 @@ export function HeatmapPanel({ cutoffDay = null }: { cutoffDay?: string | null }
                 </button>
               )}
             </div>
-            {sel.clears === 0 && sel.fc === 0 && sel.ranked === 0 && gradeDeltas.length === 0 ? (
+            {sel == null ? null : sel.clears === 0 && sel.fc === 0 && sel.ranked === 0 && gradeDeltas.length === 0 ? (
               <div className="hm-day-empty">No clears</div>
             ) : (
               <>
@@ -299,7 +311,7 @@ export function HeatmapPanel({ cutoffDay = null }: { cutoffDay?: string | null }
                         key={r.beatmap_id}
                         title={`${r.artist} - ${r.title} [${r.version}] · ${(r.accuracy * 100).toFixed(2)}%`}
                         onDoubleClick={() =>
-                          window.open(`https://osu.ppy.sh/b/${r.beatmap_id}`, "_blank")
+                          window.open(mapUrl(r.beatmap_id, ruleset), "_blank")
                         }
                         onContextMenu={(e) => {
                           e.preventDefault();
@@ -364,7 +376,7 @@ export function HeatmapPanel({ cutoffDay = null }: { cutoffDay?: string | null }
             </button>
             <button
               onClick={() => {
-                window.open(`https://osu.ppy.sh/b/${ctx.row.beatmap_id}`, "_blank");
+                window.open(mapUrl(ctx.row.beatmap_id, ruleset), "_blank");
                 setCtx(null);
               }}
             >
@@ -400,7 +412,7 @@ export function HeatmapPanel({ cutoffDay = null }: { cutoffDay?: string | null }
         </>
       )}
       {modalId != null && (
-        <MapModal beatmapId={modalId} onClose={() => setModalId(null)} />
+        <MapModal beatmapId={modalId} ruleset={ruleset} onClose={() => setModalId(null)} />
       )}
     </div>
   );

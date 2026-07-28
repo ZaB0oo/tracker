@@ -7,10 +7,29 @@ import type {
   SoloScore,
 } from "./types.js";
 
+/**
+ * 60 req/min is the documented osu! API limit and stays the default. The osu!
+ * team does grant higher limits on request (that is how osu!alternative-style
+ * projects run): the user declares that grant in Settings (api_rpm_approved),
+ * which is the ONLY way a higher rate is honoured. MAX_APPROVED_RPM is just a
+ * typo guard, not a policy number.
+ */
+const POLITE_RPM = 60;
+const MAX_APPROVED_RPM = 600;
+
+/** Highest rate the user is currently allowed to set. */
+export function maxAllowedRpm(): number {
+  try {
+    return getState("api_rpm_approved") === "1" ? MAX_APPROVED_RPM : POLITE_RPM;
+  } catch {
+    return POLITE_RPM; // DB not ready yet
+  }
+}
+
 function initialRpm(): number {
   try {
     const v = Number(getState("api_rpm"));
-    if (Number.isFinite(v) && v >= 1 && v <= 60) return v;
+    if (Number.isFinite(v) && v >= 1 && v <= maxAllowedRpm()) return v;
   } catch {
     /* DB not ready yet */
   }
@@ -24,7 +43,7 @@ export function getCurrentRpm(): number {
 }
 
 export function applyApiRpm(rpm: number): void {
-  limiter.setRpm(rpm);
+  limiter.setRpm(rpm, maxAllowedRpm());
 }
 
 /** Call after an OAuth client change: forgets all tokens. */
@@ -173,7 +192,12 @@ export interface ProfileStats {
 }
 
 /** Connected account profile (username, avatar, country, stats), via GET /me. */
-export async function fetchUserProfile(): Promise<{
+/**
+ * Profile of the connected account. `mode` (osu/taiko/fruits/mania) selects the
+ * ruleset the `statistics` belong to — /me alone answers for the account's
+ * default mode only, which would put osu! pp on a mania card.
+ */
+export async function fetchUserProfile(mode?: string): Promise<{
   username: string;
   avatar_url: string;
   cover_url: string;
@@ -182,14 +206,14 @@ export async function fetchUserProfile(): Promise<{
 } | null> {
   return limiter.schedule(async () => {
     const auth = await getUserToken();
-    const res = await netFetch(`${config.apiBase}/me`, {
+    const res = await netFetch(`${config.apiBase}/me${mode ? `/${mode}` : ""}`, {
       headers: {
         Authorization: `Bearer ${auth}`,
         Accept: "application/json",
         "User-Agent": config.userAgent,
       },
     });
-    if (!res.ok) throw new Error(`GET /me: HTTP ${res.status}`);
+    if (!res.ok) throw new Error(`GET /me${mode ? `/${mode}` : ""}: HTTP ${res.status}`);
     const j = (await res.json()) as {
       username: string;
       avatar_url: string;
@@ -254,9 +278,14 @@ export interface StoredProfile {
 }
 
 /** Profile of the connected account (null if absent or malformed). */
-export function getStoredProfile(): StoredProfile | null {
+/** State key of the cached profile: std keeps the historical key. */
+export function profileKey(ruleset = 0): string {
+  return ruleset === 0 ? "user_profile" : `user_profile_m${ruleset}`;
+}
+
+export function getStoredProfile(ruleset = 0): StoredProfile | null {
   try {
-    return JSON.parse(getState("user_profile") || "null") as StoredProfile | null;
+    return JSON.parse(getState(profileKey(ruleset)) || "null") as StoredProfile | null;
   } catch {
     return null;
   }
@@ -271,7 +300,8 @@ export function getStoredCountryCode(): string | null {
 export function logoutUser(): void {
   userToken = null;
   setState("user_refresh_token", "");
-  setState("user_profile", "");
+  // every mode's cached profile, not just std's
+  for (const r of [0, 1, 2, 3]) setState(profileKey(r), "");
 }
 
 /**
@@ -280,9 +310,10 @@ export function logoutUser(): void {
  */
 export async function getCountryTop(
   beatmapId: number,
-  priority: Priority = "low"
+  priority: Priority = "low",
+  modeName = "osu"
 ): Promise<import("./types.js").SoloScore | null> {
-  return (await getCountryTopScores(beatmapId, priority))[0] ?? null;
+  return (await getCountryTopScores(beatmapId, priority, modeName))[0] ?? null;
 }
 
 /**
@@ -291,12 +322,13 @@ export async function getCountryTop(
  */
 export async function getCountryTopScores(
   beatmapId: number,
-  priority: Priority = "low"
+  priority: Priority = "low",
+  modeName = "osu"
 ): Promise<import("./types.js").SoloScore[]> {
   return limiter.schedule(async () => {
     const auth = await getUserToken();
     const res = await netFetch(
-      `${config.apiBase}/beatmaps/${beatmapId}/scores?mode=osu&type=country`,
+      `${config.apiBase}/beatmaps/${beatmapId}/scores?mode=${modeName}&type=country`,
       {
         headers: {
           Authorization: `Bearer ${auth}`,
@@ -366,11 +398,12 @@ async function apiGet<T>(pathAndQuery: string, priority: Priority): Promise<T> {
 export async function getUserBeatmapPosition(
   beatmapId: number,
   userId: number,
-  priority: Priority = "high"
+  priority: Priority = "high",
+  modeName = "osu"
 ): Promise<number | null> {
   try {
     const res = await apiGet<{ position?: number | null }>(
-      `/beatmaps/${beatmapId}/scores/users/${userId}?mode=osu`,
+      `/beatmaps/${beatmapId}/scores/users/${userId}?mode=${modeName}`,
       priority
     );
     return res.position ?? null;
@@ -384,11 +417,12 @@ export async function getUserBeatmapPosition(
 export async function getUserBeatmapScores(
   beatmapId: number,
   userId: number,
-  priority: Priority = "low"
+  priority: Priority = "low",
+  rulesetName = "osu" // converts: the played ruleset, not the map's mode
 ): Promise<SoloScore[]> {
   try {
     const res = await apiGet<{ scores: SoloScore[] }>(
-      `/beatmaps/${beatmapId}/scores/users/${userId}/all?ruleset=osu`,
+      `/beatmaps/${beatmapId}/scores/users/${userId}/all?ruleset=${rulesetName}`,
       priority
     );
     // beatmap_id missing from the items on this endpoint -> we reinject it
@@ -404,10 +438,11 @@ export async function getUserBeatmapScores(
 export async function getBestScores(
   userId: number,
   limit = 50,
-  offset = 0
+  offset = 0,
+  modeName = "osu"
 ): Promise<SoloScore[]> {
   return apiGet<SoloScore[]>(
-    `/users/${userId}/scores/best?mode=osu&limit=${limit}&offset=${offset}`,
+    `/users/${userId}/scores/best?mode=${modeName}&limit=${limit}&offset=${offset}`,
     "high"
   );
 }
@@ -415,10 +450,11 @@ export async function getBestScores(
 export async function getRecentScores(
   userId: number,
   limit = 50,
-  offset = 0
+  offset = 0,
+  modeName = "osu"
 ): Promise<SoloScore[]> {
   return apiGet<SoloScore[]>(
-    `/users/${userId}/scores/recent?mode=osu&include_fails=0&limit=${limit}&offset=${offset}`,
+    `/users/${userId}/scores/recent?mode=${modeName}&include_fails=0&limit=${limit}&offset=${offset}`,
     "high"
   );
 }
@@ -427,6 +463,46 @@ export async function getRecentScores(
  * Star rating with specific mods (POST /beatmaps/{id}/attributes).
  * null on failure — callers fall back to the nomod SR.
  */
+/**
+ * Nomod attributes of a CONVERT (std map played in taiko/catch/mania):
+ * per-mode star rating and max combo, cached forever in convert_attrs by the
+ * caller. null on failure.
+ */
+export async function getConvertAttrs(
+  beatmapId: number,
+  rulesetName: string,
+  priority: Priority = "low"
+): Promise<{ starRating: number | null; maxCombo: number | null } | null> {
+  try {
+    return await limiter.schedule(async () => {
+      const auth = await getToken();
+      const res = await netFetch(
+        `${config.apiBase}/beatmaps/${beatmapId}/attributes`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${auth}`,
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": config.userAgent,
+          },
+          body: JSON.stringify({ ruleset: rulesetName }),
+        }
+      );
+      if (!res.ok) throw new Error(`attributes: HTTP ${res.status}`);
+      const j = (await res.json()) as {
+        attributes?: { star_rating?: number; max_combo?: number };
+      };
+      return {
+        starRating: j.attributes?.star_rating ?? null,
+        maxCombo: j.attributes?.max_combo ?? null,
+      };
+    }, priority);
+  } catch {
+    return null;
+  }
+}
+
 export async function getModdedStarRating(
   beatmapId: number,
   modAcronyms: string[],

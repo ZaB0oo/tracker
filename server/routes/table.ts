@@ -2,6 +2,7 @@ import { Router } from "express";
 import { getDb } from "../db/db.js";
 import { mapWhere, scoreWhere, type MetricParams } from "../logic/metrics.js";
 import { ensureMissingFresh } from "../logic/scoreSql.js";
+import { keysWhere, maniaKeysSql, parseRulesetParam, poolWhere } from "../logic/rulesets.js";
 import { getBeatmapsByIds } from "../osu/api.js";
 
 export const tableRouter = Router();
@@ -56,9 +57,17 @@ function buildFilters(
   q: Record<string, string | undefined>,
   missingSql: string
 ): { where: string[]; params: Record<string, string | number | null> } {
+  const ruleset = parseRulesetParam(q.ruleset);
+  // converts: per-mode SR / max combo from convert_attrs when fetched
+  const SR = ruleset === 0 ? "b.star_rating" : "COALESCE(ca.star_rating, b.star_rating)";
+  const COMBO = ruleset === 0 ? "b.max_combo" : "COALESCE(ca.max_combo, b.max_combo)";
   // defense in depth: never any graveyard/WIP diffs even if imported
-  const where: string[] = ["b.ruleset = 0", "b.status IN (1, 2, 4)"];
+  const where: string[] = [poolWhere(ruleset, q.pool), "b.status IN (1, 2, 4)"];
   const params: Record<string, string | number | null> = {};
+
+  // mania key-count filter ("4,7,other")
+  const keys = keysWhere(ruleset, q.keys);
+  if (keys) where.push(keys);
 
   const num = (name: string, sql: string, cmp: string) => {
     if (q[name] != null && q[name] !== "") {
@@ -83,9 +92,16 @@ function buildFilters(
     if (sts.length) where.push(`b.status IN (${sts.join(",")})`);
   }
   if (q.mods) {
-    // "contains the mod" filter on the best's mods JSON
+    // "contains the mod" filter on the best's mods JSON; NM = no mods
+    // (CL alone still counts as nomod)
     for (const [i, m] of q.mods.split(",").entries()) {
-      if (!/^[A-Z0-9]{2}$/i.test(m)) continue;
+      if (m.toUpperCase() === "NM") {
+        where.push(
+          `NOT EXISTS (SELECT 1 FROM json_each(s.mods) je WHERE json_extract(je.value,'$.acronym') <> 'CL')`
+        );
+        continue;
+      }
+      if (!/^[A-Z0-9]{2,3}$/i.test(m)) continue;
       where.push(`s.mods LIKE @mod${i}`);
       params[`mod${i}`] = `%"${m.toUpperCase()}"%`;
     }
@@ -107,7 +123,7 @@ function buildFilters(
       .get(Number(q.metricMissing)) as { params: string } | undefined;
     if (row) {
       const p = JSON.parse(row.params) as MetricParams;
-      where.push(mapWhere(p.map));
+      where.push(mapWhere(p.map, { ruleset: p.ruleset ?? 0, pool: p.pool }));
       where.push(
         `${q.metricMatching === "1" ? "EXISTS" : "NOT EXISTS"} (SELECT 1 FROM scores s
            WHERE s.id = u.best_lazer_score_id AND ${scoreWhere(p.score)})`
@@ -127,10 +143,13 @@ function buildFilters(
     );
     params.text = `%${q.q}%`;
   }
-  num("srMin", "b.star_rating", ">="); num("srMax", "b.star_rating", "<=");
+  num("srMin", SR, ">="); num("srMax", SR, "<=");
   num("arMin", "b.ar", ">="); num("arMax", "b.ar", "<=");
   num("odMin", "b.od", ">="); num("odMax", "b.od", "<=");
-  num("csMin", "b.cs", ">="); num("csMax", "b.cs", "<=");
+  // in mania "CS" IS the key count: filter on the same expression the column
+  // displays, so a convert is never matched on its std circle size
+  const CS = ruleset === 3 ? maniaKeysSql() : "b.cs";
+  num("csMin", CS, ">="); num("csMax", CS, "<=");
   num("hpMin", "b.hp", ">="); num("hpMax", "b.hp", "<=");
   num("lenMin", "b.total_length", ">="); num("lenMax", "b.total_length", "<=");
   num("bpmMin", "b.bpm", ">="); num("bpmMax", "b.bpm", "<=");
@@ -173,13 +192,21 @@ tableRouter.get("/table", (req, res) => {
       ? "COALESCE(s.classic_total_score, s.total_score, 0)"
       : "COALESCE(s.total_score, 0)";
   const predExpr = `(${missingSql} + ${bestExpr})`;
+  const R = parseRulesetParam(q.ruleset);
+  // converts: per-mode SR / max combo from convert_attrs when fetched
+  const SRX = R === 0 ? "b.star_rating" : "COALESCE(ca.star_rating, b.star_rating)";
+  const COMBOX = R === 0 ? "b.max_combo" : "COALESCE(ca.max_combo, b.max_combo)";
+  const CSX = R === 3 ? maniaKeysSql() : "b.cs";
 
   const { where, params } = buildFilters(db, q, missingSql);
 
   const sortParts: string[] = [];
   for (const part of (q.sort ?? "missing:desc").split(",")) {
     const [col, dir] = part.split(":");
-    const sqlCol = SORT_COLUMNS[col];
+    let sqlCol = SORT_COLUMNS[col];
+    if (sqlCol === "b.star_rating") sqlCol = SRX;
+    if (sqlCol === "b.max_combo") sqlCol = COMBOX;
+    if (sqlCol === "b.cs") sqlCol = CSX;
     if (sqlCol) sortParts.push(`${sqlCol} ${dir === "asc" ? "ASC" : "DESC"} NULLS LAST`);
   }
   if (sortParts.length === 0) sortParts.push("missing_value DESC");
@@ -190,7 +217,8 @@ tableRouter.get("/table", (req, res) => {
   const baseSql = `
     FROM beatmaps b
     JOIN beatmapsets st ON st.id = b.beatmapset_id
-    LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
+    LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}
+    LEFT JOIN convert_attrs ca ON ca.beatmap_id = b.id AND ca.ruleset = ${R} AND b.ruleset != ${R}
     LEFT JOIN scores s ON s.id = u.${bestCol}
     WHERE ${where.join(" AND ")}
   `;
@@ -199,8 +227,9 @@ tableRouter.get("/table", (req, res) => {
     .prepare(
       `SELECT
         b.id AS beatmap_id, b.beatmapset_id, b.version, b.status,
-        b.total_length, b.bpm, b.cs, b.ar, b.od, b.hp, b.star_rating,
-        b.max_combo AS map_max_combo,
+        b.total_length, b.bpm, ${CSX} AS cs, b.ar, b.od, b.hp,
+        ${SRX} AS star_rating,
+        ${COMBOX} AS map_max_combo,
         st.artist, st.title, st.creator, st.ranked_date,
         st.download_disabled AS dmca,
         s.id AS score_id, s.ended_at, s.rank AS grade, s.accuracy,
@@ -236,10 +265,12 @@ tableRouter.get("/table", (req, res) => {
 tableRouter.get("/map/:id", (req, res) => {
   const id = Number(req.params.id);
   const db = getDb();
+  const R = parseRulesetParam(req.query.ruleset);
   const map = db
     .prepare(
       `SELECT b.id, b.beatmapset_id, b.version, b.status, b.total_length, b.bpm,
-         b.cs, b.ar, b.od, b.hp, b.star_rating, b.max_combo,
+         ${R === 3 ? maniaKeysSql() : "b.cs"} AS cs,
+         b.ar, b.od, b.hp, b.star_rating, b.max_combo,
          b.count_circles, b.count_sliders, b.count_spinners,
          st.artist, st.title, st.creator, st.ranked_date,
          st.download_disabled AS dmca
@@ -252,23 +283,23 @@ tableRouter.get("/map/:id", (req, res) => {
     .prepare(
       `SELECT id, ended_at, rank, accuracy, max_combo, total_score,
          classic_total_score, pp, mods, fc_state, passed
-       FROM scores WHERE beatmap_id = ? ORDER BY ended_at DESC`
+       FROM scores WHERE beatmap_id = ? AND ruleset = ? ORDER BY ended_at DESC`
     )
-    .all(id);
+    .all(id, parseRulesetParam(req.query.ruleset));
   const user =
     db
       .prepare(
         `SELECT played, any_fc, country_first, country_checked_at, fetched_at,
            global_rank
-         FROM beatmap_user WHERE beatmap_id = ?`
+         FROM beatmap_user WHERE beatmap_id = ? AND ruleset = ?`
       )
-      .get(id) ?? null;
+      .get(id, parseRulesetParam(req.query.ruleset)) ?? null;
   const countryEvents = db
     .prepare(
       `SELECT event, at, score_at, by_username
-       FROM country_events WHERE beatmap_id = ? ORDER BY at DESC`
+       FROM country_events WHERE beatmap_id = ? AND ruleset = ? ORDER BY at DESC`
     )
-    .all(id);
+    .all(id, parseRulesetParam(req.query.ruleset));
   res.json({ map, scores, user, countryEvents });
 });
 
@@ -318,7 +349,8 @@ export async function buildCollectionDb(
       `SELECT b.id, b.checksum
        FROM beatmaps b
        JOIN beatmapsets st ON st.id = b.beatmapset_id
-       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
+       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${parseRulesetParam(q.ruleset)}
+       LEFT JOIN convert_attrs ca ON ca.beatmap_id = b.id AND ca.ruleset = ${parseRulesetParam(q.ruleset)} AND b.ruleset != ${parseRulesetParam(q.ruleset)}
        LEFT JOIN scores s ON s.id = u.best_lazer_score_id
        WHERE ${where.join(" AND ")}`
     )

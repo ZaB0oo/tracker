@@ -11,20 +11,7 @@ import {
   type Range,
 } from "../api";
 import { displayGrade, fmtNum } from "../format";
-
-// osu!std mods grouped by the in-game categories (lazer). AT/CN can't submit a
-// score so they're excluded. Fun mods are std-only.
-const MOD_GROUPS: { label: string; mods: string[] }[] = [
-  { label: "None", mods: ["NM"] },
-  { label: "Reduction", mods: ["EZ", "NF", "HT", "DC"] },
-  { label: "Increase", mods: ["HR", "SD", "PF", "DT", "NC", "HD", "FL", "BL", "ST", "AC", "TC"] },
-  { label: "Automation", mods: ["RX", "AP", "SO"] },
-  { label: "Conversion", mods: ["TP", "DA", "CL", "RD", "MR", "AL", "SG"] },
-  {
-    label: "Fun",
-    mods: ["TR", "WG", "SI", "GR", "DF", "WU", "WD", "BR", "AD", "MU", "NS", "MG", "RP", "AS", "FR", "BU", "SY", "DP", "BM"],
-  },
-];
+import { RULESET_HIT_FIELDS, RULESET_MOD_GROUPS, RULESET_NAMES, rulesetStatFields } from "../rulesets";
 // count fields: [label, path in score.counts]
 const COUNT_FIELDS: { key: keyof MetricParams["score"]["counts"]; label: string }[] = [
   { key: "n100", label: "100s" },
@@ -185,10 +172,13 @@ export function MetricBuilder({
   onClose,
   onSaved,
   edit,
+  ruleset = 0,
 }: {
   onClose: () => void;
   onSaved: () => void;
   edit?: { id: number; name: string; params: MetricParams };
+  /** ruleset the metric is created in (edit keeps the metric's own) */
+  ruleset?: number;
 }) {
   const [name, setName] = useState(edit?.name ?? "");
   // deep-merge with defaults so older metrics (missing new fields) still work
@@ -210,7 +200,7 @@ export function MetricBuilder({
           progressMode: edit.params.progressMode ?? "milestone",
           step: edit.params.step || 1000,
         }
-      : DEFAULT_METRIC_PARAMS
+      : { ...DEFAULT_METRIC_PARAMS, ruleset, pool: "all" as const }
   );
   // the step input is kept as text so it can be emptied while typing
   const [stepStr, setStepStr] = useState(String(edit?.params.step || 1000));
@@ -232,9 +222,10 @@ export function MetricBuilder({
     setP((s) => ({ ...s, map: { ...s.map, [key]: v } }));
 
   // slider bounds = real catalog maxima (highest map SR, longest map, …)
+  const rsMetric = p.ruleset ?? 0;
   const { data: bounds } = useQuery({
-    queryKey: ["filter-bounds"],
-    queryFn: fetchFilterBounds,
+    queryKey: ["filter-bounds", rsMetric],
+    queryFn: () => fetchFilterBounds(rsMetric),
     staleTime: 60 * 60_000,
   });
   const mapFields = useMemo<MapField[]>(() => {
@@ -248,9 +239,13 @@ export function MetricBuilder({
       { min: "srMin", max: "srMax", label: "Star rating", step: 0.1, lo: 0, hi: sr },
       { min: "yearMin", max: "yearMax", label: "Year", step: 1, lo: year0, hi: CUR_YEAR },
       { min: "lenMin", max: "lenMax", label: "Length (s)", step: 5, lo: 0, hi: len },
-      { min: "arMin", max: "arMax", label: "AR", step: 0.1, lo: 0, hi: 10 },
+      ...(rulesetStatFields(rsMetric).ar
+        ? [{ min: "arMin", max: "arMax", label: "AR", step: 0.1, lo: 0, hi: 10 } as const]
+        : []),
       { min: "odMin", max: "odMax", label: "OD", step: 0.1, lo: 0, hi: 10 },
-      { min: "csMin", max: "csMax", label: "CS", step: 0.1, lo: 0, hi: 10 },
+      ...(rulesetStatFields(rsMetric).cs
+        ? [{ min: "csMin", max: "csMax", label: rulesetStatFields(rsMetric).csLabel, step: 0.1, lo: 0, hi: 10 } as const]
+        : []),
       { min: "hpMin", max: "hpMax", label: "HP", step: 0.1, lo: 0, hi: 10 },
       { min: "comboMin", max: "comboMax", label: "Max combo", step: 10, lo: 0, hi: combo },
       { min: "bpmMin", max: "bpmMax", label: "BPM", step: 1, lo: 0, hi: bpm },
@@ -306,7 +301,12 @@ export function MetricBuilder({
       <div className="menu-overlay modal-overlay" onClick={onClose} />
       <div className="adv-modal mb-modal">
         <div className="adv-head">
-          <h2>{edit ? "Edit metric" : "New metric"}</h2>
+          <h2>
+            {edit ? "Edit metric" : "New metric"}
+            {rsMetric !== 0 && (
+              <span className="pp-dim"> — {RULESET_NAMES[rsMetric]}</span>
+            )}
+          </h2>
           <button className="mm-close" onClick={onClose}>✕</button>
         </div>
 
@@ -401,10 +401,10 @@ export function MetricBuilder({
 
             <Section title="Mods">
               <div className="mb-mods-label">
-                The score must have at least one of the selected mods — NM =
-                no mods (empty = any mods):
+                Keeps a score if it uses at least one of these mods. NM keeps
+                the no-mod scores. Nothing selected: every score counts.
               </div>
-              {MOD_GROUPS.map((g) => (
+              {(RULESET_MOD_GROUPS[rsMetric] ?? RULESET_MOD_GROUPS[0]).map((g) => (
                 <div key={g.label} className="mb-mod-group">
                   <span className="mb-mod-cat">{g.label}</span>
                   <div className="adv-mods">
@@ -432,15 +432,35 @@ export function MetricBuilder({
               ))}
             </Section>
 
-            <Section title="Hit counts (100s, 50s, misses, slider ends)">
-              {COUNT_FIELDS.map((f) => (
-                <RangeRow
-                  key={f.key} label={f.label}
-                  value={p.score.counts[f.key]}
-                  onChange={(r) => setCount(f.key, r)}
-                />
-              ))}
-            </Section>
+            {rsMetric === 0 ? (
+              <Section title="Hit counts (100s, 50s, misses, slider ends)">
+                {COUNT_FIELDS.map((f) => (
+                  <RangeRow
+                    key={f.key} label={f.label}
+                    value={p.score.counts[f.key]}
+                    onChange={(r) => setCount(f.key, r)}
+                  />
+                ))}
+              </Section>
+            ) : (
+              <Section title="Hit counts">
+                {(RULESET_HIT_FIELDS[rsMetric] ?? []).map((f) => (
+                  <RangeRow
+                    key={f.key} label={f.label}
+                    value={p.score.hits?.[f.key] ?? { min: null, max: null }}
+                    onChange={(r) =>
+                      setP((s) => ({
+                        ...s,
+                        score: {
+                          ...s.score,
+                          hits: { ...s.score.hits, [f.key]: r },
+                        },
+                      }))
+                    }
+                  />
+                ))}
+              </Section>
+            )}
           </>
         )}
 

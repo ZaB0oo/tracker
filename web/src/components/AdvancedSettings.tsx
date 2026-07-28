@@ -5,8 +5,11 @@ import {
   postDiscordTest,
   postImportDb,
   postSettings,
+  postImportSet,
   postSync,
+  postVerifyDump,
 } from "../api";
+import { RULESET_NAMES } from "../rulesets";
 import { firstPlaceLabel, useCountryCode } from "../country";
 import { appConfirm } from "../dialogs";
 
@@ -49,10 +52,14 @@ function Field({
 export function AdvancedSettings({
   onClose,
   notify,
+  ruleset = 0,
 }: {
   onClose: () => void;
   notify?: (msg: string) => void;
+  /** viewed ruleset: the scopable maintenance actions apply to it */
+  ruleset?: number;
 }) {
+  const modeName = RULESET_NAMES[ruleset] ?? "osu!";
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ["settings"], queryFn: fetchSettings });
   const country = useCountryCode();
@@ -70,8 +77,10 @@ export function AdvancedSettings({
   const [wither, setWither] = useState<boolean | null>(null);
   const [testMsg, setTestMsg] = useState<string | null>(null);
   const [importerPath, setImporterPath] = useState<string | null>(null);
+  const [rulesets, setRulesets] = useState<number[] | null>(null);
   const importInput = useRef<HTMLInputElement>(null);
   const [maintMsg, setMaintMsg] = useState<string | null>(null);
+  const [setIdInput, setSetIdInput] = useState("");
 
   // maintenance actions run immediately (they are not part of "Save")
   const maint = async (
@@ -117,6 +126,7 @@ export function AdvancedSettings({
       if (secret !== "") payload.clientSecret = secret;
       if (userId != null && userId !== "") payload.userId = userId;
       if (importerPath != null) payload.lazerImporterPath = importerPath;
+      if (rulesets != null) payload.activeRulesets = rulesets;
       await postSettings(payload);
       return Boolean(payload.clientId || payload.clientSecret || payload.userId);
     },
@@ -234,6 +244,43 @@ export function AdvancedSettings({
           </Field>
         </div>
 
+        <h3>Rulesets</h3>
+        <p className="set-note">
+          Each extra ruleset enumerates its own catalog and imports your scores on its maps
+          AND the converts (std maps played in that mode) — days of API budget
+          the first time, resumable. Disabling a mode (osu! included) stops its
+          polling, score import and sweeps; its views stay readable. At least one
+          mode must stay enabled.
+        </p>
+        <div className="mb-inline">
+          {(
+            [
+              [0, "osu!"],
+              [1, "taiko"],
+              [2, "catch"],
+              [3, "mania"],
+            ] as const
+          ).map(([id, label]) => {
+            const cur = rulesets ?? data.activeRulesets;
+            const on = cur.includes(id);
+            return (
+              <label key={id} className="mb-check">
+                <input
+                  type="checkbox"
+                  checked={on}
+                  disabled={on && cur.length === 1}
+                  onChange={() =>
+                    setRulesets(
+                      on ? cur.filter((r) => r !== id) : [...cur, id].sort()
+                    )
+                  }
+                />
+                {label}
+              </label>
+            );
+          })}
+        </div>
+
         <h3>Display</h3>
         <label className="adv-toggle">
           <input
@@ -330,17 +377,25 @@ export function AdvancedSettings({
           </Field>
         </div>
 
-        <h3>Maintenance</h3>
-        <div className="set-maint">
+        <h3>Maintenance — {modeName}</h3>
+        <p className="set-note">
+          These actions apply to the ruleset you are viewing ({modeName});
+          switch tabs to target another mode. Set-level actions (marked “all
+          modes”) benefit every mode at once.
+        </p>
+
+        <div className="set-maint-group">
+          <span className="set-maint-label">Database</span>
+          <div className="set-maint">
           <button
             onClick={() => window.open("/api/export-db")}
-            title="Download a consistent copy of the SQLite database (full backup: scores, catalog, settings)"
+            title="Full backup: scores, catalog, settings"
           >
             Export database (.db)
           </button>
           <button
             onClick={() => importInput.current?.click()}
-            title="Replace the current database with another tracker.db (applied at the next app restart; the current one is kept as .bak)"
+            title="Replace the database with another tracker.db. Applied on restart, the old one is kept as .bak."
           >
             Import database…
           </button>
@@ -355,50 +410,150 @@ export function AdvancedSettings({
               if (f) void importDb(f);
             }}
           />
+          </div>
+        </div>
+
+        <div className="set-maint-group">
+          <span className="set-maint-label">
+            Catalog — if the number of maps looks wrong
+          </span>
+          <div className="set-maint">
           <button
-            onClick={() => void maint("catalog-full?force=1", "Re-scanning catalog…")}
-            title="Full re-enumeration of the catalog via the API: star ratings, statuses up to date (~30-60 min)"
+            onClick={() =>
+              void maint("repair-catalog", "Repairing the catalog…")
+            }
+            title="Looks for the maps the search cannot see and adds them. Runs on its own after each initial sync, so use it only if a map count looks wrong."
           >
-            Full catalog re-scan
+            Check &amp; repair catalog <span className="scope-tag">all modes</span>
           </button>
+          <button
+            onClick={() => void maint(`catalog-full?force=1&ruleset=${ruleset}`, `Re-scanning the ${modeName} catalog…`)}
+            title="Re-reads the whole catalog to refresh star ratings and statuses. 30 to 60 min."
+          >
+            Full catalog re-scan ({modeName})
+          </button>
+          <button
+            onClick={() => {
+              void (async () => {
+                let path: string | null = null;
+                if (window.desktop) {
+                  path = await window.desktop.pickFile({
+                    title: "Select a data.ppy.sh dump (performance_*.tar.bz2 or osu_beatmaps.sql)",
+                    filters: [
+                      { name: "data.ppy.sh dump", extensions: ["bz2", "sql", "tbz2", "tbz"] },
+                    ],
+                  });
+                } else {
+                  path = window.prompt?.("Full path to the dump file (.tar.bz2 or osu_beatmaps.sql):") ?? null;
+                }
+                if (!path) return;
+                setMaintMsg("Verifying the catalog against the dump…");
+                try {
+                  const r = await postVerifyDump(path);
+                  setMaintMsg(
+                    r.ok ? "Started — progress in the sync bar activity." : `Failed: ${r.error ?? "unknown"}`
+                  );
+                } catch (e) {
+                  setMaintMsg(`Failed: ${String(e instanceof Error ? e.message : e)}`);
+                }
+              })();
+            }}
+            title="Last resort if maps are still missing. Compares your catalog with an official data.ppy.sh dump: one archive covers all four modes."
+          >
+            Advanced: verify from data dump… <span className="scope-tag">all modes</span>
+          </button>
+          <a
+            className="set-link"
+            href="https://data.ppy.sh"
+            target="_blank"
+            rel="noreferrer"
+            title="Official osu! dumps. Any performance_*_top_1000.tar.bz2 works."
+          >
+            Get dumps ↗
+          </a>
+          <span className="set-path set-import-set">
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="beatmapset id"
+              value={setIdInput}
+              onChange={(e) => setSetIdInput(e.target.value.replace(/\D/g, ""))}
+            />
+            <button
+              disabled={!setIdInput}
+              onClick={() => {
+                void (async () => {
+                  const id = Number(setIdInput);
+                  setMaintMsg(`Importing set ${id}…`);
+                  try {
+                    const r = await postImportSet(id);
+                    if (!r.ok) {
+                      setMaintMsg(`Failed: ${r.error ?? "unknown"}`);
+                      return;
+                    }
+                    const st = r.statuses ?? {};
+                    const counted = (st.ranked ?? 0) + (st.loved ?? 0);
+                    setMaintMsg(
+                      counted === 0
+                        ? `Set ${id} imported — no ranked/loved diff, it will NOT appear in any pool`
+                        : `Set ${id} imported: ${r.added ?? "no new map"} (${st.ranked ?? 0} ranked, ${st.loved ?? 0} loved in the set)`
+                    );
+                    setSetIdInput("");
+                  } catch (e) {
+                    setMaintMsg(`Failed: ${String(e instanceof Error ? e.message : e)}`);
+                  }
+                })();
+              }}
+              title="Add one beatmapset by id, even a DMCA one. Your scores follow."
+            >
+              Import set by id <span className="scope-tag">all modes</span>
+            </button>
+          </span>
+          </div>
+        </div>
+
+        <div className="set-maint-group">
+          <span className="set-maint-label">Scores</span>
+          <div className="set-maint">
           <button
             onClick={() => void maint("recompute", "Recomputing…")}
             title="Recompute bests for all scores"
           >
-            Recompute bests
+            Recompute bests <span className="scope-tag">all modes</span>
+          </button>
+          <button
+            onClick={() =>
+              void maint(`refresh-top-pp?ruleset=${ruleset}`, `Re-fetching your ${modeName} top pp scores…`)
+            }
+            title="Re-reads your 250 best maps by pp. Use it when the Profile pp metric drifts. 4 min."
+          >
+            Refresh top pp scores ({modeName})
           </button>
           <button
             onClick={() =>
               void maint(
-                "global-recheck-all",
+                `global-recheck-all?ruleset=${ruleset}`,
                 "Re-queuing all global positions…",
                 "Re-check ALL global positions (any depth, resumable). The periodic rotation only refreshes held top-100s — use this to refresh everything else. Start?"
               )
             }
             title="Re-queue every played map for a global position check"
           >
-            Re-check all global tops
-          </button>
-          <button
-            onClick={() =>
-              void maint("refresh-top-pp", "Re-fetching your top pp scores…")
-            }
-            title="Re-fetches the scores of your ~250 best-pp maps (~4 min). osu! silently adjusts stored pp over time — use this when the Profile pp metric drifts a little from your official profile."
-          >
-            Refresh top pp scores
+            Re-check all global tops ({modeName})
           </button>
           <button
             onClick={() =>
               void maint(
-                "rebackfill",
-                "Re-backfill…",
-                "FULL re-backfill: all maps go back to « to check » (~40h, resumable, no score lost). Includes a re-sweep of all country leaderboards. Start?"
+                `rebackfill?ruleset=${ruleset}`,
+                "Re-importing every score…",
+                "FULL re-backfill: all maps go back to « to check » (resumable, no score lost). Includes a re-sweep of all country leaderboards. Start?"
               )
             }
             title="Use this if the app stayed off > 24h while you were playing"
           >
-            Full re-backfill (~40h)
+            Re-import all scores
           </button>
+          </div>
         </div>
         {maintMsg && <p className="set-note">{maintMsg}</p>}
         </div>

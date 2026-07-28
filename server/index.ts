@@ -6,6 +6,7 @@ import { config } from "./config.js";
 import { getDb } from "./db/db.js";
 import { router } from "./routes.js";
 import { startCatalogRefresh, startPolling } from "./sync/daemon.js";
+import { getCurrentRpm } from "./osu/api.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -22,26 +23,9 @@ if (fs.existsSync(webDist)) {
   );
 }
 
-// Staged DB import (Settings → Import database): swap BEFORE the DB opens.
-// The previous database is kept as a single rolling backup (.bak, replaced).
-const staged = `${config.dbPath}.import`;
-if (fs.existsSync(staged)) {
-  try {
-    if (fs.existsSync(config.dbPath))
-      fs.copyFileSync(config.dbPath, `${config.dbPath}.bak`);
-    for (const ext of ["-wal", "-shm"])
-      fs.rmSync(config.dbPath + ext, { force: true });
-    fs.renameSync(staged, config.dbPath);
-    console.log(
-      `[db] staged import applied (previous database saved as ${path.basename(config.dbPath)}.bak)`
-    );
-  } catch (e) {
-    console.error("[db] staged import failed, keeping the current database:", e);
-    fs.rmSync(staged, { force: true });
-  }
-}
-
-getDb(); // creates the schema on first launch
+// Staged DB import (Settings → Import database) is applied by getDb(), the only
+// place that opens the file — this call also creates the schema on first launch.
+getDb();
 
 // Startup repair: drop stored scores osu! does not honor (played while the
 // map had no leaderboard) and recompute the affected bests. No-op when clean.
@@ -65,7 +49,7 @@ const server = app.listen(config.port, () => {
   console.log(`[server] http://localhost:${config.port}`);
   if (config.hasCredentials) {
     console.log(
-      `[server] user osu!: ${config.osuUserId}, rate limit: ${config.apiRpm} req/min`
+      `[server] user osu!: ${config.osuUserId}, rate limit: ${getCurrentRpm()} req/min`
     );
     console.log(
       `[sync] polling every ${config.pollIntervalSeconds}s. ` +

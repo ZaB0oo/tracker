@@ -12,6 +12,7 @@ import { OverlayConfig } from "./OverlayConfig";
 import { ShareCard } from "./ShareCard";
 import { firstPlaceLabel, useCountryCode } from "../country";
 import { fmtNum, fmtTime } from "../format";
+import type { PoolMode } from "../types";
 
 
 /** Labels + toasts per action (start / result). `lbl` = "#1 FR", "#1 US"… */
@@ -19,8 +20,8 @@ const actionLabels = (
   lbl: string
 ): Record<string, { start: string; done: (r: Record<string, unknown>) => string }> => ({
   start: { start: "Initial sync started…", done: () => "Initial sync running (tracked in the bar)" },
-  pause: { start: "Pausing backfill…", done: () => "Backfill paused" },
-  resume: { start: "Resuming backfill…", done: () => "Backfill resumed" },
+  pause: { start: "Pausing the score import…", done: () => "Score import paused" },
+  resume: { start: "Resuming the score import…", done: () => "Score import resumed" },
   "poll-now": {
     start: "Polling recent scores…",
     done: (r) => `Poll done: +${Number(r.newScores ?? 0)} new score(s)`,
@@ -45,25 +46,43 @@ const actionLabels = (
     done: (r) => `Recompute done: ${fmtNum(Number(r.recomputed ?? 0))} maps`,
   },
   rebackfill: {
-    start: "Re-backfill…",
-    done: () => `Re-backfill + ${lbl} re-sweep started (tracked in the bar)`,
+    start: "Re-importing every score…",
+    done: () => `Score re-import + ${lbl} re-sweep started (tracked in the bar)`,
   },
   "catalog-full?force=1": {
     start: "Re-scanning catalog…",
     done: () => "Catalog re-scan started (tracked in the bar)",
   },
+  ...Object.fromEntries(
+    ["osu!", "taiko", "catch", "mania"].flatMap((n, r) => [
+      [`backfill-pause/${r}`, { start: `Pausing the ${n} score import…`, done: () => `${n} score import paused (its passes are skipped)` }],
+      [`backfill-resume/${r}`, { start: `Resuming the ${n} score import…`, done: () => `${n} score import resumed` }],
+    ])
+  ),
+  "start-ruleset/1": { start: "Starting taiko sync…", done: () => "taiko sync started (catalog → scores, tracked in the bar)" },
+  "start-ruleset/2": { start: "Starting catch sync…", done: () => "catch sync started (catalog → scores, tracked in the bar)" },
+  "start-ruleset/3": { start: "Starting mania sync…", done: () => "mania sync started (catalog → scores, tracked in the bar)" },
 });
 
 const PHASE_LABELS: Record<string, string> = {
   idle: "idle",
   done: "up to date",
   error: "error",
-  backfill: "backfill",
+  backfill: "importing scores",
   catalog: "catalog",
   enrich: "enrichment",
 };
 
-export function SyncBar() {
+export function SyncBar({
+  ruleset = 0,
+  pool = "all",
+  keys = [],
+}: {
+  ruleset?: number;
+  /** current view, used as the overlay URL's defaults */
+  pool?: PoolMode;
+  keys?: string[];
+}) {
   const qc = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
   const [errOpen, setErrOpen] = useState(false);
@@ -80,7 +99,7 @@ export function SyncBar() {
   });
   const { data: auth } = useQuery({
     queryKey: ["auth"],
-    queryFn: fetchAuthStatus,
+    queryFn: () => fetchAuthStatus(),
     refetchInterval: 60_000,
   });
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -91,8 +110,26 @@ export function SyncBar() {
 
   if (!s) return null;
 
-  const pct =
-    s.backfill.total > 0 ? (s.backfill.fetched / s.backfill.total) * 100 : 0;
+  // the progress bar follows the VIEWED ruleset (specific maps + converts)
+  const rsEntry = s.rulesets?.find((r) => r.ruleset === ruleset);
+  const bf =
+    ruleset === 0 || !rsEntry
+      ? { fetched: s.backfill.fetched, total: s.backfill.total }
+      : {
+          fetched: rsEntry.specificFetched + rsEntry.convertsFetched,
+          total: rsEntry.specificTotal + rsEntry.convertsTotal,
+        };
+  const pct = bf.total > 0 ? (bf.fetched / bf.total) * 100 : 0;
+  // pending work in ANY started mode: the backfill process is shared, so the
+  // resume button must not depend on the currently viewed ruleset
+  const anyPending =
+    s.backfill.fetched < s.backfill.total ||
+    (s.rulesets ?? []).some(
+      (r) =>
+        r.started &&
+        r.specificFetched + r.convertsFetched <
+          r.specificTotal + r.convertsTotal
+    );
   // also after a failed attempt (phase "error"): the sync must be retryable
   const needsInit =
     (s.phase === "idle" || s.phase === "error") && s.backfill.fetched === 0;
@@ -123,7 +160,7 @@ export function SyncBar() {
       <div className="sync-left">
         <span className={`sync-phase ${s.busy?.length ? "sync-phase-busy" : ""}`}>
           {s.busy?.length
-            ? `⏳ ${s.busy.join(" + ")}`
+            ? s.busy.join(" + ")
             : PHASE_LABELS[s.phase] ?? s.phase}
         </span>
         <div className="sync-feed">
@@ -201,11 +238,15 @@ export function SyncBar() {
       <div className="sync-mid">
         <div
           className="sync-progress"
-          title={`Scores fetched for ${fmtNum(s.backfill.fetched)} maps out of ${fmtNum(s.backfill.total)} in the catalog`}
+          title={
+            ruleset === 0 || !rsEntry
+              ? `Scores fetched for ${fmtNum(bf.fetched)} maps out of ${fmtNum(bf.total)} in the catalog`
+              : `${rsEntry.name}: specific ${fmtNum(rsEntry.specificFetched)}/${fmtNum(rsEntry.specificTotal)} + converts ${fmtNum(rsEntry.convertsFetched)}/${fmtNum(rsEntry.convertsTotal)}`
+          }
         >
           <div className="sync-progress-fill" style={{ width: `${pct}%` }} />
           <span>
-            maps scanned {fmtNum(s.backfill.fetched)}/{fmtNum(s.backfill.total)} ({pct.toFixed(1)}%)
+            maps scanned {fmtNum(bf.fetched)}/{fmtNum(bf.total)} ({pct.toFixed(1)}%)
           </span>
         </div>
         <span className="sync-poll">
@@ -214,19 +255,96 @@ export function SyncBar() {
         </span>
       </div>
       <div className="sync-actions">
-        {needsInit && (
-          <button className="primary" onClick={() => act("start")}>
-            Start initial sync
-          </button>
-        )}
-        {s.backfill.running ? (
-          <button onClick={() => act("pause")}>Pause backfill</button>
-        ) : (
-          !needsInit &&
-          s.backfill.fetched < s.backfill.total && (
-            <button onClick={() => act("resume")}>Resume backfill</button>
-          )
-        )}
+        {(() => {
+          // per-mode start, osu!std included: nothing runs for a mode before it
+          const rs = s.rulesets?.find((r) => r.ruleset === ruleset);
+          if (!rs) return null;
+          const action =
+            rs.ruleset === 0 ? ("start" as const) : (`start-ruleset/${rs.ruleset}` as const);
+          if (!rs.active)
+            return (
+              <button
+                className="primary"
+                disabled
+                title={`Enable ${rs.name} in Settings first`}
+              >
+                Start initial {rs.name} sync
+              </button>
+            );
+          if (!rs.started) {
+            // Starting another mode already imports the osu! CATALOG (its maps
+            // are that mode's converts), but not your osu! scores: this button
+            // stays the way to actually track osu! itself.
+            const stdIsConvertSource =
+              rs.ruleset === 0 &&
+              (s.rulesets ?? []).some((r) => r.ruleset !== 0 && r.started);
+            return (
+              <button
+                className="primary"
+                title={
+                  stdIsConvertSource
+                    ? "Adds your osu! scores. The catalog is already there for the converts."
+                    : `Import the ${rs.name} catalog, then your scores. Takes days, resumable.`
+                }
+                onClick={() => act(action)}
+              >
+                Start initial {rs.name} sync
+              </button>
+            );
+          }
+          // started but nothing fetched yet (or a failed attempt): retryable
+          return needsInit ? (
+            <button
+              className="primary"
+              title={`No ${rs.name} score imported yet. Run it again.`}
+              onClick={() => act(action)}
+            >
+              Retry initial {rs.name} sync
+            </button>
+          ) : null;
+        })()}
+        {(() => {
+          const pausedModes = s.backfillPausedModes ?? [];
+          const viewedPaused = pausedModes.includes(ruleset);
+          const name = ruleset === 0 ? "osu!" : rsEntry?.name ?? "";
+          if (viewedPaused)
+            return (
+              <button
+                onClick={() => act(`backfill-resume/${ruleset}`)}
+                title={`Resume the ${name} import only`}
+              >
+                Resume {name} score import
+              </button>
+            );
+          // pause only where it means something: the pass currently running
+          // belongs to the viewed mode (other tabs would just be confusing)
+          if (s.backfill.running && s.backfillPassRuleset === ruleset)
+            return (
+              <button
+                onClick={() => act(`backfill-pause/${ruleset}`)}
+                title={`Pause the ${name} import only`}
+              >
+                Pause {name} score import
+              </button>
+            );
+          // mode-scoped like the pause above: the bar always talks about the
+          // viewed tab, "all modes" lives in the menu
+          const viewedPending = rsEntry
+            ? rsEntry.specificFetched + rsEntry.convertsFetched <
+              rsEntry.specificTotal + rsEntry.convertsTotal
+            : anyPending;
+          return (
+            !needsInit &&
+            viewedPending && (
+              <button
+                onClick={() => act(`backfill-resume/${ruleset}`)}
+                title={`Resume the ${name} score import (the other modes are unaffected)`}
+              >
+                Resume {name} score import
+              </button>
+            )
+          );
+        })()}
         {auth && !connected && (
           <button
             className="primary"
@@ -311,6 +429,19 @@ export function SyncBar() {
 
               <details className="menu-group" open>
               <summary className="menu-section">Synchronization</summary>
+              {s.backfill.running && (
+                <button onClick={() => act("pause")} title="Pause every mode">
+                  Pause all score imports
+                </button>
+              )}
+              {((s.backfillPausedModes?.length ?? 0) > 0 || !s.backfill.running) && (
+                <button
+                  onClick={() => act("resume")}
+                  title="Resume every mode and clear the pauses"
+                >
+                  Resume all score imports
+                </button>
+              )}
               <button onClick={() => act("poll-now")} title="Fetch your recent scores (24h)">
                 Poll new scores
               </button>
@@ -353,7 +484,7 @@ export function SyncBar() {
               ) : (
                 <button
                   onClick={() => act("global-sweep")}
-                  title="Track your global top 1/8/15/25/50/100 positions (1 request per played map, resumable; held tops are re-checked periodically)"
+                  title="Track your global top 100 positions. Slow, resumable."
                 >
                   Start/resume global tops sweep
                 </button>
@@ -385,10 +516,24 @@ export function SyncBar() {
         ))}
       </div>
       {advancedOpen && (
-        <AdvancedSettings onClose={() => setAdvancedOpen(false)} notify={toast} />
+        <AdvancedSettings ruleset={ruleset} onClose={() => setAdvancedOpen(false)} notify={toast} />
       )}
-      {overlayOpen && <OverlayConfig onClose={() => setOverlayOpen(false)} />}
-      {shareOpen && <ShareCard onClose={() => setShareOpen(false)} />}
+      {overlayOpen && (
+        <OverlayConfig
+          onClose={() => setOverlayOpen(false)}
+          ruleset={ruleset}
+          pool={pool}
+          keys={keys}
+        />
+      )}
+      {shareOpen && (
+        <ShareCard
+          onClose={() => setShareOpen(false)}
+          ruleset={ruleset}
+          pool={pool}
+          keys={keys}
+        />
+      )}
     </div>
   );
 }

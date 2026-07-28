@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { mapUrl } from "../rulesets";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { fetchClears, fetchCountryHistory, fetchGlobalHistory } from "../api";
 import { firstPlaceLabel, useCountryCode } from "../country";
@@ -26,10 +27,10 @@ const fmtDate = (at: string) => {
 };
 const fmtInt = (n: number | null | undefined) => (n == null ? "—" : fmtNum(n));
 
-function ClearsList({ onCtx }: { onCtx: OnMapContext }) {
+function ClearsList({ onCtx, ruleset }: { onCtx: OnMapContext; ruleset: number }) {
   const query = useInfiniteQuery({
-    queryKey: ["clears"],
-    queryFn: ({ pageParam }) => fetchClears(pageParam, PAGE),
+    queryKey: ["clears", ruleset],
+    queryFn: ({ pageParam }) => fetchClears(pageParam, PAGE, undefined, ruleset),
     initialPageParam: 0,
     getNextPageParam: (last, all) => {
       const loaded = all.reduce((n, p) => n + p.rows.length, 0);
@@ -58,7 +59,7 @@ function ClearsList({ onCtx }: { onCtx: OnMapContext }) {
           key={c.id}
           className={`fr-event${i % 2 ? " row-alt" : ""}`}
           onDoubleClick={() =>
-            window.open(`https://osu.ppy.sh/b/${c.beatmap_id}`, "_blank")
+            window.open(mapUrl(c.beatmap_id, ruleset), "_blank")
           }
           onContextMenu={(e) => onCtx(e, c)}
           title="Double-click: open on osu.ppy.sh — right-click: actions"
@@ -97,14 +98,16 @@ function ClearsList({ onCtx }: { onCtx: OnMapContext }) {
 function CountryList({
   filter,
   onCtx,
+  ruleset,
 }: {
   filter: "" | "gained" | "lost";
   onCtx: OnMapContext;
+  ruleset: number;
 }) {
   const query = useInfiniteQuery({
-    queryKey: ["country-history", filter],
+    queryKey: ["country-history", filter, ruleset],
     queryFn: ({ pageParam }) =>
-      fetchCountryHistory(pageParam, PAGE, filter || undefined),
+      fetchCountryHistory(pageParam, PAGE, filter || undefined, ruleset),
     initialPageParam: 0,
     getNextPageParam: (last, all) => {
       const loaded = all.reduce((n, p) => n + p.rows.length, 0);
@@ -137,7 +140,7 @@ function CountryList({
           key={e.id}
           className={`fr-event fr-event-${e.event}${i % 2 ? " row-alt" : ""}`}
           onDoubleClick={() =>
-            window.open(`https://osu.ppy.sh/b/${e.beatmap_id}`, "_blank")
+            window.open(mapUrl(e.beatmap_id, ruleset), "_blank")
           }
           onContextMenu={(ev) => onCtx(ev, e)}
           title="Double-click: open on osu.ppy.sh — right-click: actions"
@@ -192,14 +195,16 @@ function CountryList({
 function GlobalList({
   filter,
   onCtx,
+  ruleset,
 }: {
   filter: "" | "gained" | "lost";
   onCtx: OnMapContext;
+  ruleset: number;
 }) {
   const query = useInfiniteQuery({
-    queryKey: ["global-history", filter],
+    queryKey: ["global-history", filter, ruleset],
     queryFn: ({ pageParam }) =>
-      fetchGlobalHistory(pageParam, PAGE, filter || undefined),
+      fetchGlobalHistory(pageParam, PAGE, filter || undefined, ruleset),
     initialPageParam: 0,
     getNextPageParam: (last, all) => {
       const loaded = all.reduce((n, p) => n + p.rows.length, 0);
@@ -239,7 +244,7 @@ function GlobalList({
             key={e.id}
             className={`fr-event fr-event-${gained ? "gained" : "lost"}${i % 2 ? " row-alt" : ""}`}
             onDoubleClick={() =>
-              window.open(`https://osu.ppy.sh/b/${e.beatmap_id}`, "_blank")
+              window.open(mapUrl(e.beatmap_id, ruleset), "_blank")
             }
             onContextMenu={(ev) => onCtx(ev, e)}
             title="Double-click: open on osu.ppy.sh — right-click: actions"
@@ -284,7 +289,7 @@ function GlobalList({
   );
 }
 
-export function HistoryView() {
+export function HistoryView({ ruleset = 0 }: { ruleset?: number }) {
   const country = useCountryCode();
   const [src, setSrc] = useState<"country" | "global">("country");
   const [frFilter, setFrFilter] = useState<"" | "gained" | "lost">("");
@@ -300,7 +305,7 @@ export function HistoryView() {
       <div className="history-cols">
         <div className="panel history-panel">
           <h3>Clears</h3>
-          <ClearsList onCtx={onCtx} />
+          <ClearsList onCtx={onCtx} ruleset={ruleset} />
         </div>
         <div className="panel history-panel">
           <div className="hist-col-head">
@@ -331,9 +336,9 @@ export function HistoryView() {
             </div>
           </div>
           {src === "country" ? (
-            <CountryList filter={frFilter} onCtx={onCtx} />
+            <CountryList filter={frFilter} onCtx={onCtx} ruleset={ruleset} />
           ) : (
-            <GlobalList filter={frFilter} onCtx={onCtx} />
+            <GlobalList filter={frFilter} onCtx={onCtx} ruleset={ruleset} />
           )}
         </div>
       </div>
@@ -397,7 +402,7 @@ export function HistoryView() {
         </>
       )}
       {detailId != null && (
-        <MapModal beatmapId={detailId} onClose={() => setDetailId(null)} />
+        <MapModal beatmapId={detailId} ruleset={ruleset} onClose={() => setDetailId(null)} />
       )}
     </div>
   );

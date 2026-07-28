@@ -3,6 +3,7 @@ import { getDb } from "../db/db.js";
 import { evalMetric, previewMetric } from "../logic/metricEval.js";
 import { mapWhere, scoreWhere, type MetricParams } from "../logic/metrics.js";
 import { getModdedStarRating } from "../osu/api.js";
+import { parseRulesetParam, poolWhere } from "../logic/rulesets.js";
 
 const KINDS = ["count", "ranked_score", "pp"] as const;
 
@@ -33,13 +34,21 @@ export const metricsRouter = Router();
 // Real maxima of the catalog, used as slider bounds in the metric builder
 // (instead of arbitrary caps / ∞). Loved maps are excluded: their broken SR /
 // BPM outliers would stretch the sliders into uselessness.
-metricsRouter.get("/metrics/filter-bounds", (_req, res) => {
+metricsRouter.get("/metrics/filter-bounds", (req, res) => {
   const db = getDb();
+  const R = parseRulesetParam(req.query.ruleset);
+  const pool = R === 0 ? "b.ruleset = 0" : `(b.ruleset = ${R} OR b.ruleset = 0)`;
+  const caJoin =
+    R === 0
+      ? ""
+      : `LEFT JOIN convert_attrs ca ON ca.beatmap_id = b.id AND ca.ruleset = ${R} AND b.ruleset != ${R}`;
+  const srX = R === 0 ? "b.star_rating" : "COALESCE(ca.star_rating, b.star_rating)";
+  const comboX = R === 0 ? "b.max_combo" : "COALESCE(ca.max_combo, b.max_combo)";
   const b = db
     .prepare(
-      `SELECT MAX(star_rating) sr, MAX(total_length) len, MAX(max_combo) combo,
-         MAX(bpm) bpm
-       FROM beatmaps WHERE ruleset = 0 AND status IN (1, 2)`
+      `SELECT MAX(${srX}) sr, MAX(b.total_length) len, MAX(${comboX}) combo,
+         MAX(b.bpm) bpm
+       FROM beatmaps b ${caJoin} WHERE ${pool} AND b.status IN (1, 2)`
     )
     .get() as { sr: number | null; len: number | null; combo: number | null; bpm: number | null };
   const yr = db
@@ -49,10 +58,10 @@ metricsRouter.get("/metrics/filter-bounds", (_req, res) => {
     )
     .get() as { y: string | null };
   const g = db
-    .prepare("SELECT MAX(global_rank) r FROM beatmap_user")
+    .prepare(`SELECT MAX(global_rank) r FROM beatmap_user WHERE ruleset = ${R}`)
     .get() as { r: number | null };
   const pp = db
-    .prepare("SELECT MAX(pp) p, MAX(total_score) std FROM scores")
+    .prepare(`SELECT MAX(pp) p, MAX(total_score) std FROM scores WHERE ruleset = ${R}`)
     .get() as { p: number | null; std: number | null };
   res.json({
     sr: b.sr,
@@ -97,24 +106,29 @@ metricsRouter.get("/overlay-metrics", (req, res) => {
     .all() as { id: number; name: string; params: string }[];
   // Total (and %) are only meaningful when the metric restricts its map pool:
   // for "all maps" metrics the total is just the whole catalog — noise on
-  // stream. total: 0 tells the overlay to hide it.
-  const catalogTotal = (
-    getDb()
-      .prepare(
-        "SELECT COUNT(*) c FROM beatmaps WHERE ruleset = 0 AND status IN (1, 2, 4)"
-      )
-      .get() as { c: number }
-  ).c;
+  // stream. total: 0 tells the overlay to hide it. Compared against the catalog
+  // OF THE METRIC'S OWN mode and pool, not always std's.
+  const catalogTotal = (ruleset: number, pool?: string) =>
+    (
+      getDb()
+        .prepare(
+          `SELECT COUNT(*) c FROM beatmaps b
+           WHERE ${poolWhere(ruleset, pool)} AND b.status IN (1, 2, 4)`
+        )
+        .get() as { c: number }
+    ).c;
   res.json({
     metrics: rows.map((r) => {
       const params = JSON.parse(r.params) as MetricParams;
       const { count, total } = evalMetric(params, "month");
+      const whole = catalogTotal(params.ruleset ?? 0, params.pool);
       return {
         id: r.id,
         name: r.name,
         kind: params.kind,
+        ruleset: params.ruleset ?? 0,
         count,
-        total: total !== catalogTotal ? total : 0,
+        total: total !== whole ? total : 0,
       };
     }),
   });
@@ -218,8 +232,9 @@ metricsRouter.get("/metrics/:id/pp-top", (req, res) => {
        FROM scores s
        JOIN beatmaps b ON b.id = s.beatmap_id
        JOIN beatmapsets st ON st.id = b.beatmapset_id
-       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
-       WHERE ${mapWhere(p.map)} AND ${scoreWhere(p.score)}
+       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${p.ruleset ?? 0}
+       WHERE s.ruleset = ${p.ruleset ?? 0}
+         AND ${mapWhere(p.map, { ruleset: p.ruleset ?? 0, pool: p.pool })} AND ${scoreWhere(p.score)}
          AND s.pp IS NOT NULL AND s.passed = 1 AND ${bound}
        GROUP BY s.beatmap_id
        ORDER BY pp DESC

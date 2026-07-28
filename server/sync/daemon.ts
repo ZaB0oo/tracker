@@ -9,9 +9,18 @@
  *  - daily delta: timestamp persisted (catalog_delta_at)
  */
 import { config } from "../config.js";
-import { getDb, getState, setState } from "../db/db.js";
+import { catalogRulesets, getActiveRulesets, getDb, getStartedRulesets, getState, setState, sqlIn } from "../db/db.js";
+import {
+  poolGrowth,
+  rulesetDef,
+  shortModeName,
+  seedCounts,
+  seedNeedsLookup,
+  type SeedVersion,
+} from "../logic/rulesets.js";
 import {
   getBeatmapsByIds,
+  getConvertAttrs,
   getCountryTop,
   getCountryTopScores,
   getModdedStarRating,
@@ -33,6 +42,9 @@ import {
   enrichMaxCombo,
   importCatalogFromApi,
   importOneSet,
+  poolCounts,
+  recheckDelistedSets,
+  currentEnumMode,
   repairOversizedSets,
   updateCatalogDelta,
   verifyYear,
@@ -135,6 +147,10 @@ const status = new Proxy(statusData, {
 }) as DaemonStatus;
 
 let backfillWanted = false;
+/** Persistent per-mode backfill pause: those passes are skipped. */
+export function isBackfillModePaused(r: number): boolean {
+  return getState(`backfill_paused_m${r}`) === "1";
+}
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let deltaTimer: ReturnType<typeof setInterval> | null = null;
 let enrichCatchupRunning = false;
@@ -143,6 +159,8 @@ let catalogRunning = false;
 
 export function getDaemonStatus(): DaemonStatus & {
   busy: string[];
+  backfillPausedModes: number[];
+  backfillPassRuleset: number | null;
   sweeps: {
     country: boolean;
     countryChecked: number;
@@ -152,6 +170,18 @@ export function getDaemonStatus(): DaemonStatus & {
     globalChecked: number;
     globalPending: number;
   };
+  rulesets: {
+    ruleset: number;
+    name: string;
+    /** enabled in Settings (a disabled mode cannot be started) */
+    active: boolean;
+    started: boolean;
+    backfillPaused: boolean;
+    specificTotal: number;
+    specificFetched: number;
+    convertsTotal: number;
+    convertsFetched: number;
+  }[];
 } {
   const db = getDb();
   const total = (
@@ -163,7 +193,7 @@ export function getDaemonStatus(): DaemonStatus & {
     db
       .prepare(
         `SELECT COUNT(*) c FROM beatmaps b
-         JOIN beatmap_user u ON u.beatmap_id = b.id
+         JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = 0
          WHERE b.ruleset = 0 AND u.fetched_at IS NOT NULL`
       )
       .get() as { c: number }
@@ -175,16 +205,25 @@ export function getDaemonStatus(): DaemonStatus & {
 
   // What is running RIGHT NOW (the old "phase" only covered the pipeline)
   const busy: string[] = [];
-  if (status.phase === "catalog" || catalogRunning) busy.push("catalog import");
-  if (status.phase === "enrich" || enrichCatchupRunning) busy.push("enrichment");
-  if (seedRunning) busy.push("known-sets import");
-  if (status.backfill.running) busy.push("backfill");
+  busy.push(...maintenanceTasks);
+  if (status.phase === "catalog" || catalogRunning) {
+    const m = currentEnumMode();
+    busy.push(
+      m == null ? "catalog import" : `catalog import (${shortModeName(m)})`
+    );
+  }
+  for (const m of queuedEnumModes)
+    busy.push(`catalog import (${shortModeName(m)}) queued`);
+  if (status.phase === "enrich" || enrichCatchupRunning)
+    busy.push("map details (all modes)");
+  if (seedRunning) busy.push("known-sets import (all modes)");
+  if (status.backfill.running) busy.push(backfillPassLabel);
   if (countryRunning) {
     const cc = getStoredCountryCode();
-    busy.push(`${cc ? `#1 ${cc}` : "country #1"} sweep`);
+    busy.push(`${cc ? `#1 ${cc}` : "country #1"} sweep (all modes)`);
   }
-  if (globalRunning) busy.push("global tops sweep");
-  if (deltaRunning) busy.push("new maps");
+  if (globalRunning) busy.push("global tops sweep (all modes)");
+  if (deltaRunning) busy.push("new maps (all modes)");
   // Same scope as the sweep queues (catalog maps only): a stray beatmap_user
   // row outside ranked/approved/loved must not inflate the totals.
   const sweepCount = (cond: string) =>
@@ -193,7 +232,9 @@ export function getDaemonStatus(): DaemonStatus & {
         .prepare(
           `SELECT COUNT(*) c FROM beatmap_user u
            JOIN beatmaps b ON b.id = u.beatmap_id
-           WHERE u.played = 1 AND b.ruleset = 0 AND b.status IN (1, 2, 4)
+           WHERE u.played = 1 AND b.status IN (1, 2, 4)
+             AND u.ruleset IN (${sqlIn(getStartedRulesets())})
+             AND (b.ruleset = u.ruleset OR b.ruleset = 0)
              AND ${cond}`
         )
         .get() as { c: number }
@@ -226,10 +267,57 @@ export function getDaemonStatus(): DaemonStatus & {
   // cleared (UI button), stop displaying it forever.
   const phase =
     status.phase === "error" && status.errors.length === 0 ? "idle" : status.phase;
+  // Per-ruleset backfill progress (specific maps + converts), active ones only.
+  const backfillPausedModes = [0, 1, 2, 3].filter(isBackfillModePaused);
+  // All four modes, so the UI can offer (or grey out) each mode's start button.
+  // Inactive modes report zeros instead of running four COUNTs for nothing —
+  // this payload is polled every couple of seconds.
+  const active = getActiveRulesets();
+  const rulesets = [0, 1, 2, 3]
+    .map((r) => {
+      if (!active.includes(r))
+        return {
+          ruleset: r,
+          name: shortModeName(r),
+          active: false,
+          started: false,
+          backfillPaused: false,
+          specificTotal: 0,
+          specificFetched: 0,
+          convertsTotal: 0,
+          convertsFetched: 0,
+        };
+      const cnt = (mapMode: number, fetchedOnly: boolean) =>
+        (
+          db
+            .prepare(
+              `SELECT COUNT(*) c FROM beatmaps b
+               ${fetchedOnly ? "JOIN" : "LEFT JOIN"} beatmap_user u
+                 ON u.beatmap_id = b.id AND u.ruleset = ${r}
+               WHERE b.ruleset = ${mapMode}${fetchedOnly ? " AND u.fetched_at IS NOT NULL" : ""}`
+            )
+            .get() as { c: number }
+        ).c;
+      return {
+        ruleset: r,
+        name: shortModeName(r),
+        active: true,
+        started: getState(`ruleset_started_${r}`) === "1",
+        backfillPaused: isBackfillModePaused(r),
+        specificTotal: cnt(r, false),
+        specificFetched: cnt(r, true),
+        // a std map is not a convert of itself
+        convertsTotal: r === 0 ? 0 : cnt(0, false),
+        convertsFetched: r === 0 ? 0 : cnt(0, true),
+      };
+    });
   return {
     ...status,
     phase,
     busy,
+    backfillPausedModes,
+    backfillPassRuleset: status.backfill.running ? backfillPassRuleset : null,
+    rulesets,
     sweeps: {
       country: countryRunning,
       global: globalRunning,
@@ -256,8 +344,26 @@ function logError(e: unknown, ctx?: string) {
 /** Progress callback shared by the enrichment passes. */
 const enrichProgress = (done: number, total: number) => {
   status.enrich = { done, total };
-  logActivity("enrich", `${done}/${total} maps enriched (max combo / SR)`);
+  logActivity("enrich", `${done}/${total} maps read (max combo, checksum)`);
 };
+
+/**
+ * Fills what the search does not give: max_combo (FC reference, classic score,
+ * combo filter) and the .osu checksum, 50 maps per request. Runs AFTER the
+ * catalog is complete, so the map count is already final while it works.
+ */
+export async function enrichCatalog(): Promise<number> {
+  // `phase` is the initial pipeline's own progress, and nothing else resets it:
+  // a background pass that left it on "enrich" kept "map details" in the sync
+  // bar for ever, even when the pass had nothing to read and returned at once.
+  const prev = status.phase;
+  status.phase = "enrich";
+  try {
+    return await enrichMaxCombo(enrichProgress);
+  } finally {
+    if (status.phase === "enrich") status.phase = prev;
+  }
+}
 
 /**
  * Fetch and store my full score list for one map. Errors are logged and
@@ -267,16 +373,68 @@ const enrichProgress = (done: number, total: number) => {
 async function backfillMap(
   beatmapId: number,
   priority: "high" | "low",
-  errCtx: string
+  errCtx: string,
+  ruleset = 0
 ): Promise<SoloScore[] | null> {
   try {
-    const scores = await getUserBeatmapScores(beatmapId, config.osuUserId, priority);
-    if (scores.length === 0) markFetchedEmpty(beatmapId);
-    else saveScores(beatmapId, scores);
+    const scores = await getUserBeatmapScores(
+      beatmapId,
+      config.osuUserId,
+      priority,
+      rulesetDef(ruleset).apiName
+    );
+    if (scores.length === 0) markFetchedEmpty(beatmapId, ruleset);
+    else saveScores(beatmapId, scores, { ruleset });
     return scores;
   } catch (e) {
     logError(e, errCtx);
     return null;
+  }
+}
+
+/**
+ * Background fill of convert_attrs: per-mode star rating and max combo of the
+ * PLAYED converts (1 request each, low priority, resumable — unplayed
+ * converts keep the std values as approximation until played). Kicked by the
+ * periodic tick and after each backfill completion.
+ */
+let convertAttrsRunning = false;
+export async function fillConvertAttrs(): Promise<void> {
+  if (convertAttrsRunning) return;
+  const modes = getStartedRulesets().filter((r) => r !== 0);
+  if (modes.length === 0) return;
+  convertAttrsRunning = true;
+  try {
+    const db = getDb();
+    const next = db.prepare(
+      `SELECT u.beatmap_id AS id, u.ruleset AS r FROM beatmap_user u
+       JOIN beatmaps b ON b.id = u.beatmap_id
+       WHERE u.played = 1 AND u.ruleset IN (${modes.join(",")}) AND b.ruleset = 0
+         AND NOT EXISTS (SELECT 1 FROM convert_attrs ca
+                         WHERE ca.beatmap_id = u.beatmap_id AND ca.ruleset = u.ruleset)
+       LIMIT 100`
+    );
+    const ins = db.prepare(
+      `INSERT OR REPLACE INTO convert_attrs (beatmap_id, ruleset, star_rating, max_combo, fetched_at)
+       VALUES (?, ?, ?, ?, datetime('now'))`
+    );
+    let done = 0;
+    for (;;) {
+      const rows = next.all() as { id: number; r: number }[];
+      if (rows.length === 0) break;
+      for (const { id, r } of rows) {
+        const a = await getConvertAttrs(id, rulesetDef(r).apiName, "low");
+        if (!a) return; // API down: the next tick retries
+        ins.run(id, r, a.starRating, a.maxCombo);
+        done++;
+      }
+      logActivity(
+        "convert attrs",
+        `${done} played convert(s) enriched (per-mode SR / max combo)`
+      );
+    }
+  } finally {
+    convertAttrsRunning = false;
   }
 }
 
@@ -296,13 +454,26 @@ const outOfScopeScoreIds = new Set<number>();
 const unimportableMapIds = new Set<number>();
 
 export async function pollRecentScores(): Promise<number> {
+  // one pass per active ruleset — the recent endpoint is per mode
+  let total = 0;
+  for (const mode of getStartedRulesets())
+    total += await pollRecentScoresForMode(mode);
+  return total;
+}
+
+async function pollRecentScoresForMode(mode: number): Promise<number> {
   if (outOfScopeScoreIds.size > 10_000) outOfScopeScoreIds.clear();
   if (unimportableMapIds.size > 10_000) unimportableMapIds.clear();
   let offset = 0;
   let newCount = 0;
   const byBeatmap = new Map<number, SoloScore[]>();
   for (;;) {
-    const batch = await getRecentScores(config.osuUserId, 50, offset);
+    const batch = await getRecentScores(
+      config.osuUserId,
+      50,
+      offset,
+      rulesetDef(mode).apiName
+    );
     for (const s of batch) {
       const bid = s.beatmap_id ?? s.beatmap?.id;
       if (!bid) continue;
@@ -313,6 +484,7 @@ export async function pollRecentScores(): Promise<number> {
     if (batch.length < 50) break;
     offset += 50;
   }
+  if (byBeatmap.size === 0) return 0;
 
   const db = getDb();
 
@@ -322,7 +494,7 @@ export async function pollRecentScores(): Promise<number> {
   // nothing "fresh" on it and its best would never notify.
   const exists = db.prepare("SELECT 1 FROM scores WHERE id = ?");
   const preStateStmt = db.prepare(
-    "SELECT played, best_lazer_score_id AS best FROM beatmap_user WHERE beatmap_id = ?"
+    `SELECT played, best_lazer_score_id AS best FROM beatmap_user WHERE beatmap_id = ? AND ruleset = ${mode}`
   );
   const freshByMap = new Map<number, SoloScore[]>();
   const preState = new Map<
@@ -402,7 +574,10 @@ export async function pollRecentScores(): Promise<number> {
     newCount += fresh.length;
     // markFetched: false => the map stays in the backfill queue, which will
     // later fetch the FULL list (old bests included)
-    const result = saveScores(beatmapId, fresh, { markFetched: false });
+    const result = saveScores(beatmapId, fresh, {
+      markFetched: false,
+      ruleset: mode,
+    });
     logActivity(
       "poll",
       () => `${mapLabel(beatmapId)} — ${fresh.length} new score(s)`
@@ -450,7 +625,7 @@ export async function pollRecentScores(): Promise<number> {
   // it, the map would wait its turn behind the whole initial sweep).
   if (freshBeatmapIds.length > 0 && isUserConnected()) {
     const invalidateCountry = db.prepare(
-      "UPDATE beatmap_user SET country_checked_at = NULL WHERE beatmap_id = ?"
+      `UPDATE beatmap_user SET country_checked_at = NULL WHERE beatmap_id = ? AND ruleset = ${mode}`
     );
     for (const id of freshBeatmapIds) {
       try {
@@ -459,12 +634,18 @@ export async function pollRecentScores(): Promise<number> {
         const wasFirst =
           (
             db
-              .prepare("SELECT country_first FROM beatmap_user WHERE beatmap_id = ?")
+              .prepare(
+                `SELECT country_first FROM beatmap_user WHERE beatmap_id = ? AND ruleset = ${mode}`
+              )
               .get(id) as { country_first: number } | undefined
           )?.country_first === 1;
-        const countryScores = await getCountryTopScores(id, "high");
+        const countryScores = await getCountryTopScores(
+          id,
+          "high",
+          rulesetDef(mode).apiName
+        );
         const top = countryScores[0] ?? null;
-        applyCountryCheck(id, top, true);
+        applyCountryCheck(id, top, true, mode);
         // Discord: mark the best as "country #1 at submit time" (display only,
         // no country event notifications). The runner-up is the previous
         // holder — the player this score just sniped.
@@ -483,7 +664,7 @@ export async function pollRecentScores(): Promise<number> {
         // AND schedule a quick confirmation ~10 min from now.
         if (!(top && top.user_id === config.osuUserId)) {
           invalidateCountry.run(id);
-          scheduleCountryConfirm(id);
+          scheduleCountryConfirm(id, mode);
         }
       } catch (e) {
         logError(e, `immediate country check map ${id}`);
@@ -504,21 +685,27 @@ export async function pollRecentScores(): Promise<number> {
     // since the 2026 reading rework)
     const DIFF_MODS = new Set(["DT", "NC", "HT", "DC", "HR", "EZ", "FL", "HD", "TD"]);
     for (const e of bestEvents) {
-      if (discordOn) {
+      if (discordOn && mode === 0) {
+        // modded SR display: std only for now (the attributes cache is std)
         const acronyms = parseModAcronyms(e.modsJson).filter((a) => a !== "CL");
         if (acronyms.some((a) => DIFF_MODS.has(a)))
           e.moddedSr = await getModdedStarRating(e.beatmapId, acronyms, "high");
       }
       try {
-        e.globalRank = await getUserBeatmapPosition(e.beatmapId, config.osuUserId, "high");
-        applyGlobalCheck(e.beatmapId, e.globalRank, true);
+        e.globalRank = await getUserBeatmapPosition(
+          e.beatmapId,
+          config.osuUserId,
+          "high",
+          rulesetDef(mode).apiName
+        );
+        applyGlobalCheck(e.beatmapId, e.globalRank, true, mode);
         // the leaderboard may not include the fresh score yet: confirm later
-        scheduleGlobalConfirm(e.beatmapId);
+        scheduleGlobalConfirm(e.beatmapId, mode);
       } catch (err) {
         // failed check: back into the sweep queue, it will retry
         logError(err, `position check map ${e.beatmapId}`);
         db.prepare(
-          "UPDATE beatmap_user SET global_checked_at = NULL WHERE beatmap_id = ?"
+          `UPDATE beatmap_user SET global_checked_at = NULL WHERE beatmap_id = ? AND ruleset = ${mode}`
         ).run(e.beatmapId);
       }
     }
@@ -561,7 +748,9 @@ export function startPolling(): void {
       getDb()
         .prepare(
           `SELECT 1 FROM beatmap_user u JOIN beatmaps b ON b.id = u.beatmap_id
-           WHERE u.played = 1 AND ${cond} AND b.ruleset = 0 LIMIT 1`
+           WHERE u.played = 1 AND ${cond}
+             AND u.ruleset IN (${sqlIn(getStartedRulesets())})
+             AND (b.ruleset = u.ruleset OR b.ruleset = 0) LIMIT 1`
         )
         .get() != null;
     const sweepsFree =
@@ -605,21 +794,104 @@ export function applyPollInterval(): void {
  */
 const MIN_EXPECTED_STD_DIFFS = 140_000;
 
-export async function ensureCatalogComplete(force = false): Promise<number> {
+/** Modes whose enumeration is waiting for the running one (sync-bar visibility). */
+const queuedEnumModes = new Set<number>();
+
+/**
+ * True while a catalog mode has not finished its enumeration. The seed catch-up
+ * must not run then: every set it would look up individually (one request each)
+ * is about to arrive from the search, 50 per page.
+ */
+function catalogIncomplete(): boolean {
+  const cat = catalogRulesets();
+  if (cat.length === 0) return true; // nothing started: nothing to catch up on
+  if (cat.some((m) => m !== 0 && getState(`catalog_done_m${m}`) !== "1"))
+    return true;
+  if (!cat.includes(0)) return false;
+  const std = (
+    getDb()
+      .prepare("SELECT COUNT(*) c FROM beatmaps WHERE ruleset = 0")
+      .get() as { c: number }
+  ).c;
+  return std < MIN_EXPECTED_STD_DIFFS;
+}
+
+export async function ensureCatalogComplete(
+  force = false,
+  modes?: number[]
+): Promise<number> {
   const db = getDb();
-  const count = () =>
-    (db.prepare("SELECT COUNT(*) c FROM beatmaps WHERE ruleset = 0").get() as {
-      c: number;
-    }).c;
-  const before = count();
-  if (before === 0) return 0;
-  if (!force && before >= MIN_EXPECTED_STD_DIFFS) return 0;
-  // the pipeline (or a previous call) is already importing: don't run twice
-  if (catalogRunning || status.phase === "catalog") return 0;
+  let catalog = catalogRulesets();
+  const rowsOf = (ms: number[]) =>
+    (
+      db
+        .prepare(
+          `SELECT COUNT(*) c FROM beatmaps WHERE ruleset IN (${ms.join(",") || "-1"})`
+        )
+        .get() as { c: number }
+    ).c;
+  // Nothing enumerated for ANY catalog mode: leave that to the initial sync…
+  // unless the caller named the modes it wants. A per-mode "Start initial sync"
+  // IS the enumeration entry point on a fresh install where std was never
+  // started — bailing out here made that button run the repair on an empty
+  // database and finish instantly without importing anything.
+  if (!modes?.length && rowsOf(catalog) === 0) return 0;
+  // Another enumeration is running. A background call steps aside, but an
+  // explicit per-mode start WAITS for its turn: returning here silently dropped
+  // the second mode when two were started in a row (its catalog then waited for
+  // the next 6 h tick). Sequential on purpose — the rate limit is global, so
+  // parallel enumerations would only interleave. Everything below is decided
+  // AFTER the wait: the run we waited for has just changed the catalog.
+  if (catalogRunning || status.phase === "catalog") {
+    if (!modes?.length) return 0;
+    // Shown in the busy list, NOT in status.message: the running import writes
+    // there constantly and the two would fight. Without this the second mode
+    // looked dead — its start button gone, nothing happening for an hour.
+    for (const m of modes) queuedEnumModes.add(m);
+    try {
+      while (catalogRunning || status.phase === "catalog")
+        await new Promise((r) => setTimeout(r, 5000));
+    } finally {
+      for (const m of modes) queuedEnumModes.delete(m);
+    }
+  }
+  // The wait can last an hour: re-read what the catalog needs now. A mode
+  // disabled in Settings while its import was queued simply drops out (its
+  // catalog is no longer needed) instead of being enumerated anyway.
+  catalog = catalogRulesets();
+  if (modes?.length) {
+    const dropped = modes.filter((m) => !catalog.includes(m));
+    modes = modes.filter((m) => catalog.includes(m));
+    if (dropped.length > 0)
+      logActivity(
+        "catalog",
+        `${dropped.map(shortModeName).join(" + ")} disabled meanwhile, import cancelled`
+      );
+    if (modes.length === 0) return 0;
+  }
+  // std complete but a started mode's enumeration is unfinished: complete
+  // ONLY that mode — never re-run the std slices as a side effect
+  const unfinishedModes = catalog.filter(
+    (m) => m !== 0 && getState(`catalog_done_m${m}`) !== "1"
+  );
+  // std must be complete whenever it is in the catalog — as a played mode or
+  // as the convert source of another one
+  const stdIncomplete =
+    catalog.includes(0) && rowsOf([0]) < MIN_EXPECTED_STD_DIFFS;
+  if (!force && !stdIncomplete) {
+    if (unfinishedModes.length === 0 && !modes?.length) return 0;
+    modes = modes ?? unfinishedModes;
+  }
+  // Starting a non-std mode also needs its CONVERT SOURCE: its pool counts the
+  // std maps playable in it, so enumerating the mode alone leaves the pool with
+  // its specifics only. Added only when std is actually behind — a complete std
+  // catalog must not be re-scanned because someone started catch.
+  if (modes?.length && stdIncomplete && !modes.includes(0))
+    modes = [...modes, 0];
 
   catalogRunning = true;
   try {
-    return await ensureCatalogCompleteInner(force, before, count);
+    return await ensureCatalogCompleteInner(force, modes);
   } finally {
     catalogRunning = false;
   }
@@ -627,21 +899,27 @@ export async function ensureCatalogComplete(force = false): Promise<number> {
 
 async function ensureCatalogCompleteInner(
   force: boolean,
-  before: number,
-  count: () => number
+  modes?: number[]
 ): Promise<number> {
-  status.message = `Incomplete catalog (${before} diffs, ~150k expected) — completing via the API...`;
+  const before = poolCounts();
+  // neutral wording: the expected size depends on which modes are started,
+  // so no misleading "~150k expected" (std-era message)
+  status.message = modes?.length
+    ? `Enumerating the ${modes.map(shortModeName).join(" + ")} catalog via the API...`
+    : "Completing the catalog via the API...";
   console.log(`[sync] ${status.message}`);
   // without force: resumes unfinished yearly slices (resumable);
   // with force: re-scans everything (also updates statuses + DMCA flags)
   await importCatalogFromApi((m) => {
     status.message = m;
     logActivity("catalog", m);
-  }, { reset: force });
-  await enrichMaxCombo(enrichProgress);
-  const added = count() - before;
-  console.log(`[sync] catalog completed: +${added} diffs`);
-  return added;
+  }, { reset: force, modes });
+  // No enrichment here: the known-sets catch-up runs right after and settles the
+  // map count in a couple of minutes. Reading each map's details takes an hour,
+  // and doing it first left the user staring at a count that was still wrong.
+  const g = poolGrowth(before, poolCounts());
+  console.log(`[sync] catalog completed: ${g.label}`);
+  return g.total;
 }
 
 // ---------- Daily delta: new ranked/loved maps ----------
@@ -659,10 +937,12 @@ export async function refreshCatalogDelta(): Promise<number> {
       (db.prepare("SELECT COUNT(*) c FROM beatmaps").get() as { c: number }).c > 0;
     if (!hasCatalog) return 0; // the initial sync will handle it
 
+    const before = poolCounts();
     const newIds = await updateCatalogDelta((m) => {
       status.message = m;
       logActivity("new maps", m);
     });
+    const added = poolGrowth(before, poolCounts()).label;
     status.lastDeltaNewMaps = newIds.length;
     if (newIds.length === 0) return 0;
 
@@ -672,8 +952,8 @@ export async function refreshCatalogDelta(): Promise<number> {
     // targeted backfill: only the new diffs
     for (const id of newIds)
       await backfillMap(id, "low", `delta: backfill map ${id}`);
-    logActivity("new maps", `+${newIds.length} new diff(s) added`);
-    console.log(`[sync] delta: ${newIds.length} new diffs added`);
+    logActivity("new maps", `${added} added`);
+    console.log(`[sync] delta: ${added} added`);
     return newIds.length;
   } finally {
     deltaRunning = false;
@@ -697,17 +977,27 @@ export function startCatalogRefresh(): void {
           .get() as { c: number }
       ).c;
       if (diffs >= MIN_EXPECTED_STD_DIFFS) {
-        void importMissingKnownSets();
-        // background fill of enrichment gaps (max_combo, and the MD5 checksums
-        // added for collection export on DBs enriched before that column)
-        if (!enrichCatchupRunning && !status.backfill.running) {
-          enrichCatchupRunning = true;
-          void enrichMaxCombo(enrichProgress)
-            .catch((e) => logError(e, "background enrichment"))
-            .finally(() => {
-              enrichCatchupRunning = false;
-            });
-        }
+        // automatic catch-up of the seed list (new app versions can ship a
+        // bigger seed-sets.json: users get the new sets without any action)
+        await importMissingKnownSets();
+      }
+      // then the gaps left by the search: max_combo, and the checksums added
+      // for the collection export on databases enriched before that column.
+      // Background: it can run for an hour and nothing else depends on it.
+      // Never while the catalog is still being completed (repair, known-sets,
+      // dump check) — that pass settles the map count and comes first.
+      if (
+        !enrichCatchupRunning &&
+        !status.backfill.running &&
+        !seedRunning &&
+        maintenanceTasks.size === 0
+      ) {
+        enrichCatchupRunning = true;
+        void enrichCatalog()
+          .catch((e) => logError(e, "map details"))
+          .finally(() => {
+            enrichCatchupRunning = false;
+          });
       }
       // snipe check: re-check my country #1s older than the configured delay
       if (isUserConnected()) {
@@ -717,7 +1007,7 @@ export function startCatalogRefresh(): void {
         getDb()
           .prepare(
             `UPDATE beatmap_user SET country_checked_at = NULL
-             WHERE country_first = 1
+             WHERE ruleset IN (${sqlIn(getStartedRulesets())}) AND country_first = 1
                AND country_checked_at < datetime('now', '-' || ? || ' hours')`
           )
           .run(getCountryRecheckHours());
@@ -730,7 +1020,8 @@ export function startCatalogRefresh(): void {
         gdb
           .prepare(
             `UPDATE beatmap_user SET global_checked_at = NULL
-             WHERE global_rank IS NOT NULL AND global_rank <= 100
+             WHERE ruleset IN (${sqlIn(getStartedRulesets())})
+               AND global_rank IS NOT NULL AND global_rank <= 100
                AND global_checked_at < datetime('now', '-' || ? || ' hours')`
           )
           .run(getGlobalRecheckHours());
@@ -739,14 +1030,28 @@ export function startCatalogRefresh(): void {
         // update — and the deferred-confirm timer does not survive a restart.
         gdb.exec(
           `UPDATE beatmap_user SET global_checked_at = NULL
-           WHERE global_checked_at IS NOT NULL AND EXISTS (
+           WHERE ruleset IN (${sqlIn(getStartedRulesets())})
+             AND global_checked_at IS NOT NULL AND EXISTS (
              SELECT 1 FROM scores s
              WHERE s.beatmap_id = beatmap_user.beatmap_id
+               AND s.ruleset = beatmap_user.ruleset
                AND datetime(s.ended_at) >= datetime('now', '-2 days')
                AND datetime(beatmap_user.global_checked_at) <= datetime(s.ended_at, '+15 minutes'))`
         );
         void runGlobalSweep();
       }
+      if (!status.backfill.running && !catalogRunning) void fillConvertAttrs();
+      // Self-heal: a STARTED mode whose initial enumeration never finished
+      // (restart mid-import — remaining ranked years, the whole loved
+      // category…) is resumed from its persisted slice cursors.
+      const unfinished = getStartedRulesets().filter(
+        (r) => r !== 0 && getState(`catalog_done_m${r}`) !== "1"
+      );
+      if (unfinished.length > 0 && !catalogRunning && !status.backfill.running)
+        void ensureCatalogComplete(false, unfinished)
+          .then(() => importMissingKnownSets())
+          .then(() => enrichCatalog())
+          .then(() => resumeBackfill());
       const last = getState("catalog_delta_at");
       if (last && Date.now() - Date.parse(last) < MIN_INTERVAL_MS) return;
       await refreshCatalogDelta();
@@ -762,10 +1067,12 @@ export function startCatalogRefresh(): void {
 
 let countryWanted = false;
 let countryRunning = false;
-// Manual pause is sticky: automatic starts (poll auto-resume, 6 h tick, auth
-// callback…) respect it; only a manual start (force) lifts it. Without this,
-// the 30 s auto-resume would defeat the pause button entirely.
-let countryPaused = false;
+// Manual pause is sticky AND persistent (sync_state): automatic starts (poll
+// auto-resume, 6 h tick, auth callback…) respect it across restarts; only a
+// manual start (force) lifts it.
+function isCountryPaused(): boolean {
+  return getState("country_sweep_paused") === "1";
+}
 
 /**
  * Deferred confirmation after a new score: osu!'s leaderboard can take a
@@ -776,11 +1083,11 @@ let countryPaused = false;
  */
 const COUNTRY_CONFIRM_DELAY_MS = 2 * 60_000;
 
-function scheduleCountryConfirm(beatmapId: number): void {
+function scheduleCountryConfirm(beatmapId: number, ruleset = 0): void {
   const t = setTimeout(() => {
     if (!isUserConnected()) return;
-    getCountryTop(beatmapId, "high")
-      .then((top) => applyCountryCheck(beatmapId, top, true))
+    getCountryTop(beatmapId, "high", rulesetDef(ruleset).apiName)
+      .then((top) => applyCountryCheck(beatmapId, top, true, ruleset))
       .catch((e) => logError(e, `deferred country check map ${beatmapId}`));
   }, COUNTRY_CONFIRM_DELAY_MS);
   t.unref(); // never keeps the process alive
@@ -794,22 +1101,25 @@ function scheduleCountryConfirm(beatmapId: number): void {
  */
 export async function confirmRecentCountryChecks(): Promise<void> {
   if (!isUserConnected()) return;
+  const modes = getStartedRulesets().join(",");
   const rows = getDb()
     .prepare(
-      `SELECT u.beatmap_id AS id FROM beatmap_user u
+      `SELECT u.beatmap_id AS id, u.ruleset AS r FROM beatmap_user u
        JOIN beatmaps b ON b.id = u.beatmap_id
-       WHERE u.played = 1 AND u.country_checked_at IS NULL AND b.ruleset = 0
+       WHERE u.played = 1 AND u.country_checked_at IS NULL
+         AND u.ruleset IN (${modes})
+         AND (b.ruleset = u.ruleset OR b.ruleset = 0)
          AND EXISTS (
            SELECT 1 FROM scores s
-           WHERE s.beatmap_id = u.beatmap_id
+           WHERE s.beatmap_id = u.beatmap_id AND s.ruleset = u.ruleset
              AND datetime(s.ended_at) >= datetime('now', '-2 days'))
        LIMIT 100`
     )
-    .all() as { id: number }[];
-  for (const { id } of rows) {
+    .all() as { id: number; r: number }[];
+  for (const { id, r } of rows) {
     try {
-      const top = await getCountryTop(id, "high");
-      applyCountryCheck(id, top, true);
+      const top = await getCountryTop(id, "high", rulesetDef(r).apiName);
+      applyCountryCheck(id, top, true, r);
       logActivity(
         "country #1",
         () =>
@@ -834,14 +1144,15 @@ export async function confirmRecentCountryChecks(): Promise<void> {
 export function applyCountryCheck(
   beatmapId: number,
   top: SoloScore | null,
-  recordInitial: boolean
+  recordInitial: boolean,
+  ruleset = 0
 ): void {
   const db = getDb();
   const prev = db
     .prepare(
-      "SELECT country_first, country_checked_at FROM beatmap_user WHERE beatmap_id = ?"
+      "SELECT country_first, country_checked_at FROM beatmap_user WHERE beatmap_id = ? AND ruleset = ?"
     )
-    .get(beatmapId) as
+    .get(beatmapId, ruleset) as
     | { country_first: number; country_checked_at: string | null }
     | undefined;
   const isFirst = top && top.user_id === config.osuUserId ? 1 : 0;
@@ -854,10 +1165,11 @@ export function applyCountryCheck(
   const shouldRecord = prevFirst === 1 || wasChecked || recordInitial;
   if (shouldRecord && prevFirst !== isFirst) {
     db.prepare(
-      `INSERT INTO country_events (beatmap_id, event, at, score_at, by_user_id, by_username)
-       VALUES (?, ?, datetime('now'), ?, ?, ?)`
+      `INSERT INTO country_events (beatmap_id, ruleset, event, at, score_at, by_user_id, by_username)
+       VALUES (?, ?, ?, datetime('now'), ?, ?, ?)`
     ).run(
       beatmapId,
+      ruleset,
       isFirst ? "gained" : "lost",
       // real date of the score that took the #1 (mine or the sniper's)
       top?.ended_at ?? null,
@@ -866,8 +1178,8 @@ export function applyCountryCheck(
     );
   }
   db.prepare(
-    "UPDATE beatmap_user SET country_first = ?, country_checked_at = datetime('now') WHERE beatmap_id = ?"
-  ).run(isFirst, beatmapId);
+    "UPDATE beatmap_user SET country_first = ?, country_checked_at = datetime('now') WHERE beatmap_id = ? AND ruleset = ?"
+  ).run(isFirst, beatmapId, ruleset);
 }
 
 /**
@@ -877,8 +1189,8 @@ export function applyCountryCheck(
  */
 export async function runCountrySweep(force = false): Promise<void> {
   if (countryRunning) return;
-  if (countryPaused && !force) return;
-  if (force) countryPaused = false;
+  if (isCountryPaused() && !force) return;
+  if (force) setState("country_sweep_paused", "0");
   // The full sweep and the backfill both consume the same 60 req/min budget:
   // interleaving them doubles the duration of BOTH. Automatic starts (periodic
   // tick, auth callback) are deferred while the backfill runs — the sweep is
@@ -894,23 +1206,27 @@ export async function runCountrySweep(force = false): Promise<void> {
   countryWanted = true;
   try {
     const db = getDb();
+    // one shared queue across the active rulesets (specific maps + converts);
+    // held #1s first, then std before the other modes
     const nextBatch = db.prepare(
-      `SELECT u.beatmap_id AS id FROM beatmap_user u
+      `SELECT u.beatmap_id AS id, u.ruleset AS r FROM beatmap_user u
        JOIN beatmaps b ON b.id = u.beatmap_id
-       WHERE u.played = 1 AND u.country_checked_at IS NULL AND b.ruleset = 0
-       ORDER BY u.country_first DESC, u.beatmap_id
+       WHERE u.played = 1 AND u.country_checked_at IS NULL
+         AND u.ruleset IN (${sqlIn(getStartedRulesets())})
+         AND (b.ruleset = u.ruleset OR b.ruleset = 0)
+       ORDER BY u.country_first DESC, u.ruleset, u.beatmap_id
        LIMIT 200`
     );
     let done = 0;
     while (countryWanted) {
-      const ids = (nextBatch.all() as { id: number }[]).map((r) => r.id);
-      if (ids.length === 0) break;
-      for (const id of ids) {
+      const rows = nextBatch.all() as { id: number; r: number }[];
+      if (rows.length === 0) break;
+      for (const { id, r } of rows) {
         if (!countryWanted) break;
         try {
-          const top = await getCountryTop(id, "low");
+          const top = await getCountryTop(id, "low", rulesetDef(r).apiName);
           const cc = getStoredCountryCode();
-          applyCountryCheck(id, top, false);
+          applyCountryCheck(id, top, false, r);
           done++;
           logActivity(
               `${cc ? `#1 ${cc}` : "country #1"} sweep`,
@@ -943,7 +1259,7 @@ export async function runCountrySweep(force = false): Promise<void> {
 
 export function pauseCountrySweep(): void {
   countryWanted = false;
-  countryPaused = true;
+  setState("country_sweep_paused", "1");
 }
 
 // ---------- Global leaderboard sweep: my top 1/8/15/25/50/100 positions ----------
@@ -974,14 +1290,15 @@ function globalTier(rank: number | null): number | null {
 export function applyGlobalCheck(
   beatmapId: number,
   pos: number | null,
-  recordInitial = false
+  recordInitial = false,
+  ruleset = 0
 ): void {
   const db = getDb();
   const prev = db
     .prepare(
-      "SELECT global_rank, global_checked_at, global_seen FROM beatmap_user WHERE beatmap_id = ?"
+      "SELECT global_rank, global_checked_at, global_seen FROM beatmap_user WHERE beatmap_id = ? AND ruleset = ?"
     )
-    .get(beatmapId) as
+    .get(beatmapId, ruleset) as
     | {
         global_rank: number | null;
         global_checked_at: string | null;
@@ -997,8 +1314,8 @@ export function applyGlobalCheck(
   const newTier = globalTier(pos);
   if ((wasKnown || recordInitial) && oldTier !== newTier) {
     db.prepare(
-      "INSERT INTO global_events (beatmap_id, at, old_rank, new_rank) VALUES (?, datetime('now'), ?, ?)"
-    ).run(beatmapId, prevRank, pos);
+      "INSERT INTO global_events (beatmap_id, ruleset, at, old_rank, new_rank) VALUES (?, ?, datetime('now'), ?, ?)"
+    ).run(beatmapId, ruleset, prevRank, pos);
     logActivity(
       "global tops",
       () =>
@@ -1008,8 +1325,8 @@ export function applyGlobalCheck(
     );
   }
   db.prepare(
-    "UPDATE beatmap_user SET global_rank = ?, global_checked_at = datetime('now'), global_seen = 1 WHERE beatmap_id = ?"
-  ).run(pos, beatmapId);
+    "UPDATE beatmap_user SET global_rank = ?, global_checked_at = datetime('now'), global_seen = 1 WHERE beatmap_id = ? AND ruleset = ?"
+  ).run(pos, beatmapId, ruleset);
 }
 
 /**
@@ -1020,11 +1337,16 @@ export function applyGlobalCheck(
  */
 const GLOBAL_CONFIRM_DELAY_MS = 3 * 60_000;
 
-function scheduleGlobalConfirm(beatmapId: number): void {
+function scheduleGlobalConfirm(beatmapId: number, ruleset = 0): void {
   const t = setTimeout(() => {
     if (!config.hasCredentials) return;
-    getUserBeatmapPosition(beatmapId, config.osuUserId, "high")
-      .then((pos) => applyGlobalCheck(beatmapId, pos, true))
+    getUserBeatmapPosition(
+      beatmapId,
+      config.osuUserId,
+      "high",
+      rulesetDef(ruleset).apiName
+    )
+      .then((pos) => applyGlobalCheck(beatmapId, pos, true, ruleset))
       .catch((e) => logError(e, `deferred global check map ${beatmapId}`));
   }, GLOBAL_CONFIRM_DELAY_MS);
   t.unref(); // never keeps the process alive
@@ -1056,23 +1378,32 @@ export async function runGlobalSweep(force = false): Promise<void> {
   globalWanted = true;
   try {
     const db = getDb();
+    // shared queue across active rulesets (specific + converts); held ranks
+    // first (losing a top spot matters more than discovering a new #4000)
     const nextBatch = db.prepare(
-      `SELECT u.beatmap_id AS id FROM beatmap_user u
+      `SELECT u.beatmap_id AS id, u.ruleset AS r FROM beatmap_user u
        JOIN beatmaps b ON b.id = u.beatmap_id
-       WHERE u.played = 1 AND u.global_checked_at IS NULL AND b.ruleset = 0
-       ORDER BY (u.global_rank IS NOT NULL) DESC, u.global_rank, u.beatmap_id
+       WHERE u.played = 1 AND u.global_checked_at IS NULL
+         AND u.ruleset IN (${sqlIn(getStartedRulesets())})
+         AND (b.ruleset = u.ruleset OR b.ruleset = 0)
+       ORDER BY (u.global_rank IS NOT NULL) DESC, u.global_rank, u.ruleset, u.beatmap_id
        LIMIT 200`
     );
     let done = 0;
     let failures = 0;
     while (globalWanted) {
-      const ids = (nextBatch.all() as { id: number }[]).map((r) => r.id);
-      if (ids.length === 0) break;
-      for (const id of ids) {
+      const rows = nextBatch.all() as { id: number; r: number }[];
+      if (rows.length === 0) break;
+      for (const { id, r } of rows) {
         if (!globalWanted) break;
         try {
-          const pos = await getUserBeatmapPosition(id, config.osuUserId, "low");
-          applyGlobalCheck(id, pos);
+          const pos = await getUserBeatmapPosition(
+            id,
+            config.osuUserId,
+            "low",
+            rulesetDef(r).apiName
+          );
+          applyGlobalCheck(id, pos, false, r);
           done++;
           failures = 0;
           logActivity(
@@ -1103,52 +1434,136 @@ export function pauseGlobalSweep(): void {
 
 /**
  * Known-sets catch-up: seed-sets.json (shipped with the repo) lists every
- * ranked/approved/loved std set known from a complete reference catalog —
- * including DMCA/delisted sets that /beatmapsets/search never returns. Any set
- * missing locally is imported by direct lookup (API then web page). Runs after
- * the search enumeration is done; no-op once the catalog is complete.
+ * ranked/approved/loved set of a complete reference catalog — including the
+ * DMCA/delisted ones /beatmapsets/search never returns — as
+ * `{ "<set id>": <ruleset bitmask> }` (1 osu!, 2 taiko, 4 catch, 8 mania).
+ * A set is fetched by direct lookup (API then web page) when the seed says it
+ * carries diffs for a mode we track and we hold none of that mode: no budget
+ * spent on rulesets the user never started, and a hybrid set missing ONE mode's
+ * diffs is caught too (the plain "no diff at all" test misses those).
+ * Runs after the search enumeration is done; no-op once the catalog is complete.
  */
 let seedRunning = false;
 
+/**
+ * Reads the shipped seed list. Three shapes, oldest first (see SeedVersion):
+ * flat ids, per-mode bitmask, per-mode diff COUNTS — only the last one can spot
+ * a set holding some of a mode's diffs but not all of them.
+ */
+function readSeed(): { version: SeedVersion; entries: [number, number][] } | null {
+  const seedPath = path.join(__dirname, "../db/seed-sets.json");
+  if (!fs.existsSync(seedPath)) return null;
+  const raw = JSON.parse(fs.readFileSync(seedPath, "utf8")) as
+    | number[]
+    | Record<string, number>
+    | { v: number; sets: Record<string, number> };
+  if (Array.isArray(raw))
+    return { version: 0, entries: raw.map((id) => [id, 0]) };
+  if (typeof (raw as { v?: number }).v === "number")
+    return {
+      version: 2,
+      entries: Object.entries((raw as { sets: Record<string, number> }).sets).map(
+        ([id, v]) => [Number(id), v]
+      ),
+    };
+  return {
+    version: 1,
+    entries: Object.entries(raw as Record<string, number>).map(([id, m]) => [
+      Number(id),
+      m,
+    ]),
+  };
+}
+
 export async function importMissingKnownSets(): Promise<number> {
   if (seedRunning) return 0;
+  if (catalogIncomplete()) {
+    // said in the feed too: silence here reads as "the seed list is not used"
+    logActivity(
+      "catalog",
+      "known-sets list postponed, the catalog import is not done yet"
+    );
+    console.log(
+      "[sync] known-sets catch-up postponed: a catalog enumeration is unfinished (looking these sets up one by one would waste hours)"
+    );
+    return 0;
+  }
   seedRunning = true;
   try {
-    const seedPath = path.join(__dirname, "../db/seed-sets.json");
-    if (!fs.existsSync(seedPath)) return 0;
-    const known = JSON.parse(fs.readFileSync(seedPath, "utf8")) as number[];
+    const seed = readSeed();
+    if (!seed) return 0;
+    const { version, entries } = seed;
     const db = getDb();
-    const have = new Set(
-      (db.prepare("SELECT id FROM beatmapsets").all() as { id: number }[]).map(
-        (r) => r.id
-      )
-    );
-    const missing = known.filter((id) => !have.has(id));
-    if (missing.length === 0) return 0;
+    // std counts too when it only feeds another mode's converts
+    const tracked = catalogRulesets();
 
+    // local diff counts per set and per ruleset
+    const localCounts = new Map<number, number[]>();
+    for (const r of db
+      .prepare(
+        `SELECT beatmapset_id AS id, ruleset, COUNT(*) n FROM beatmaps
+         WHERE status IN (1, 2, 4) GROUP BY beatmapset_id, ruleset`
+      )
+      .all() as { id: number; ruleset: number; n: number }[]) {
+      const arr = localCounts.get(r.id) ?? [0, 0, 0, 0];
+      arr[r.ruleset] = r.n;
+      localCounts.set(r.id, arr);
+    }
+    const FORMAT_NOTE: Record<SeedVersion, string> = {
+      0: " (old format: ids only, regenerate it to catch per-mode holes)",
+      1: " (old format: no diff counts, regenerate it to catch partial sets)",
+      2: "",
+    };
+    // No "looked up recently" filter: an earlier `checked_at` (the set was
+    // fetched once, while another mode was inactive) used to hide it for a
+    // month, which is exactly how 11 catch diffs stayed missing while the list
+    // reported "nothing missing". Re-looking up a handful of stubborn sets on
+    // each repair costs a handful of requests — cheaper than the confusion.
+    const missing = entries
+      .filter(([id, value]) => {
+        const have = localCounts.get(id) ?? [0, 0, 0, 0];
+        // a flat-id seed knows nothing per mode: only a set with no diff at all
+        if (version === 0) return have.every((n) => n === 0);
+        return seedNeedsLookup(seedCounts(value, version), have, tracked);
+      })
+      .map(([id]) => id);
+    if (missing.length === 0) {
+      // Silence used to look like "the shipped list is never used": say that it
+      // WAS checked and matched, and in which format.
+      logActivity(
+        "catalog",
+        `known-sets list checked, ${entries.length} sets, nothing missing${FORMAT_NOTE[version]}`
+      );
+      return 0;
+    }
+
+    logActivity(
+      "catalog",
+      `known-sets list: ${missing.length} set(s) to fetch, the search cannot see them`
+    );
     console.log(`[sync] known-sets catch-up: ${missing.length} sets missing`);
-    let imported = 0;
+    const before = poolCounts();
     let failures = 0;
     for (const id of missing) {
       try {
         const r = await importSetById(id);
-        imported += r.newDiffs;
         failures = 0;
         logActivity(
           "catalog",
-          `known-sets catch-up: set ${id} (${r.source ?? "not found"}, +${r.newDiffs} diffs)`
+          `known-sets catch-up: set ${id} (${r.source ?? "not found"}, ${r.added})`
         );
-        status.message = `known-sets catch-up: ${imported} diffs imported...`;
+        status.message = `known-sets catch-up: ${poolGrowth(before, poolCounts()).label}...`;
       } catch (e) {
         logError(e, `known-sets catch-up: set ${id}`);
         if (++failures >= 10) break; // API down / auth issue: retry next tick
       }
     }
-    if (imported > 0) {
-      await enrichMaxCombo(enrichProgress);
-      status.message = `known-sets catch-up done: +${imported} diffs.`;
-    }
-    return imported;
+    const g = poolGrowth(before, poolCounts());
+    // No enrichment here: every caller runs enrichCatalog() right after, and
+    // enriching under this label kept "known-sets import" in the sync bar for
+    // the whole hour it takes.
+    if (g.total > 0) status.message = `known-sets catch-up done: ${g.label}.`;
+    return g.total;
   } finally {
     seedRunning = false;
   }
@@ -1157,35 +1572,128 @@ export async function importMissingKnownSets(): Promise<number> {
 /** Manual import of a set (API then web page) + backfill of its diffs. */
 export async function importSetById(
   setId: number
-): Promise<{ source: "api" | "web" | null; newDiffs: number }> {
+): Promise<{ source: "api" | "web" | null; added: string }> {
+  const before = poolCounts();
   const { source, newIds } = await importOneSet(setId);
+  // measured before the (rate-limited, minutes-long) backfill, so a concurrent
+  // delta import cannot inflate what THIS set added
+  const added = poolGrowth(before, poolCounts()).label;
   for (const id of newIds)
     await backfillMap(id, "high", `import set ${setId}: backfill map ${id}`);
-  return { source, newDiffs: newIds.length };
+  return { source, added };
 }
 
 /** Targeted year verification (search vs local DB) + backfill. */
 export async function verifyYearAndBackfill(year: number) {
+  const before = poolCounts();
   const result = await verifyYear(year, (m) => (status.message = m));
+  const added = poolGrowth(before, poolCounts()).label;
   if (result.newBeatmapIds.length > 0) {
     await enrichMaxCombo(enrichProgress);
     for (const id of result.newBeatmapIds)
       await backfillMap(id, "low", `verify-year: backfill map ${id}`);
   }
-  status.message = `verify ${year} done: +${result.newBeatmapIds.length} diffs.`;
+  status.message = `verify ${year} done: ${added}.`;
   return result;
 }
 
 /** Manual repair of mega-collabs (>100 diffs) + backfill of the new ones. */
-export async function runBigSetsRepair(): Promise<number> {
-  const newIds = await repairOversizedSets((m) => (status.message = m));
-  if (newIds.length > 0) {
-    await enrichMaxCombo(enrichProgress);
-    for (const id of newIds)
-      await backfillMap(id, "low", `big-sets: backfill map ${id}`);
+// Shown in the sync-bar busy list while a manual maintenance action runs, so
+// the bar never reads "idle" during a long verification.
+// A Set, not one slot: two manual actions can overlap (a dump verify while a
+// repair finishes) and the first one to end used to clear the other's label.
+const maintenanceTasks = new Set<string>();
+// Current pass ("score import (catch converts)", …) for the busy list.
+let backfillPassLabel = "score import";
+let backfillPassRuleset: number | null = null;
+
+/** Catalog verification vs a data.ppy.sh dump file, with sync-bar visibility. */
+export async function runDumpVerify(path: string, modes?: number[]): Promise<string> {
+  const { verifyCatalogFromDump } = await import("./dump.js");
+  maintenanceTasks.add("dump verification");
+  try {
+    const g = await verifyCatalogFromDump(
+      path,
+      modes?.length ? modes : catalogRulesets(),
+      (m) => {
+        status.message = `dump: ${m}`;
+        logActivity("dump", m);
+      },
+      // heartbeat: visible freshness without flooding the activity feed
+      (m) => (status.message = `dump: ${m}`)
+    );
+    if (g == null) {
+      logActivity("dump", "verification already running");
+      return "already running";
+    }
+    // background, like the repair: both have their own label and hours of
+    // work, awaiting them kept "dump verification" on screen the whole time
+    if (g.total > 0)
+      void enrichCatalog()
+        .then(() => resumeBackfill())
+        .catch((e) => logError(e, "after dump"));
+    return g.label;
+  } catch (e) {
+    logActivity("dump", `failed: ${e instanceof Error ? e.message : String(e)}`);
+    throw e;
+  } finally {
+    maintenanceTasks.delete("dump verification");
   }
-  console.log(`[sync] big-sets: +${newIds.length} diffs`);
-  return newIds.length;
+}
+
+/**
+ * One-click catalog repair: re-lookup of the known DMCA sets, then repair of
+ * the truncated mega-collabs, then enrichment + backfill of anything new.
+ * The data-dump verification (runDumpVerify) stays separate: it needs a file
+ * and only matters when the map counts still look wrong after this.
+ */
+export async function runCatalogRepair(): Promise<string> {
+  const prog = (m: string) => (status.message = `repair: ${m}`);
+  // A repair only makes sense on an enumerated catalog: its whole job is the
+  // holes the search cannot see. Running it alongside an enumeration made the
+  // seed catch-up look up, one request each, the very sets the search was about
+  // to import 50 at a time. Waited for BEFORE claiming the busy label and the
+  // pool snapshot: an hour of "catalog repair" in the bar while it does nothing
+  // reads as stuck, and the snapshot would have counted the enumeration's maps
+  // as the repair's own.
+  while (catalogRunning || status.phase === "catalog") {
+    status.message = "repair: waiting for the catalog enumeration to finish…";
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+  maintenanceTasks.add("catalog repair");
+  const before = poolCounts();
+  try {
+    // 1. known-sets seed catch-up (sets the search enumeration cannot see)
+    await importMissingKnownSets();
+    // 2. re-lookup of the known DMCA sets — only useful with an OLD seed. A v2
+    // list carries the per-mode diff counts of EVERY set, DMCA or not, so the
+    // catch-up above already covers this population (and more: the hybrid sets
+    // that are not flagged DMCA at all). Skipping saves ~1 request per DMCA set
+    // on every repair, for a pass that could only re-confirm what it read.
+    if (readSeed()?.version === 2)
+      logActivity(
+        "repair",
+        "delisted re-check skipped, the known-sets list already covers those sets"
+      );
+    else
+      await recheckDelistedSets((m) => {
+        prog(m);
+        logActivity("repair", m);
+      });
+    await repairOversizedSets(prog);
+    const g = poolGrowth(before, poolCounts());
+    // NOT awaited (and outside the label): map details then the score import
+    // both run for a long time under their own label. Waiting for them kept
+    // "catalog repair" on screen all that time.
+    if (g.total > 0)
+      void enrichCatalog()
+        .then(() => resumeBackfill())
+        .catch((e) => logError(e, "after repair"));
+    logActivity("repair", `catalog repair done: ${g.label}`);
+    return g.label;
+  } finally {
+    maintenanceTasks.delete("catalog repair");
+  }
 }
 
 // ---------- Initial pipeline (catalog, enrichment, backfill) ----------
@@ -1212,14 +1720,19 @@ export async function runPipeline(opts?: { skipCatalog?: boolean }) {
           status.message = m;
           logActivity("catalog", m);
         });
+        // Automatic completeness — no fix button needed: the DMCA/delisted
+        // sets invisible to the search (bundled seed list), then the sets
+        // truncated by the ~100-diff payload cap (web page re-fetch).
+        status.message = "Completing the catalog (known delisted sets)…";
+        await importMissingKnownSets();
+        await repairOversizedSets((m) => (status.message = m));
       } finally {
         catalogRunning = false;
       }
     }
 
-    status.phase = "enrich";
-    status.message = "Enriching max combo / star rating (API, 50 maps/req)...";
-    await enrichMaxCombo(enrichProgress);
+    status.message = "Reading map details (max combo, checksum)...";
+    await enrichCatalog();
 
     status.phase = "backfill";
     backfillWanted = true;
@@ -1246,33 +1759,75 @@ export async function resumeBackfill(): Promise<void> {
 async function runBackfill(): Promise<void> {
   const db = getDb();
   status.backfill.running = true;
-  status.message = "Score backfill in progress (resumable, ~40h the first time)...";
+  status.message = "Score backfill in progress (resumable)...";
   try {
-    const nextBatch = db.prepare(
-      `SELECT b.id FROM beatmaps b
-       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id
-       WHERE b.ruleset = 0 AND u.fetched_at IS NULL
-       ORDER BY b.id
-       LIMIT 200`
-    );
+    // Queue order: std first, then each active ruleset's SPECIFIC maps, then
+    // the CONVERTS of each active ruleset (std maps played in that mode) —
+    // the cheap high-value passes go before the huge convert grind. Each pass
+    // is resumable independently (fetched_at NULL per (map, ruleset) row).
+    const passes: { ruleset: number; mapMode: number; label: string }[] = [];
+    for (const r of getStartedRulesets())
+      passes.push({
+        ruleset: r,
+        mapMode: r,
+        label: r === 0 ? "score import" : `score import (${shortModeName(r)})`,
+      });
+    for (const r of getStartedRulesets())
+      if (r !== 0)
+        passes.push({
+          ruleset: r,
+          mapMode: 0,
+          label: `score import (${shortModeName(r)} converts)`,
+        });
+
     let completed = false;
-    while (backfillWanted) {
-      const ids = (nextBatch.all() as { id: number }[]).map((r) => r.id);
-      if (ids.length === 0) {
-        completed = true;
-        break;
+    const skippedPaused = new Set<string>();
+    outer: for (const pass of passes) {
+      if (isBackfillModePaused(pass.ruleset)) {
+        skippedPaused.add(shortModeName(pass.ruleset));
+        continue; // paused mode: skip
       }
-      for (const id of ids) {
-        if (!backfillWanted) break;
-        const scores = await backfillMap(id, "low", `backfill map ${id}`);
-        if (scores)
-          logActivity(
-            "backfill",
-            () =>
-              `${mapLabel(id)}${scores.length ? ` — ${scores.length} score(s)` : ""}`
+      backfillPassLabel =
+        pass.label === "score import" ? "score import (osu!)" : pass.label;
+      backfillPassRuleset = pass.ruleset;
+      const nextBatch = db.prepare(
+        `SELECT b.id FROM beatmaps b
+         LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${pass.ruleset}
+         WHERE b.ruleset = ${pass.mapMode} AND u.fetched_at IS NULL
+         ORDER BY b.id
+         LIMIT 200`
+      );
+      for (;;) {
+        if (!backfillWanted) break outer;
+        if (isBackfillModePaused(pass.ruleset)) continue outer; // paused mid-pass
+        const ids = (nextBatch.all() as { id: number }[]).map((r) => r.id);
+        if (ids.length === 0) break; // pass done, next one
+        for (const id of ids) {
+          if (!backfillWanted) break outer;
+          if (isBackfillModePaused(pass.ruleset)) continue outer;
+          const scores = await backfillMap(
+            id,
+            "low",
+            `${pass.label} map ${id}`,
+            pass.ruleset
           );
+          if (scores)
+            logActivity(
+              pass.label,
+              () =>
+                `${mapLabel(id)}${scores.length ? ` — ${scores.length} score(s)` : ""}`
+            );
+        }
       }
     }
+    completed = backfillWanted; // reached the end of every pass without a pause
+    // Paused modes were skipped: say it loudly, otherwise "the backfill does
+    // nothing" with no clue why (the flag survives restarts on purpose)
+    if (skippedPaused.size > 0)
+      logActivity(
+        "scores",
+        `${[...skippedPaused].join(" + ")} paused, resume it from that mode's tab`
+      );
     // Backfill done => run the leaderboard passes that were deferred while it
     // held the rate budget: country sweep first (needs the connected
     // account), then the global tops sweep. Initial sync therefore chains
@@ -1282,6 +1837,7 @@ async function runBackfill(): Promise<void> {
       void (async () => {
         if (isUserConnected()) await runCountrySweep();
         if (isGlobalTrackingEnabled()) await runGlobalSweep();
+        await fillConvertAttrs();
       })();
     }
   } finally {

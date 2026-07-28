@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { mapUrl } from "../rulesets";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   deleteMetric,
@@ -9,6 +10,7 @@ import {
   type MetricBreakdown,
 } from "../api";
 import { ctxMenuStyle } from "../ctxmenu";
+import type { PoolMode } from "../types";
 import { appConfirm } from "../dialogs";
 import { displayGrade, fmtCompact, fmtDate, fmtNum } from "../format";
 import { EvoChart } from "./EvoChart";
@@ -361,7 +363,7 @@ function MetricCard({
                   key={r.beatmap_id}
                   className={`pp-top-row${i % 2 ? " row-alt" : ""}`}
                   onDoubleClick={() =>
-                    window.open(`https://osu.ppy.sh/b/${r.beatmap_id}`, "_blank")
+                    window.open(mapUrl(r.beatmap_id, m.params.ruleset ?? 0), "_blank")
                   }
                   onContextMenu={(e) => onCtx(e, r)}
                   title="Double-click: open on osu.ppy.sh — right-click: actions"
@@ -397,8 +399,16 @@ function MetricCard({
 /** Metrics tab: user-defined metrics as milestones + optional evolution. */
 export function MetricsView({
   onMissingMaps,
+  ruleset = 0,
 }: {
-  onMissingMaps: (id: number, name: string, matching: boolean) => void;
+  onMissingMaps: (
+    id: number,
+    name: string,
+    matching: boolean,
+    ruleset?: number,
+    pool?: PoolMode
+  ) => void;
+  ruleset?: number;
 }) {
   const qc = useQueryClient();
   const [gran, setGran] = useState<"month" | "day">("month");
@@ -506,7 +516,9 @@ export function MetricsView({
         <p className="goal-note">No metric yet — create one with “+ New metric”.</p>
       )}
       <div className="metrics-grid" ref={gridRef}>
-        {data.metrics.map((m) => (
+        {data.metrics
+          .filter((m) => (m.params.ruleset ?? 0) === ruleset)
+          .map((m) => (
           <MetricCard
             key={m.id}
             m={m}
@@ -523,7 +535,9 @@ export function MetricsView({
               onMissingMaps(
                 metric.id,
                 metric.name,
-                metric.params.kind === "count" && !!metric.params.descending
+                metric.params.kind === "count" && !!metric.params.descending,
+                metric.params.ruleset ?? 0,
+                metric.params.pool
               )
             }
             onCtx={onCtx}
@@ -555,7 +569,7 @@ export function MetricsView({
             </button>
             <button
               onClick={() => {
-                window.open(`https://osu.ppy.sh/b/${ctx.row.beatmap_id}`, "_blank");
+                window.open(mapUrl(ctx.row.beatmap_id, ruleset), "_blank");
                 setCtx(null);
               }}
             >
@@ -591,11 +605,11 @@ export function MetricsView({
         </>
       )}
       {detailId != null && (
-        <MapModal beatmapId={detailId} onClose={() => setDetailId(null)} />
+        <MapModal beatmapId={detailId} ruleset={ruleset} onClose={() => setDetailId(null)} />
       )}
 
       {(builderOpen || editing) && (
-        <MetricBuilder
+        <MetricBuilder ruleset={ruleset}
           edit={editing ? { id: editing.id, name: editing.name, params: editing.params } : undefined}
           onClose={() => {
             setBuilderOpen(false);

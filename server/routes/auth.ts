@@ -7,8 +7,10 @@ import {
   getStoredProfile,
   isUserConnected,
   logoutUser,
+  profileKey,
   type StoredProfile,
 } from "../osu/api.js";
+import { parseRulesetParam, rulesetDef } from "../logic/rulesets.js";
 import { runCountrySweep } from "../sync/daemon.js";
 
 // User OAuth (country leaderboards, requires supporter)
@@ -38,32 +40,35 @@ authRouter.get("/auth/callback", async (req, res) => {
   }
 });
 
-let profileFetchInFlight = false;
+// one in-flight fetch per ruleset: the profile stats (pp, ranks, accuracy) are
+// per mode, so each mode has its own cached copy
+const profileFetchInFlight = new Set<number>();
 
-authRouter.get("/auth/status", (_req, res) => {
+authRouter.get("/auth/status", (req, res) => {
+  const R = parseRulesetParam(req.query.ruleset);
   const connected = isUserConnected();
   let profile: StoredProfile | null = null;
   if (connected) {
-    profile = getStoredProfile();
+    profile = getStoredProfile(R);
     // refetch if missing, or cached by an older version (fields added since)
     const stale =
       !profile ||
       !profile.country_code ||
       profile.cover_url == null ||
       profile.stats?.join_date == null;
-    if (stale && !profileFetchInFlight) {
-      profileFetchInFlight = true;
-      void fetchUserProfile()
+    if (stale && !profileFetchInFlight.has(R)) {
+      profileFetchInFlight.add(R);
+      void fetchUserProfile(R === 0 ? undefined : rulesetDef(R).apiName)
         .then((p) => {
-          if (p) setState("user_profile", JSON.stringify(p));
+          if (p) setState(profileKey(R), JSON.stringify(p));
         })
         .catch(() => undefined)
         .finally(() => {
-          profileFetchInFlight = false;
+          profileFetchInFlight.delete(R);
         });
     }
   }
-  res.json({ connected, profile });
+  res.json({ connected, profile, ruleset: R });
 });
 
 authRouter.post("/auth/logout", (_req, res) => {

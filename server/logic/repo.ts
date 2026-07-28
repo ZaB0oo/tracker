@@ -15,14 +15,26 @@ import { computeFcState } from "./score.js";
 export function saveScores(
   beatmapId: number,
   scores: SoloScore[],
-  opts?: { markFetched?: boolean }
+  opts?: { markFetched?: boolean; ruleset?: number }
 ): { bestScoreId: number | null } {
+  const ruleset = opts?.ruleset ?? 0;
   const db = getDb();
-  const maxCombo = (
-    db.prepare("SELECT max_combo FROM beatmaps WHERE id = ?").get(beatmapId) as
-      | { max_combo: number | null }
-      | undefined
-  )?.max_combo ?? null;
+  // convert plays (ruleset != map's mode): the map's own max_combo is not a
+  // valid reference — use the per-ruleset convert_attrs when known
+  const nativeRow = db
+    .prepare("SELECT ruleset, max_combo FROM beatmaps WHERE id = ?")
+    .get(beatmapId) as { ruleset: number; max_combo: number | null } | undefined;
+  let maxCombo = nativeRow?.max_combo ?? null;
+  if (nativeRow && nativeRow.ruleset !== ruleset) {
+    maxCombo =
+      (
+        db
+          .prepare(
+            "SELECT max_combo FROM convert_attrs WHERE beatmap_id = ? AND ruleset = ?"
+          )
+          .get(beatmapId, ruleset) as { max_combo: number | null } | undefined
+      )?.max_combo ?? null;
+  }
 
   const upsertScore = db.prepare(`
     INSERT INTO scores (
@@ -51,13 +63,13 @@ export function saveScores(
   transaction(() => {
     for (const s of scores) {
       if (!existsStmt.get(s.id)) hasNewScore = true;
-      const fcState = computeFcState(s, maxCombo);
+      const fcState = computeFcState(s, maxCombo, s.ruleset_id ?? ruleset);
       upsertScore.run({
         id: s.id,
         legacy_score_id: s.legacy_score_id ?? null,
         beatmap_id: beatmapId,
         user_id: s.user_id,
-        ruleset: s.ruleset_id ?? 0,
+        ruleset: s.ruleset_id ?? ruleset,
         ended_at: s.ended_at,
         rank: s.rank,
         accuracy: s.accuracy,
@@ -78,19 +90,23 @@ export function saveScores(
         raw: JSON.stringify(s),
       });
     }
-    refreshBest(beatmapId, opts?.markFetched ?? true);
+    refreshBest(beatmapId, opts?.markFetched ?? true, ruleset);
     // A never-seen score (e.g. fetched by a re-backfill after a long absence)
     // may have taken a country #1: we re-queue the country check.
     // (Polling re-stamps right after via its immediate check.)
     if (hasNewScore)
       db.prepare(
-        "UPDATE beatmap_user SET country_checked_at = NULL WHERE beatmap_id = ?"
-      ).run(beatmapId);
+        "UPDATE beatmap_user SET country_checked_at = NULL WHERE beatmap_id = ? AND ruleset = ?"
+      ).run(beatmapId, ruleset);
   });
 
   const after = db
-    .prepare("SELECT best_lazer_score_id FROM beatmap_user WHERE beatmap_id = ?")
-    .get(beatmapId) as { best_lazer_score_id: number | null } | undefined;
+    .prepare(
+      "SELECT best_lazer_score_id FROM beatmap_user WHERE beatmap_id = ? AND ruleset = ?"
+    )
+    .get(beatmapId, ruleset) as
+    | { best_lazer_score_id: number | null }
+    | undefined;
   return { bestScoreId: after?.best_lazer_score_id ?? null };
 }
 
@@ -98,14 +114,20 @@ export function saveScores(
  * Recompute the best pointer from the scores table.
  * `markFetched=false`: preserves the existing fetched_at state (NULL included).
  */
-export function refreshBest(beatmapId: number, markFetched = true): void {
+export function refreshBest(
+  beatmapId: number,
+  markFetched = true,
+  ruleset = 0
+): void {
   const db = getDb();
+  // scores are per ruleset: a convert's taiko scores must never feed the
+  // std best of the same beatmap (and vice versa)
   const rows = db
     .prepare(
       `SELECT id, total_score, classic_total_score FROM scores
-       WHERE beatmap_id = ? AND passed = 1`
+       WHERE beatmap_id = ? AND ruleset = ? AND passed = 1`
     )
-    .all(beatmapId) as {
+    .all(beatmapId, ruleset) as {
     id: number;
     total_score: number;
     classic_total_score: number | null;
@@ -124,19 +146,20 @@ export function refreshBest(beatmapId: number, markFetched = true): void {
   }
 
   db.prepare(
-    `INSERT INTO beatmap_user (beatmap_id, fetched_at, played, best_lazer_score_id)
-     VALUES (?, CASE WHEN ? = 1 THEN datetime('now') ELSE NULL END, ?, ?)
-     ON CONFLICT(beatmap_id) DO UPDATE SET
+    `INSERT INTO beatmap_user (beatmap_id, ruleset, fetched_at, played, best_lazer_score_id)
+     VALUES (?, ?, CASE WHEN ? = 1 THEN datetime('now') ELSE NULL END, ?, ?)
+     ON CONFLICT(beatmap_id, ruleset) DO UPDATE SET
        fetched_at = COALESCE(excluded.fetched_at, beatmap_user.fetched_at),
        played = MAX(beatmap_user.played, excluded.played),
        best_lazer_score_id = excluded.best_lazer_score_id`
-  ).run(beatmapId, markFetched ? 1 : 0, rows.length > 0 ? 1 : 0, bestLazer);
+  ).run(beatmapId, ruleset, markFetched ? 1 : 0, rows.length > 0 ? 1 : 0, bestLazer);
 
   db.prepare(
     `UPDATE beatmap_user SET any_fc = EXISTS(
-       SELECT 1 FROM scores s WHERE s.beatmap_id = ? AND s.passed = 1 AND s.fc_state <= 1)
-     WHERE beatmap_id = ?`
-  ).run(beatmapId, beatmapId);
+       SELECT 1 FROM scores s
+       WHERE s.beatmap_id = ? AND s.ruleset = ? AND s.passed = 1 AND s.fc_state <= 1)
+     WHERE beatmap_id = ? AND ruleset = ?`
+  ).run(beatmapId, ruleset, beatmapId, ruleset);
 }
 
 /**
@@ -162,32 +185,30 @@ export function cleanupPreLeaderboardScores(): { deleted: number; maps: number }
   if (!any) return { deleted: 0, maps: 0 };
   // only refresh maps that still exist (refreshBest would otherwise create
   // orphan beatmap_user rows for deleted maps)
-  const ids = (
-    db
-      .prepare(
-        `SELECT DISTINCT s.beatmap_id AS id FROM scores s
-         WHERE (${COND}) AND EXISTS (SELECT 1 FROM beatmaps b WHERE b.id = s.beatmap_id)`
-      )
-      .all() as { id: number }[]
-  ).map((r) => r.id);
+  const ids = db
+    .prepare(
+      `SELECT DISTINCT s.beatmap_id AS id, s.ruleset AS ruleset FROM scores s
+       WHERE (${COND}) AND EXISTS (SELECT 1 FROM beatmaps b WHERE b.id = s.beatmap_id)`
+    )
+    .all() as { id: number; ruleset: number }[];
 
   let deleted = 0;
   transaction(() => {
     deleted = Number(
       db.prepare(`DELETE FROM scores AS s WHERE ${COND}`).run().changes
     );
-    for (const id of ids) refreshBest(id, false);
+    for (const r of ids) refreshBest(r.id, false, r.ruleset);
   });
   return { deleted, maps: ids.length };
 }
 
 /** Mark a map as fetched with no score (never played). */
-export function markFetchedEmpty(beatmapId: number): void {
+export function markFetchedEmpty(beatmapId: number, ruleset = 0): void {
   getDb()
     .prepare(
-      `INSERT INTO beatmap_user (beatmap_id, fetched_at, played)
-       VALUES (?, datetime('now'), 0)
-       ON CONFLICT(beatmap_id) DO UPDATE SET fetched_at = excluded.fetched_at`
+      `INSERT INTO beatmap_user (beatmap_id, ruleset, fetched_at, played)
+       VALUES (?, ?, datetime('now'), 0)
+       ON CONFLICT(beatmap_id, ruleset) DO UPDATE SET fetched_at = excluded.fetched_at`
     )
-    .run(beatmapId);
+    .run(beatmapId, ruleset);
 }

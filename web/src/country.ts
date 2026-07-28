@@ -7,7 +7,7 @@ import { fetchAuthStatus } from "./api";
  * account's country, so all "#1" labels use this instead of a hardcoded value.
  */
 export function useCountryCode(): string | null {
-  const { data } = useQuery({ queryKey: ["auth"], queryFn: fetchAuthStatus });
+  const { data } = useQuery({ queryKey: ["auth"], queryFn: () => fetchAuthStatus() });
   return data?.profile?.country_code || null;
 }
 

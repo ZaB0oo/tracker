@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchVersion } from "./api";
 import { DEFAULT_FILTERS, type Filters } from "./types";
+import { modeIcon } from "./rulesets";
 import { FilterBar } from "./components/FilterBar";
 import { PresetBar } from "./components/PresetBar";
 import { ScoreTable } from "./components/ScoreTable";
@@ -19,10 +20,28 @@ type View = "table" | "metrics" | "history" | "dashboard";
 const isActivityWindow = new URLSearchParams(window.location.search).has("activity");
 const isOverlayWindow = new URLSearchParams(window.location.search).has("overlay");
 
+const RULESET_TABS: [number, string][] = [
+  [0, "osu!"],
+  [1, "taiko"],
+  [2, "catch"],
+  [3, "mania"],
+];
+
 export default function App() {
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [sort, setSort] = useState<SortSpec>([{ id: "missing", desc: true }]);
   const [view, setView] = useState<View>("table");
+  const ruleset = filters.ruleset;
+  const switchRuleset = (r: number) =>
+    // filters are pool-specific: switching mode resets them (like a drill-down).
+    // The scoring mode and the converts choice describe WHAT you look at, not a
+    // filter on it — they follow you across modes and views.
+    setFilters({
+      ...DEFAULT_FILTERS,
+      mode: filters.mode,
+      pool: filters.pool,
+      ruleset: r,
+    });
 
   const drillDown = (f: Filters, s: SortSpec) => {
     setFilters(f);
@@ -62,6 +81,19 @@ export default function App() {
       </header>
 
       <nav className="tabs">
+        <div className="ruleset-tabs" title="Viewed ruleset">
+          {RULESET_TABS.map(([r, label]) => (
+            <button
+              key={r}
+              className={`rs-tab ${ruleset === r ? "active" : ""}`}
+              onClick={() => switchRuleset(r)}
+              title={label}
+            >
+              <img className="rs-icon" src={modeIcon(r)} alt="" />
+              {label}
+            </button>
+          ))}
+        </div>
         {(
           [
             ["table", "Maps"],
@@ -80,7 +112,7 @@ export default function App() {
         ))}
       </nav>
 
-      <SyncBar />
+      <SyncBar ruleset={ruleset} pool={filters.pool} keys={filters.keys} />
 
       {view === "table" && (
         <>
@@ -91,16 +123,31 @@ export default function App() {
       )}
       {view === "metrics" && (
         <MetricsView
-          onMissingMaps={(id, name, matching) =>
+          ruleset={ruleset}
+          onMissingMaps={(id, name, matching, mRuleset, mPool) =>
             drillDown(
-              { ...DEFAULT_FILTERS, mode: filters.mode, metricMissing: { id, name, matching } },
+              {
+                ...DEFAULT_FILTERS,
+                mode: filters.mode,
+                ruleset: mRuleset ?? 0,
+                pool: mPool ?? "all",
+                metricMissing: { id, name, matching },
+              },
               [{ id: "star_rating", desc: false }]
             )
           }
         />
       )}
-      {view === "history" && <HistoryView />}
-      {view === "dashboard" && <Dashboard />}
+      {view === "history" && <HistoryView ruleset={ruleset} />}
+      {view === "dashboard" && (
+        <Dashboard
+          ruleset={ruleset}
+          pool={filters.pool}
+          onPoolChange={(pool) => setFilters({ ...filters, pool })}
+          keys={filters.keys}
+          onKeysChange={(keys) => setFilters({ ...filters, keys })}
+        />
+      )}
     </div>
   );
 }

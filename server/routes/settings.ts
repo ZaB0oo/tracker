@@ -3,11 +3,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { applyOAuthOverrides, config } from "../config.js";
-import { getDb, getState, setState } from "../db/db.js";
+import { getActiveRulesets, getDb, getState, setState } from "../db/db.js";
 import {
   applyApiRpm,
   getCurrentRpm,
   logoutUser,
+  maxAllowedRpm,
   resetAuthTokens,
 } from "../osu/api.js";
 import {
@@ -61,6 +62,8 @@ function getPollSeconds(): number {
 settingsRouter.get("/settings", (_req, res) =>
   res.json({
     apiRpm: getCurrentRpm(),
+    apiRpmMax: maxAllowedRpm(),
+    apiRpmApproved: getState("api_rpm_approved") === "1",
     pollIntervalSeconds: getPollSeconds(),
     countryRecheckHours: getCountryRecheckHours(),
     globalRecheckHours: getGlobalRecheckHours(),
@@ -76,6 +79,7 @@ settingsRouter.get("/settings", (_req, res) =>
     // desktop: set from the UI (stored in DB); .env stays the fallback
     lazerImporterPath:
       getState("lazer_importer_path") ?? config.lazerImporterPath ?? "",
+    activeRulesets: getActiveRulesets(),
     info: { port: config.port },
   })
 );
@@ -110,6 +114,7 @@ settingsRouter.post(
 settingsRouter.post("/settings", (req, res) => {
   const body = req.body as {
     apiRpm?: unknown;
+    apiRpmApproved?: unknown;
     pollIntervalSeconds?: unknown;
     countryRecheckHours?: unknown;
     globalRecheckHours?: unknown;
@@ -119,7 +124,21 @@ settingsRouter.post("/settings", (req, res) => {
     clientSecret?: unknown;
     userId?: unknown;
     lazerImporterPath?: unknown;
+    activeRulesets?: unknown;
   };
+  if (Array.isArray(body.activeRulesets)) {
+    const wanted = new Set(
+      body.activeRulesets.map(Number).filter((n) => [0, 1, 2, 3].includes(n))
+    );
+    if (wanted.size === 0)
+      return res
+        .status(400)
+        .json({ ok: false, error: "at least one ruleset must stay enabled" });
+    // std included: disabling it stops its polling/backfill/sweeps — the
+    // views stay readable. Non-std activation only unlocks the views: their
+    // processes wait for the per-mode "Start initial sync" button.
+    setState("active_rulesets", [...wanted].sort().join(","));
+  }
   // executable path: loopback only (see the lazer-import security model)
   if (body.lazerImporterPath != null) {
     if (!isLoopback(req))
@@ -158,12 +177,29 @@ settingsRouter.post("/settings", (req, res) => {
         .json({ ok: false, error: "invalid globalRecheckHours (1..720)" });
     setState("global_recheck_hours", String(Math.round(h)));
   }
+  // Read BEFORE apiRpm: the same save can declare the grant and raise the rate.
+  // Revoking it clamps the live rate back down — otherwise an un-declared
+  // install would keep hammering at the rate it was left at.
+  if (body.apiRpmApproved != null) {
+    const on = body.apiRpmApproved === true || body.apiRpmApproved === "1";
+    setState("api_rpm_approved", on ? "1" : "0");
+    if (!on) {
+      const kept = Math.min(Number(getState("api_rpm")) || 60, 60);
+      setState("api_rpm", String(kept));
+      applyApiRpm(kept);
+    }
+  }
   if (body.apiRpm != null) {
+    const max = maxAllowedRpm();
     const r = Number(body.apiRpm);
-    if (!Number.isFinite(r) || r < 1 || r > 60)
-      return res
-        .status(400)
-        .json({ ok: false, error: "invalid apiRpm (1..60, polite osu! limit)" });
+    if (!Number.isFinite(r) || r < 1 || r > max)
+      return res.status(400).json({
+        ok: false,
+        error:
+          max === 60
+            ? "invalid apiRpm (1..60, documented osu! limit)"
+            : `invalid apiRpm (1..${max})`,
+      });
     setState("api_rpm", String(Math.round(r)));
     applyApiRpm(Math.round(r));
   }
