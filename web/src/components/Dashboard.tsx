@@ -1,11 +1,14 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { rulesetStatFields } from "../rulesets";
 import { fetchSkillCurve, fetchSnapshot, fetchStats, fetchTimeline, type Snapshot, type SnapshotBucket } from "../api";
 import { firstPlaceLabel, useCountryCode } from "../country";
 import { useDisplayPrefs } from "../prefs";
 import { useHidden } from "../visibility";
 import { GradeBadge } from "./GradeBadge";
 import { HeatmapPanel } from "./Heatmap";
+import { KeysChips } from "./KeysChips";
+import { PoolSeg } from "./PoolSeg";
 import { TimeMachineBar } from "./TimeMachine";
 import { MedalIcon } from "./Icons";
 import { VisibilityMenu } from "./VisibilityMenu";
@@ -13,6 +16,7 @@ import { displayGrade, fmtNum } from "../format";
 import {
   FC_LABELS,
   GRADE_ORDER,
+  type PoolMode,
   type Bucket,
   type SkillCurveBucket,
 } from "../types";
@@ -41,11 +45,20 @@ function tipPos(fx: number, fy: number): React.CSSProperties {
  * Skill curve (basis of "missing"): x-axis star rating, y-axis predicted
  * standardised score, one point per 0.1★ band, details on hover.
  */
-function SkillCurvePanel() {
+function SkillCurvePanel({
+  ruleset = 0,
+  pool = "all",
+  keys = [],
+}: {
+  ruleset?: number;
+  pool?: PoolMode;
+  keys?: string[];
+}) {
   const prefs = useDisplayPrefs();
+  const showWither = prefs.wither && ruleset === 0;
   const { data } = useQuery({
-    queryKey: ["skill-curve"],
-    queryFn: fetchSkillCurve,
+    queryKey: ["skill-curve", ruleset, pool, keys],
+    queryFn: () => fetchSkillCurve(ruleset, pool, keys),
     refetchInterval: 60_000,
   });
   const [hover, setHover] = useState<SkillCurveBucket | null>(null);
@@ -192,7 +205,7 @@ function SkillCurvePanel() {
             Missing:
             <br />
             - {fmtNum(hover.missingClassic)} Classic Score
-            {prefs.wither && (
+            {showWither && (
               <>
                 <br />- {fmtNum(hover.missingWither)} Wither Score
               </>
@@ -201,7 +214,7 @@ function SkillCurvePanel() {
             Cumulative missing (≤ {hover.sr.toFixed(1)}★):
             <br />
             - {fmtNum(cumByQ.get(hover.sr)?.classic ?? 0)} Classic Score
-            {prefs.wither && (
+            {showWither && (
               <>
                 <br />- {fmtNum(cumByQ.get(hover.sr)?.wither ?? 0)} Wither Score
               </>
@@ -292,24 +305,40 @@ const DistPanel = memo(function DistPanel({ title, rows }: { title: string; rows
 });
 
 const statLabel = (b: number) => (b >= 10 ? "10" : `${b}–${b + 1}`);
+/** mania key counts are exact integers, not ranges: 4K, 7K, 18K (dual stage) */
+const keysLabel = (b: number) => `${b}K`;
 
-export function Dashboard({ ruleset = 0 }: { ruleset?: number }) {
-  // non-std views: the time machine / skill curve / missing predictions are
-  // still std-only (per-ruleset curves land later) — hide them cleanly
+export function Dashboard({
+  ruleset = 0,
+  pool = "all",
+  onPoolChange,
+  keys = [],
+  onKeysChange,
+}: {
+  ruleset?: number;
+  /** map pool of the viewed ruleset — same choice as the Maps view */
+  pool?: PoolMode;
+  onPoolChange?: (pool: PoolMode) => void;
+  /** mania key-count filter, shared with the Maps view */
+  keys?: string[];
+  onKeysChange?: (keys: string[]) => void;
+}) {
+  // witherscore is an osu!std-only proposal; everything else (time machine,
+  // skill curve, missing) is per-ruleset
   const isStd = ruleset === 0;
   const country = useCountryCode();
   const prefs = useDisplayPrefs();
   const distHidden = useHidden("dashboard-dist");
   const { data, isLoading, error } = useQuery({
-    queryKey: ["stats", ruleset],
-    queryFn: () => fetchStats(ruleset),
+    queryKey: ["stats", ruleset, pool, keys],
+    queryFn: () => fetchStats(ruleset, pool, keys),
     refetchInterval: 60_000,
   });
+  // per ruleset AND pool: one shared key served osu!'s history to every tab
   const { data: timeline } = useQuery({
-    queryKey: ["timeline"],
-    queryFn: fetchTimeline,
+    queryKey: ["timeline", ruleset, pool, keys],
+    queryFn: () => fetchTimeline(ruleset, pool, keys),
     refetchInterval: 5 * 60_000,
-    enabled: isStd,
   });
   const [tmIdx, setTmIdx] = useState<number | null>(null);
   const tmDay =
@@ -332,7 +361,7 @@ export function Dashboard({ ruleset = 0 }: { ruleset?: number }) {
     }
     const run = (day: string) => {
       inFlight.current = true;
-      fetchSnapshot(day)
+      fetchSnapshot(day, ruleset, pool, keys)
         .then((sn) => {
           inFlight.current = false;
           setSnap(sn);
@@ -413,12 +442,25 @@ export function Dashboard({ ruleset = 0 }: { ruleset?: number }) {
           snapOf("byCombo")
         ),
       },
-      { title: "AR", rows: bucketRows(data.byAr, statLabel, snapOf("byAr")) },
+      ...(rulesetStatFields(ruleset).ar
+        ? [{ title: "AR", rows: bucketRows(data.byAr, statLabel, snapOf("byAr")) }]
+        : []),
       { title: "OD", rows: bucketRows(data.byOd, statLabel, snapOf("byOd")) },
-      { title: "CS", rows: bucketRows(data.byCs, statLabel, snapOf("byCs")) },
+      ...(rulesetStatFields(ruleset).cs
+        ? [
+            {
+              title: rulesetStatFields(ruleset).csLabel,
+              rows: bucketRows(
+                data.byCs,
+                ruleset === 3 ? keysLabel : statLabel,
+                snapOf("byCs")
+              ),
+            },
+          ]
+        : []),
       { title: "HP", rows: bucketRows(data.byHp, statLabel, snapOf("byHp")) },
     ];
-  }, [data, snap, tmDay != null]);
+  }, [data, snap, tmDay != null, ruleset]);
 
   if (isLoading)
     return (
@@ -468,6 +510,14 @@ export function Dashboard({ ruleset = 0 }: { ruleset?: number }) {
 
   return (
     <div className="dashboard">
+      {!isStd && onPoolChange && (
+        <div className="dash-pool">
+          <PoolSeg value={pool} onChange={onPoolChange} />
+          {ruleset === 3 && onKeysChange && (
+            <KeysChips value={keys} onChange={onKeysChange} />
+          )}
+        </div>
+      )}
       {points.length > 1 && (
         <TimeMachineBar points={points} idx={tmIdx} onChange={setTmIdx} />
       )}
@@ -534,7 +584,7 @@ export function Dashboard({ ruleset = 0 }: { ruleset?: number }) {
           <div className="big">
             {fmtNum(eff.rankedClassic)} <span className="big-unit">Classic Score</span>
           </div>
-          {prefs.wither && (
+          {prefs.wither && isStd && (
             <div className={`big${past ? " tm-dim" : ""}`}>
               {fmtNum(data.scoreSums.wither)} <span className="big-unit">Wither Score</span>
             </div>
@@ -543,14 +593,13 @@ export function Dashboard({ ruleset = 0 }: { ruleset?: number }) {
             Standardised: {fmtNum(data.scoreSums.lazer)}
           </small>
         </div>
-        {isStd && (
         <div className={`hero-stat${past ? " tm-dim" : ""}`}>
           <h3>Missing score (estimate)</h3>
           <div className="big accent">
             {fmtNum(data.scoreSums.missingClassic)}{" "}
             <span className="big-unit">Classic Score</span>
           </div>
-          {prefs.wither && (
+          {prefs.wither && isStd && (
             <div className="big accent">
               {fmtNum(data.scoreSums.missingWither)}{" "}
               <span className="big-unit">Wither Score</span>
@@ -558,7 +607,6 @@ export function Dashboard({ ruleset = 0 }: { ruleset?: number }) {
           )}
           <small>Standardised: {fmtNum(data.scoreSums.missing)}</small>
         </div>
-        )}
         <div className="hero-stat hero-grades">
           <h3>Grades</h3>
           <div className="grade-grid">
@@ -580,7 +628,7 @@ export function Dashboard({ ruleset = 0 }: { ruleset?: number }) {
         </div>
       </div>
 
-      <HeatmapPanel cutoffDay={past?.day ?? null} ruleset={ruleset} />
+      <HeatmapPanel cutoffDay={past?.day ?? null} ruleset={ruleset} pool={pool} keys={keys} />
 
       <div className="view-toolbar">
         <VisibilityMenu
@@ -598,7 +646,7 @@ export function Dashboard({ ruleset = 0 }: { ruleset?: number }) {
           ))}
       </div>
 
-      {isStd && <SkillCurvePanel />}
+      <SkillCurvePanel ruleset={ruleset} pool={pool} keys={keys} />
     </div>
   );
 }

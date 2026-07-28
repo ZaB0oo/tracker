@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { mapUrl } from "../rulesets";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   deleteMetric,
@@ -9,6 +10,7 @@ import {
   type MetricBreakdown,
 } from "../api";
 import { ctxMenuStyle } from "../ctxmenu";
+import type { PoolMode } from "../types";
 import { appConfirm } from "../dialogs";
 import { displayGrade, fmtCompact, fmtDate, fmtNum } from "../format";
 import { EvoChart } from "./EvoChart";
@@ -361,7 +363,7 @@ function MetricCard({
                   key={r.beatmap_id}
                   className={`pp-top-row${i % 2 ? " row-alt" : ""}`}
                   onDoubleClick={() =>
-                    window.open(`https://osu.ppy.sh/b/${r.beatmap_id}`, "_blank")
+                    window.open(mapUrl(r.beatmap_id, m.params.ruleset ?? 0), "_blank")
                   }
                   onContextMenu={(e) => onCtx(e, r)}
                   title="Double-click: open on osu.ppy.sh — right-click: actions"
@@ -404,7 +406,7 @@ export function MetricsView({
     name: string,
     matching: boolean,
     ruleset?: number,
-    pool?: "all" | "specific"
+    pool?: PoolMode
   ) => void;
   ruleset?: number;
 }) {
@@ -567,7 +569,7 @@ export function MetricsView({
             </button>
             <button
               onClick={() => {
-                window.open(`https://osu.ppy.sh/b/${ctx.row.beatmap_id}`, "_blank");
+                window.open(mapUrl(ctx.row.beatmap_id, ruleset), "_blank");
                 setCtx(null);
               }}
             >
@@ -603,7 +605,7 @@ export function MetricsView({
         </>
       )}
       {detailId != null && (
-        <MapModal beatmapId={detailId} onClose={() => setDetailId(null)} />
+        <MapModal beatmapId={detailId} ruleset={ruleset} onClose={() => setDetailId(null)} />
       )}
 
       {(builderOpen || editing) && (

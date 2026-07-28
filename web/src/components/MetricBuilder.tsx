@@ -11,21 +11,7 @@ import {
   type Range,
 } from "../api";
 import { displayGrade, fmtNum } from "../format";
-import { RULESET_HIT_FIELDS, RULESET_NAMES } from "../rulesets";
-
-// osu!std mods grouped by the in-game categories (lazer). AT/CN can't submit a
-// score so they're excluded. Fun mods are std-only.
-const MOD_GROUPS: { label: string; mods: string[] }[] = [
-  { label: "None", mods: ["NM"] },
-  { label: "Reduction", mods: ["EZ", "NF", "HT", "DC"] },
-  { label: "Increase", mods: ["HR", "SD", "PF", "DT", "NC", "HD", "FL", "BL", "ST", "AC", "TC"] },
-  { label: "Automation", mods: ["RX", "AP", "SO"] },
-  { label: "Conversion", mods: ["TP", "DA", "CL", "RD", "MR", "AL", "SG"] },
-  {
-    label: "Fun",
-    mods: ["TR", "WG", "SI", "GR", "DF", "WU", "WD", "BR", "AD", "MU", "NS", "MG", "RP", "AS", "FR", "BU", "SY", "DP", "BM"],
-  },
-];
+import { RULESET_HIT_FIELDS, RULESET_MOD_GROUPS, RULESET_NAMES, rulesetStatFields } from "../rulesets";
 // count fields: [label, path in score.counts]
 const COUNT_FIELDS: { key: keyof MetricParams["score"]["counts"]; label: string }[] = [
   { key: "n100", label: "100s" },
@@ -253,9 +239,13 @@ export function MetricBuilder({
       { min: "srMin", max: "srMax", label: "Star rating", step: 0.1, lo: 0, hi: sr },
       { min: "yearMin", max: "yearMax", label: "Year", step: 1, lo: year0, hi: CUR_YEAR },
       { min: "lenMin", max: "lenMax", label: "Length (s)", step: 5, lo: 0, hi: len },
-      { min: "arMin", max: "arMax", label: "AR", step: 0.1, lo: 0, hi: 10 },
+      ...(rulesetStatFields(rsMetric).ar
+        ? [{ min: "arMin", max: "arMax", label: "AR", step: 0.1, lo: 0, hi: 10 } as const]
+        : []),
       { min: "odMin", max: "odMax", label: "OD", step: 0.1, lo: 0, hi: 10 },
-      { min: "csMin", max: "csMax", label: "CS", step: 0.1, lo: 0, hi: 10 },
+      ...(rulesetStatFields(rsMetric).cs
+        ? [{ min: "csMin", max: "csMax", label: rulesetStatFields(rsMetric).csLabel, step: 0.1, lo: 0, hi: 10 } as const]
+        : []),
       { min: "hpMin", max: "hpMax", label: "HP", step: 0.1, lo: 0, hi: 10 },
       { min: "comboMin", max: "comboMax", label: "Max combo", step: 10, lo: 0, hi: combo },
       { min: "bpmMin", max: "bpmMax", label: "BPM", step: 1, lo: 0, hi: bpm },
@@ -411,10 +401,10 @@ export function MetricBuilder({
 
             <Section title="Mods">
               <div className="mb-mods-label">
-                The score must have at least one of the selected mods — NM =
-                no mods (empty = any mods):
+                Keeps a score if it uses at least one of these mods. NM keeps
+                the no-mod scores. Nothing selected: every score counts.
               </div>
-              {MOD_GROUPS.map((g) => (
+              {(RULESET_MOD_GROUPS[rsMetric] ?? RULESET_MOD_GROUPS[0]).map((g) => (
                 <div key={g.label} className="mb-mod-group">
                   <span className="mb-mod-cat">{g.label}</span>
                   <div className="adv-mods">

@@ -17,18 +17,32 @@ function classicFromStd(stdExpr: string): string {
   return `CAST(ROUND(${CLASSIC_MAX} * (${stdExpr}) / ${FULL_BASE}.0) AS INTEGER)`;
 }
 
+// n for taiko/catch = the map's BASIC judgement count (what lazer feeds into
+// convertStandardisedToClassic): NOT circles+sliders+spinners — in catch every
+// juice-stream fruit counts, so that would underestimate marathons ~2x
+// (squared in the formula). Exact when a best score exists (sum of the basic
+// keys of maximum_statistics), else max_combo: exact for taiko (combo = hits),
+// slight overestimate for catch (combo = fruits + large droplets, ~+10%).
+const N_BASIC = `NULLIF(
+  COALESCE(json_extract(s.maximum_statistics,'$.perfect'),0)
+  + COALESCE(json_extract(s.maximum_statistics,'$.great'),0)
+  + COALESCE(json_extract(s.maximum_statistics,'$.good'),0)
+  + COALESCE(json_extract(s.maximum_statistics,'$.ok'),0)
+  + COALESCE(json_extract(s.maximum_statistics,'$.meh'),0)
+  + COALESCE(json_extract(s.maximum_statistics,'$.miss'),0), 0)`;
+/** Basic-judgement count as seen from a non-std ruleset (needs s + ca + b). */
+const N_MODE = `COALESCE(${N_BASIC}, ca.max_combo, b.max_combo, ${N_OBJ})`;
+
 /**
  * Per-ruleset classic conversion (ppy/osu ScoreInfoExtensions formulas).
- * n is approximated by the map's object count (exact for std; taiko/catch
- * converts use the std object count as a documented approximation).
  * mania: classic IS the standardised score.
  */
 function classicFromStdRuleset(ruleset: number, stdExpr: string): string {
   switch (ruleset) {
     case 1:
-      return `CAST(ROUND((1109.0 * ${N_OBJ} + 100000) * (${stdExpr}) / ${FULL_BASE}.0) AS INTEGER)`;
+      return `CAST(ROUND((1109.0 * ${N_MODE} + 100000) * (${stdExpr}) / ${FULL_BASE}.0) AS INTEGER)`;
     case 2:
-      return `CAST(ROUND(pow((${stdExpr}) / ${FULL_BASE}.0 * ${N_OBJ}, 2) * 21.62 + (${stdExpr}) / 10.0) AS INTEGER)`;
+      return `CAST(ROUND(pow((${stdExpr}) / ${FULL_BASE}.0 * ${N_MODE}, 2) * 21.62 + (${stdExpr}) / 10.0) AS INTEGER)`;
     case 3:
       return `CAST(ROUND(${stdExpr}) AS INTEGER)`;
     default:

@@ -10,7 +10,7 @@ import { firstPlaceLabel, useCountryCode } from "../country";
 import { GradeBadge } from "./GradeBadge";
 // OBS overlay => English text, numbers in en-US format.
 import { fmtCompact, fmtNum } from "../format";
-import { GRADE_ORDER } from "../types";
+import { GRADE_ORDER, type PoolMode } from "../types";
 
 // Custom metric ids from the ?metrics= query param (chosen in the configurator)
 const METRIC_IDS = (new URLSearchParams(window.location.search).get("metrics") ?? "")
@@ -20,9 +20,19 @@ const METRIC_IDS = (new URLSearchParams(window.location.search).get("metrics") ?
 
 const delta = (cur: number, base: number) => cur - base;
 
-// ruleset scoped by the browser-source URL (?overlay=1&ruleset=N)
-const OVERLAY_RULESET =
-  Number(new URLSearchParams(window.location.search).get("ruleset")) || 0;
+// ruleset, map pool and mania key count scoped by the browser-source URL
+// (?overlay=1&ruleset=3&pool=specific&keys=7 = mania 7K specifics only)
+const OVERLAY_PARAMS = new URLSearchParams(window.location.search);
+const OVERLAY_RULESET = Number(OVERLAY_PARAMS.get("ruleset")) || 0;
+const OVERLAY_POOL: PoolMode =
+  OVERLAY_PARAMS.get("pool") === "specific"
+    ? "specific"
+    : OVERLAY_PARAMS.get("pool") === "converts"
+      ? "converts"
+      : "all";
+const OVERLAY_KEYS = (OVERLAY_PARAMS.get("keys") ?? "")
+  .split(",")
+  .filter((k) => ["4", "7", "other"].includes(k));
 
 /**
  * Stream overlay (OBS browser source, /?overlay=1): transparent background,
@@ -31,7 +41,7 @@ const OVERLAY_RULESET =
 export function StreamOverlay() {
   const { data } = useQuery({
     queryKey: ["overlay"],
-    queryFn: () => fetchOverlayStats(OVERLAY_RULESET),
+    queryFn: () => fetchOverlayStats(OVERLAY_RULESET, OVERLAY_POOL, OVERLAY_KEYS),
     refetchInterval: 5000,
   });
   const { data: sync } = useQuery({
@@ -73,10 +83,9 @@ export function StreamOverlay() {
   const completion = data.totalMaps > 0 ? (data.clears / data.totalMaps) * 100 : 0;
   const rankedGain = delta(data.rankedClassic, b.rankedClassic);
 
-  // last new score seen by the poll (activity feed)
-  const lastPlay = sync?.activity
-    ?.filter((a) => a.source === "poll")
-    .slice(-1)[0];
+  // last play OF THIS MODE, straight from the overlay payload: the activity
+  // feed is not mode-tagged, so it showed osu! plays on a mania overlay
+  const lastPlay = data.lastPlay;
 
   // Rows to hide, from the ?hide= query param (OBS browser sources can't share
   // localStorage, so overlay content is configured through the URL).
@@ -194,9 +203,14 @@ export function StreamOverlay() {
           </div>
         )}
         {!hide.has("last") && lastPlay && (
-          <div className="ov-row ov-last" title={lastPlay.text}>
+          <div
+            className="ov-row ov-last"
+            title={`${lastPlay.artist} - ${lastPlay.title} [${lastPlay.version}] — ${lastPlay.rank} · ${lastPlay.at.slice(0, 16).replace("T", " ")}`}
+          >
             <span className="ov-tag">LAST PLAYED</span>
-            <span className="ov-lastmap">{lastPlay.text.split(" — ")[0]}</span>
+            <span className="ov-lastmap">
+              {lastPlay.artist} - {lastPlay.title} [{lastPlay.version}]
+            </span>
           </div>
         )}
       </div>

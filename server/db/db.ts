@@ -12,6 +12,7 @@ import {
   DEFAULT_SCORE_CONDS,
   type MetricParams,
 } from "../logic/metrics.js";
+import { withConvertSource } from "../logic/rulesets.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -75,9 +76,54 @@ function seedDefaultMetrics(d: DatabaseSync): void {
 
 let db: DatabaseSync | null = null;
 
+/**
+ * Staged DB import (Settings → Import database): the uploaded file waits as
+ * `tracker.db.import` and is swapped in HERE, because this is the only place
+ * that opens the database — and it must happen while nothing holds it. Doing it
+ * from index.ts could never work: ESM evaluates every import first, and one of
+ * them (osu/api.ts reading its rate limit) already opens the database, so the
+ * swap hit its own handle (EBUSY on Windows) and the upload was discarded.
+ */
+function applyStagedImport(): void {
+  const staged = `${config.dbPath}.import`;
+  if (!fs.existsSync(staged)) return;
+  try {
+    // The WAL holds every recent transaction (easily hundreds of MB), so the
+    // backup copies the three files, not just the .db: restoring means putting
+    // .bak, .bak-wal and .bak-shm back as tracker.db*.
+    for (const ext of ["", "-wal", "-shm"])
+      if (fs.existsSync(config.dbPath + ext))
+        fs.copyFileSync(config.dbPath + ext, `${config.dbPath}.bak${ext}`);
+    for (const ext of ["-wal", "-shm"])
+      fs.rmSync(config.dbPath + ext, { force: true });
+    fs.renameSync(staged, config.dbPath);
+    console.log(
+      `[db] staged import applied (previous database saved as ${path.basename(config.dbPath)}.bak)`
+    );
+  } catch (e) {
+    // The staged file is KEPT: it is the user's upload — possibly gigabytes —
+    // and the usual cause is a lock, not a bad file (the upload already checked
+    // the SQLite header), so the swap retries at the next start. Deleting it
+    // here forced a full re-upload for a transient lock.
+    const code = (e as NodeJS.ErrnoException).code;
+    console.error(
+      `[db] staged import NOT applied: ${e instanceof Error ? e.message : String(e)}`
+    );
+    console.error(
+      code === "EBUSY" || code === "EPERM"
+        ? `[db] another instance still has the database open. Close it (a second ` +
+            `app window, or a dev server on the same data folder) and start again: ` +
+            `your import is kept. Delete ${path.basename(staged)} to cancel it.`
+        : `[db] your import is kept and will be retried at the next start. Delete ` +
+            `${staged} to cancel it.`
+    );
+  }
+}
+
 export function getDb(): DatabaseSync {
   if (db) return db;
   fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
+  applyStagedImport();
   db = new DatabaseSync(config.dbPath);
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA synchronous = NORMAL");
@@ -216,6 +262,28 @@ function migrate(d: DatabaseSync): void {
     `);
   }
 
+  // osu!std is now started explicitly, like the other modes (nothing runs for a
+  // mode before its "Start initial sync"). An install that already has a std
+  // catalog did that start historically: flag it, or its sync would stop dead.
+  // A brand-new database has neither, and stays idle until the user asks.
+  const stdStarted = d
+    .prepare("SELECT value FROM sync_state WHERE key = 'ruleset_started_0'")
+    .get() as { value: string } | undefined;
+  if (!stdStarted) {
+    const stdRows = (
+      d
+        .prepare("SELECT COUNT(*) c FROM beatmaps WHERE ruleset = 0")
+        .get() as { c: number }
+    ).c;
+    const imported = d
+      .prepare("SELECT 1 FROM sync_state WHERE key = 'catalog_imported_at'")
+      .get();
+    if (stdRows > 0 || imported)
+      d.prepare(
+        "INSERT OR REPLACE INTO sync_state(key, value) VALUES('ruleset_started_0', '1')"
+      ).run();
+  }
+
   // Multi-ruleset events: gained/lost history rows are tagged with the mode.
   for (const table of ["country_events", "global_events"]) {
     const cols = d.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
@@ -263,9 +331,10 @@ export function transaction<T>(fn: () => T): T {
 }
 
 /**
- * Rulesets the tracker is following. osu!std (0) is always active; the others
- * are opted into from Settings (each one has real API cost: catalog
- * enumeration + score backfill of its maps and converts).
+ * Rulesets the tracker is following, opted in/out from Settings (each one has
+ * real API cost). std can be disabled like the others — its processes stop,
+ * the views stay readable. At least one ruleset is always kept (the settings
+ * route enforces it; empty state falls back to std).
  */
 export function getActiveRulesets(): number[] {
   const raw = getState("active_rulesets") ?? "0";
@@ -275,7 +344,7 @@ export function getActiveRulesets(): number[] {
       .map(Number)
       .filter((n) => [0, 1, 2, 3].includes(n))
   );
-  set.add(0);
+  if (set.size === 0) set.add(0);
   return [...set].sort();
 }
 
@@ -287,8 +356,26 @@ export function getActiveRulesets(): number[] {
  */
 export function getStartedRulesets(): number[] {
   return getActiveRulesets().filter(
-    (r) => r === 0 || getState(`ruleset_started_${r}`) === "1"
+    (r) => getState(`ruleset_started_${r}`) === "1"
   );
+}
+
+/**
+ * `IN (…)` list of ruleset ids, valid even when the list is empty (a fresh
+ * install has nothing started until the user asks): `IN ()` is a syntax error,
+ * `IN (-1)` matches nothing.
+ */
+export function sqlIn(rulesets: number[]): string {
+  return rulesets.join(",") || "-1";
+}
+
+/**
+ * Rulesets whose CATALOG must be kept up to date: the started ones plus the
+ * convert source (see withConvertSource). Catalog only — scores, polling,
+ * sweeps and views stay on getStartedRulesets().
+ */
+export function catalogRulesets(): number[] {
+  return withConvertSource(getStartedRulesets());
 }
 
 export function getState(key: string): string | null {

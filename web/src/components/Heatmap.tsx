@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { mapUrl } from "../rulesets";
 import { useQuery } from "@tanstack/react-query";
 import {
   fetchClears,
@@ -8,6 +9,7 @@ import {
   type TimelinePoint,
 } from "../api";
 import { ctxMenuStyle } from "../ctxmenu";
+import type { PoolMode } from "../types";
 import { fmtCompact, fmtDate, fmtNum } from "../format";
 import { GradeBadge } from "./GradeBadge";
 import { MapModal } from "./MapModal";
@@ -75,25 +77,27 @@ function dayStats(
 export function HeatmapPanel({
   cutoffDay = null,
   ruleset = 0,
+  pool = "all",
+  keys = [],
 }: {
   cutoffDay?: string | null;
   ruleset?: number;
+  pool?: PoolMode;
+  keys?: string[];
 }) {
   const [year, setYear] = useState(new Date().getUTCFullYear());
   const todayIso = new Date().toISOString().slice(0, 10);
   const [selDay, setSelDay] = useState(todayIso);
   const { data } = useQuery({
-    queryKey: ["daily", year, ruleset],
-    queryFn: () => fetchDaily(year, ruleset),
+    queryKey: ["daily", year, ruleset, pool, keys],
+    queryFn: () => fetchDaily(year, ruleset, pool, keys),
     refetchInterval: 5 * 60_000,
   });
   // same key as the dashboard's time machine -> shared cache, no extra request
   const { data: tl } = useQuery({
-    queryKey: ["timeline"],
-    queryFn: fetchTimeline,
+    queryKey: ["timeline", ruleset, pool, keys],
+    queryFn: () => fetchTimeline(ruleset, pool, keys),
     refetchInterval: 5 * 60_000,
-    // the timeline (day summary deltas) is still std-only
-    enabled: ruleset === 0,
   });
   // maps played on the selected day (one row per map, day's best play)
   const { data: dayClears } = useQuery({
@@ -307,7 +311,7 @@ export function HeatmapPanel({
                         key={r.beatmap_id}
                         title={`${r.artist} - ${r.title} [${r.version}] · ${(r.accuracy * 100).toFixed(2)}%`}
                         onDoubleClick={() =>
-                          window.open(`https://osu.ppy.sh/b/${r.beatmap_id}`, "_blank")
+                          window.open(mapUrl(r.beatmap_id, ruleset), "_blank")
                         }
                         onContextMenu={(e) => {
                           e.preventDefault();
@@ -372,7 +376,7 @@ export function HeatmapPanel({
             </button>
             <button
               onClick={() => {
-                window.open(`https://osu.ppy.sh/b/${ctx.row.beatmap_id}`, "_blank");
+                window.open(mapUrl(ctx.row.beatmap_id, ruleset), "_blank");
                 setCtx(null);
               }}
             >
@@ -408,7 +412,7 @@ export function HeatmapPanel({
         </>
       )}
       {modalId != null && (
-        <MapModal beatmapId={modalId} onClose={() => setModalId(null)} />
+        <MapModal beatmapId={modalId} ruleset={ruleset} onClose={() => setModalId(null)} />
       )}
     </div>
   );

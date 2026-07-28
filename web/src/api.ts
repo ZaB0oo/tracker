@@ -1,5 +1,6 @@
 import type {
   Filters,
+  PoolMode,
   MapDetail,
   SkillCurveBucket,
   Stats,
@@ -19,10 +20,27 @@ export interface OverlayStats {
   };
   rankedClassic: number;
   rankedWither: number;
+  /** last play of THIS ruleset (null if none yet) */
+  lastPlay: {
+    artist: string;
+    title: string;
+    version: string;
+    rank: string;
+    at: string;
+  } | null;
 }
 
-export async function fetchOverlayStats(ruleset = 0): Promise<OverlayStats> {
-  const res = await fetch(`/api/overlay?ruleset=${ruleset}`);
+/** mania key-count filter as a query fragment (empty = every key count). */
+const keysQ = (keys: string[]) => (keys.length ? `&keys=${keys.join(",")}` : "");
+
+export async function fetchOverlayStats(
+  ruleset = 0,
+  pool: PoolMode = "all",
+  keys: string[] = []
+): Promise<OverlayStats> {
+  const res = await fetch(
+    `/api/overlay?ruleset=${ruleset}&pool=${pool}${keysQ(keys)}`
+  );
   if (!res.ok) throw new Error(`overlay: HTTP ${res.status}`);
   return res.json();
 }
@@ -41,14 +59,20 @@ export async function fetchOverlayMetrics(ids: number[]): Promise<{ metrics: Ove
   return res.json();
 }
 
-export async function fetchMapDetail(id: number): Promise<MapDetail> {
-  const res = await fetch(`/api/map/${id}`);
+export async function fetchMapDetail(id: number, ruleset = 0): Promise<MapDetail> {
+  const res = await fetch(`/api/map/${id}?ruleset=${ruleset}`);
   if (!res.ok) throw new Error(`map: HTTP ${res.status}`);
   return res.json();
 }
 
-export async function fetchSkillCurve(): Promise<{ buckets: SkillCurveBucket[] }> {
-  const res = await fetch("/api/skill-curve");
+export async function fetchSkillCurve(
+  ruleset = 0,
+  pool: PoolMode = "all",
+  keys: string[] = []
+): Promise<{ buckets: SkillCurveBucket[] }> {
+  const res = await fetch(
+    `/api/skill-curve?ruleset=${ruleset}&pool=${pool}${keysQ(keys)}`
+  );
   if (!res.ok) throw new Error(`skill-curve: HTTP ${res.status}`);
   return res.json();
 }
@@ -63,6 +87,7 @@ function buildTableQuery(
   p.set("mode", filters.mode);
   if (filters.ruleset) p.set("ruleset", String(filters.ruleset));
   if (filters.pool) p.set("pool", filters.pool);
+  if (filters.keys.length) p.set("keys", filters.keys.join(","));
   p.set("offset", String(offset));
   p.set("limit", String(limit));
   if (sort.length)
@@ -80,7 +105,7 @@ function buildTableQuery(
   }
   if (filters.platform) p.set("platform", filters.platform);
   for (const k of [
-    "srMin", "srMax", "arMin", "arMax", "odMin", "odMax",
+    "srMin", "srMax", "arMin", "arMax", "odMin", "odMax", "hpMin", "hpMax",
     "csMin", "csMax", "lenMin", "lenMax",
     "globalTopMin", "globalTopMax",
     "rankedFrom", "rankedTo", "playedFrom", "playedTo",
@@ -142,10 +167,11 @@ export interface DailyStats {
 export async function fetchDaily(
   year?: number,
   ruleset = 0,
-  pool: "all" | "specific" = "all"
+  pool: PoolMode = "all",
+  keys: string[] = []
 ): Promise<DailyStats> {
   const res = await fetch(
-    `/api/daily?ruleset=${ruleset}&pool=${pool}${year ? `&year=${year}` : ""}`
+    `/api/daily?ruleset=${ruleset}&pool=${pool}${keysQ(keys)}${year ? `&year=${year}` : ""}`
   );
   if (!res.ok) throw new Error(`daily: HTTP ${res.status}`);
   return res.json();
@@ -171,11 +197,17 @@ export interface TimelinePoint {
   grades: number[];
 }
 
-export async function fetchTimeline(): Promise<{
+export async function fetchTimeline(
+  ruleset = 0,
+  pool: PoolMode = "all",
+  keys: string[] = []
+): Promise<{
   tiers: string[];
   points: TimelinePoint[];
 }> {
-  const res = await fetch("/api/timeline");
+  const res = await fetch(
+    `/api/timeline?ruleset=${ruleset}&pool=${pool}${keysQ(keys)}`
+  );
   if (!res.ok) throw new Error(`timeline: HTTP ${res.status}`);
   return res.json();
 }
@@ -200,8 +232,15 @@ export interface Snapshot {
   byHp: SnapshotBucket[];
 }
 
-export async function fetchSnapshot(day: string): Promise<Snapshot> {
-  const res = await fetch(`/api/snapshot?day=${day}`);
+export async function fetchSnapshot(
+  day: string,
+  ruleset = 0,
+  pool: PoolMode = "all",
+  keys: string[] = []
+): Promise<Snapshot> {
+  const res = await fetch(
+    `/api/snapshot?day=${day}&ruleset=${ruleset}&pool=${pool}${keysQ(keys)}`
+  );
   if (!res.ok) throw new Error(`snapshot: HTTP ${res.status}`);
   return res.json();
 }
@@ -224,6 +263,30 @@ export interface LazerImportResult {
 }
 
 /** Whether direct import into osu!lazer is configured on the server. */
+/** Manual import of one beatmapset by id (existing route, backfills right after). */
+export async function postImportSet(
+  id: number
+): Promise<{ ok: boolean; error?: string; added?: string; statuses?: Record<string, number> }> {
+  const res = await fetch(`/api/sync/import-set/${id}`, { method: "POST" });
+  return res.json();
+}
+
+/**
+ * Catalog verification against a local data.ppy.sh dump file. Not scoped to a
+ * ruleset: one archive holds every mode's beatmaps, so a single pass (the
+ * decompression is the slow part) checks them all.
+ */
+export async function postVerifyDump(
+  path: string
+): Promise<{ ok: boolean; error?: string }> {
+  const res = await fetch("/api/sync/verify-dump", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  return res.json();
+}
+
 export async function fetchLazerImportStatus(): Promise<{ available: boolean }> {
   const res = await fetch("/api/lazer-import/status");
   if (!res.ok) return { available: false };
@@ -241,8 +304,12 @@ export async function lazerImport(filters: Filters, name: string): Promise<Lazer
   return json;
 }
 
-export async function fetchStats(ruleset = 0, pool: "all" | "specific" = "all"): Promise<Stats> {
-  const res = await fetch(`/api/stats?ruleset=${ruleset}&pool=${pool}`);
+export async function fetchStats(
+  ruleset = 0,
+  pool: PoolMode = "all",
+  keys: string[] = []
+): Promise<Stats> {
+  const res = await fetch(`/api/stats?ruleset=${ruleset}&pool=${pool}${keysQ(keys)}`);
   if (!res.ok) throw new Error(`stats: HTTP ${res.status}`);
   return res.json();
 }
@@ -267,9 +334,16 @@ export async function postSync(
     | "global-recheck-all"
     | "recompute"
     | `start-ruleset/${number}`
+    | `backfill-pause/${number}`
+    | `backfill-resume/${number}`
     | "refresh-top-pp"
+    | "repair-catalog"
     | "rebackfill"
     | "catalog-full?force=1"
+    | `catalog-full?force=1&ruleset=${number}`
+    | `refresh-top-pp?ruleset=${number}`
+    | `global-recheck-all?ruleset=${number}`
+    | `rebackfill?ruleset=${number}`
 ): Promise<Record<string, unknown>> {
   const res = await fetch(`/api/sync/${action}`, { method: "POST" });
   return res.json().catch(() => ({}));
@@ -302,8 +376,9 @@ export interface AuthStatus {
   } | null;
 }
 
-export async function fetchAuthStatus(): Promise<AuthStatus> {
-  const res = await fetch("/api/auth/status");
+/** ruleset: the returned profile stats (pp, ranks, accuracy…) are per mode. */
+export async function fetchAuthStatus(ruleset = 0): Promise<AuthStatus> {
+  const res = await fetch(`/api/auth/status?ruleset=${ruleset}`);
   if (!res.ok) throw new Error(`auth: HTTP ${res.status}`);
   return res.json();
 }
@@ -474,7 +549,7 @@ export interface MetricParams {
   /** ruleset the metric lives in (default 0 = osu!std) */
   ruleset?: number;
   /** map pool for non-std rulesets (converts included by default) */
-  pool?: "all" | "specific";
+  pool?: PoolMode;
   score: MetricScoreConds;
   map: MetricMapConds;
   /** dimension of the per-bucket completion on the card (default sr) */
@@ -642,6 +717,10 @@ export interface DisplayPrefs {
 
 export interface Settings {
   apiRpm: number;
+  /** highest rate the server accepts (60, or more once a grant is declared) */
+  apiRpmMax: number;
+  /** the user declared an osu!-team approved higher rate limit */
+  apiRpmApproved: boolean;
   pollIntervalSeconds: number;
   countryRecheckHours: number;
   globalRecheckHours: number;
@@ -684,6 +763,7 @@ export async function fetchSettings(): Promise<Settings> {
 
 export async function postSettings(payload: {
   apiRpm?: number;
+  apiRpmApproved?: boolean;
   pollIntervalSeconds?: number;
   countryRecheckHours?: number;
   globalRecheckHours?: number;

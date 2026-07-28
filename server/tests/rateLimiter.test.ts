@@ -31,6 +31,18 @@ describe("RateLimiter", () => {
     expect(starts[starts.length - 1]).toBeGreaterThanOrEqual(9 * 1000);
   });
 
+  it("setRpm caps at 60 by default, higher only with an explicit ceiling", () => {
+    const rl = new RateLimiter(60);
+    rl.setRpm(300); // no ceiling passed: the documented limit wins
+    expect(rl.minIntervalMs).toBe(1000);
+    rl.setRpm(300, 600); // declared osu!-approved ceiling
+    expect(rl.minIntervalMs).toBe(200);
+    rl.setRpm(900, 600); // above the ceiling: clamped to it
+    expect(rl.minIntervalMs).toBe(100);
+    rl.setRpm(0, 600); // never a division by zero
+    expect(rl.minIntervalMs).toBe(60_000);
+  });
+
   it("high priority goes before the low queue", async () => {
     const clock = virtualClock();
     const rl = new RateLimiter(60, 3, clock.now, clock.sleep);

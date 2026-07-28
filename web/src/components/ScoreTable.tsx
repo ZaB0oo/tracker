@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { mapUrl, rulesetStatFields } from "../rulesets";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { fetchTable } from "../api";
@@ -169,13 +170,21 @@ export function ScoreTable({
     });
   };
   const country = useCountryCode();
-  // static columns, except the #1 label which carries the country code
+  // static columns, except the #1 label (country code) and the stats that do
+  // not exist in the current ruleset (taiko: no AR/CS, mania: no AR, CS = Keys)
+  const stats = rulesetStatFields(filters.ruleset ?? 0);
   const columns = useMemo(
     () =>
-      COLUMNS.map((c) =>
-        c.id === "country_first" ? { ...c, label: firstPlaceLabel(country) } : c
+      COLUMNS.filter((c) =>
+        c.id === "ar" ? stats.ar : c.id === "cs" ? stats.cs : true
+      ).map((c) =>
+        c.id === "country_first"
+          ? { ...c, label: firstPlaceLabel(country) }
+          : c.id === "cs"
+            ? { ...c, label: stats.csLabel }
+            : c
       ),
-    [country]
+    [country, stats.ar, stats.cs, stats.csLabel]
   );
   const visibleCols = useMemo(
     () => columns.filter((c) => !hidden.includes(c.id)),
@@ -319,7 +328,7 @@ export function ScoreTable({
                     width: "100%",
                   }}
                   onDoubleClick={() =>
-                    window.open(`https://osu.ppy.sh/b/${r.beatmap_id}`, "_blank")
+                    window.open(mapUrl(r.beatmap_id, filters.ruleset), "_blank")
                   }
                   onContextMenu={(e) => {
                     e.preventDefault();
@@ -358,7 +367,7 @@ export function ScoreTable({
             </button>
             <button
               onClick={() => {
-                window.open(`https://osu.ppy.sh/b/${ctx.row.beatmap_id}`, "_blank");
+                window.open(mapUrl(ctx.row.beatmap_id, filters.ruleset), "_blank");
                 setCtx(null);
               }}
             >
@@ -394,7 +403,7 @@ export function ScoreTable({
         </>
       )}
       {detailId != null && (
-        <MapModal beatmapId={detailId} onClose={() => setDetailId(null)} />
+        <MapModal beatmapId={detailId} ruleset={filters.ruleset} onClose={() => setDetailId(null)} />
       )}
     </div>
   );

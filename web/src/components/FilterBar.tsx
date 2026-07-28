@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import { firstPlaceLabel, useCountryCode } from "../country";
 import { collectionExportUrl, fetchLazerImportStatus, lazerImport } from "../api";
+import { rulesetStatFields } from "../rulesets";
 import { displayGrade } from "../format";
-import { DEFAULT_FILTERS, GRADE_ORDER, type Filters } from "../types";
+import { DEFAULT_FILTERS, GRADE_ORDER, type Filters, type PoolMode } from "../types";
 import { NamePrompt } from "./NamePrompt";
+import { KeysChips } from "./KeysChips";
+import { PoolSeg } from "./PoolSeg";
 import { appAlert } from "../dialogs";
 const FC_OPTS = [
   { v: "0", label: "PFC" },
@@ -119,6 +122,12 @@ export function FilterBar({
         .join("/")}`,
       clear: () => set("statuses", []),
     });
+  if (local.keys.length)
+    badges.push({
+      key: "keys",
+      label: `Keys: ${local.keys.map((k) => (k === "other" ? "other" : `${k}K`)).join("/")}`,
+      clear: () => set("keys", []),
+    });
   if (local.mods)
     badges.push({ key: "mods", label: `Mods: ${local.mods}`, clear: () => set("mods", "") });
   if (local.countryFirst)
@@ -153,7 +162,8 @@ export function FilterBar({
   rangeBadge("sr", "★", "srMin", "srMax");
   rangeBadge("ar", "AR", "arMin", "arMax");
   rangeBadge("od", "OD", "odMin", "odMax");
-  rangeBadge("cs", "CS", "csMin", "csMax");
+  rangeBadge("hp", "HP", "hpMin", "hpMax");
+  rangeBadge("cs", rulesetStatFields(local.ruleset ?? 0).csLabel, "csMin", "csMax");
   rangeBadge("len", "Length", "lenMin", "lenMax");
   rangeBadge("globalTop", "Global top", "globalTopMin", "globalTopMax");
   rangeBadge("ranked", "Ranked", "rankedFrom", "rankedTo");
@@ -170,18 +180,9 @@ export function FilterBar({
             Standardised
           </button>
         </div>
-        {local.ruleset !== 0 && (
-          <label
-            className="mb-check pool-toggle"
-            title="Also list the osu! standard maps playable as converts in this ruleset"
-          >
-            <input
-              type="checkbox"
-              checked={local.pool === "all"}
-              onChange={(e) => set("pool", e.target.checked ? "all" : "specific")}
-            />
-            Include converts
-          </label>
+        {local.ruleset !== 0 && <PoolSeg value={local.pool} onChange={(p) => set("pool", p)} />}
+        {local.ruleset === 3 && (
+          <KeysChips value={local.keys} onChange={(k) => set("keys", k)} />
         )}
         <input
           className="search"
@@ -197,7 +198,7 @@ export function FilterBar({
           ))}
         </div>
         {(badges.length > 0 || local.q) && (
-          <button className="reset" onClick={() => onChange({ ...DEFAULT_FILTERS, mode: local.mode })}>
+          <button className="reset" onClick={() => onChange({ ...DEFAULT_FILTERS, mode: local.mode, ruleset: local.ruleset })}>
             Reset all
           </button>
         )}
@@ -212,7 +213,7 @@ export function FilterBar({
           <button
             className="export-coll"
             disabled={lazerBusy}
-            title="Import these maps as a collection directly into osu!lazer (osu! must be closed; a backup of the database is made first)"
+            title="Send these maps to osu!lazer as a collection. Close osu! first, a backup is made."
             onClick={() => setNaming("lazer")}
           >
             {lazerBusy ? "…" : "⇥ lazer"}
@@ -361,9 +362,13 @@ export function FilterBar({
             step="1"
             lo={1}
           />
+        </div>
+
+        <div className="filter-group">
+          <span className="filter-group-label">Mods</span>
           <input
             className="mods-input"
-            placeholder="Mods (HD,DT)"
+            placeholder="Mods (HD,DT — NM = nomod)"
             value={local.mods}
             onChange={(e) => set("mods", e.target.value.toUpperCase())}
           />
@@ -373,9 +378,14 @@ export function FilterBar({
           <span className="filter-group-label">Ranges</span>
           <div className="ranges">
             <Range label="★" min={local.srMin} max={local.srMax} onMin={(v) => set("srMin", v)} onMax={(v) => set("srMax", v)} />
-            <Range label="AR" min={local.arMin} max={local.arMax} onMin={(v) => set("arMin", v)} onMax={(v) => set("arMax", v)} />
+            {rulesetStatFields(local.ruleset ?? 0).ar && (
+              <Range label="AR" min={local.arMin} max={local.arMax} onMin={(v) => set("arMin", v)} onMax={(v) => set("arMax", v)} />
+            )}
             <Range label="OD" min={local.odMin} max={local.odMax} onMin={(v) => set("odMin", v)} onMax={(v) => set("odMax", v)} />
-            <Range label="CS" min={local.csMin} max={local.csMax} onMin={(v) => set("csMin", v)} onMax={(v) => set("csMax", v)} />
+            <Range label="HP" min={local.hpMin} max={local.hpMax} onMin={(v) => set("hpMin", v)} onMax={(v) => set("hpMax", v)} />
+            {rulesetStatFields(local.ruleset ?? 0).cs && (
+              <Range label={rulesetStatFields(local.ruleset ?? 0).csLabel} min={local.csMin} max={local.csMax} onMin={(v) => set("csMin", v)} onMax={(v) => set("csMax", v)} />
+            )}
             <Range label="Length (s)" min={local.lenMin} max={local.lenMax} onMin={(v) => set("lenMin", v)} onMax={(v) => set("lenMax", v)} step="1" />
             <DateRange label="Ranked" from={local.rankedFrom} to={local.rankedTo} onFrom={(v) => set("rankedFrom", v)} onTo={(v) => set("rankedTo", v)} />
             <DateRange label="Played" from={local.playedFrom} to={local.playedTo} onFrom={(v) => set("playedFrom", v)} onTo={(v) => set("playedTo", v)} />

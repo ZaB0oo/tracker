@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { mapUrl, rulesetStatFields } from "../rulesets";
 import { fetchMapDetail } from "../api";
 import { firstPlaceLabel, useCountryCode } from "../country";
 import { GradeBadge } from "./GradeBadge";
@@ -22,14 +23,17 @@ function modsText(raw: string): string {
 export function MapModal({
   beatmapId,
   onClose,
+  ruleset = 0,
 }: {
   beatmapId: number;
   onClose: () => void;
+  ruleset?: number;
 }) {
   const country = useCountryCode();
+  const stats = rulesetStatFields(ruleset);
   const { data } = useQuery({
-    queryKey: ["map", beatmapId],
-    queryFn: () => fetchMapDetail(beatmapId),
+    queryKey: ["map", beatmapId, ruleset],
+    queryFn: () => fetchMapDetail(beatmapId, ruleset),
   });
 
   return (
@@ -57,7 +61,7 @@ export function MapModal({
                 : ""}
               {data.map.dmca ? " · ⛔ DMCA" : ""} ·{" "}
               <a
-                href={`https://osu.ppy.sh/b/${data.map.id}`}
+                href={mapUrl(data.map.id, ruleset)}
                 target="_blank"
                 rel="noreferrer"
               >
@@ -69,9 +73,13 @@ export function MapModal({
               {(
                 [
                   ["★", data.map.star_rating?.toFixed(2)],
-                  ["AR", data.map.ar],
+                  ...(stats.ar
+                    ? ([["AR", data.map.ar]] as [string, number | null][])
+                    : []),
                   ["OD", data.map.od],
-                  ["CS", data.map.cs],
+                  ...(stats.cs
+                    ? ([[stats.csLabel, data.map.cs]] as [string, number | null][])
+                    : []),
                   ["HP", data.map.hp],
                   ["BPM", data.map.bpm],
                   ["Length", mmss(data.map.total_length)],

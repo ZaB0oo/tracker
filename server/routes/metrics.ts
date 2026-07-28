@@ -3,7 +3,7 @@ import { getDb } from "../db/db.js";
 import { evalMetric, previewMetric } from "../logic/metricEval.js";
 import { mapWhere, scoreWhere, type MetricParams } from "../logic/metrics.js";
 import { getModdedStarRating } from "../osu/api.js";
-import { parseRulesetParam } from "../logic/rulesets.js";
+import { parseRulesetParam, poolWhere } from "../logic/rulesets.js";
 
 const KINDS = ["count", "ranked_score", "pp"] as const;
 
@@ -106,24 +106,29 @@ metricsRouter.get("/overlay-metrics", (req, res) => {
     .all() as { id: number; name: string; params: string }[];
   // Total (and %) are only meaningful when the metric restricts its map pool:
   // for "all maps" metrics the total is just the whole catalog — noise on
-  // stream. total: 0 tells the overlay to hide it.
-  const catalogTotal = (
-    getDb()
-      .prepare(
-        "SELECT COUNT(*) c FROM beatmaps WHERE ruleset = 0 AND status IN (1, 2, 4)"
-      )
-      .get() as { c: number }
-  ).c;
+  // stream. total: 0 tells the overlay to hide it. Compared against the catalog
+  // OF THE METRIC'S OWN mode and pool, not always std's.
+  const catalogTotal = (ruleset: number, pool?: string) =>
+    (
+      getDb()
+        .prepare(
+          `SELECT COUNT(*) c FROM beatmaps b
+           WHERE ${poolWhere(ruleset, pool)} AND b.status IN (1, 2, 4)`
+        )
+        .get() as { c: number }
+    ).c;
   res.json({
     metrics: rows.map((r) => {
       const params = JSON.parse(r.params) as MetricParams;
       const { count, total } = evalMetric(params, "month");
+      const whole = catalogTotal(params.ruleset ?? 0, params.pool);
       return {
         id: r.id,
         name: r.name,
         kind: params.kind,
+        ruleset: params.ruleset ?? 0,
         count,
-        total: total !== catalogTotal ? total : 0,
+        total: total !== whole ? total : 0,
       };
     }),
   });

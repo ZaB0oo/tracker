@@ -90,6 +90,9 @@ export interface MapDetail {
 
 type ScoreMode = "lazer" | "classic";
 
+/** Which maps of the viewed ruleset to count: its own, the converts, or both. */
+export type PoolMode = "all" | "specific" | "converts";
+
 export interface TableResponse {
   rows: TableRow[];
   total: number;
@@ -161,6 +164,8 @@ export interface SyncStatus {
   message: string;
   messageAt: string | null;
   busy: string[];
+  backfillPausedModes: number[];
+  backfillPassRuleset: number | null;
   backfill: { fetched: number; total: number; running: boolean };
   enrich: { done: number; total: number };
   lastPollAt: string | null;
@@ -177,11 +182,14 @@ export interface SyncStatus {
     globalChecked: number;
     globalPending: number;
   };
-  /** active non-std rulesets: per-mode sync state and backfill progress */
+  /** all four rulesets: per-mode sync state and backfill progress */
   rulesets: {
     ruleset: number;
     name: string;
+    /** enabled in Settings (a disabled mode cannot be started) */
+    active: boolean;
     started: boolean;
+    backfillPaused: boolean;
     specificTotal: number;
     specificFetched: number;
     convertsTotal: number;
@@ -194,7 +202,9 @@ export interface Filters {
   /** viewed ruleset (0 osu, 1 taiko, 2 catch, 3 mania) — set by the header switcher */
   ruleset: number;
   /** map pool for non-std rulesets: converts included by default */
-  pool: "all" | "specific";
+  pool: PoolMode;
+  /** mania only: key-count filter ("4", "7", "other"); empty = all */
+  keys: string[];
   played: "" | "played" | "unplayed";
   q: string;
   grades: string[];
@@ -211,6 +221,7 @@ export interface Filters {
   srMin: string; srMax: string;
   arMin: string; arMax: string;
   odMin: string; odMax: string;
+  hpMin: string; hpMax: string;
   csMin: string; csMax: string;
   lenMin: string; lenMax: string;
   /** full dates YYYY-MM-DD (empty = unbounded) */
@@ -222,6 +233,7 @@ export const DEFAULT_FILTERS: Filters = {
   mode: "classic",
   ruleset: 0,
   pool: "all",
+  keys: [],
   played: "",
   q: "",
   grades: [],
@@ -235,6 +247,7 @@ export const DEFAULT_FILTERS: Filters = {
   srMin: "", srMax: "",
   arMin: "", arMax: "",
   odMin: "", odMax: "",
+  hpMin: "", hpMax: "",
   csMin: "", csMax: "",
   lenMin: "", lenMax: "",
   rankedFrom: "", rankedTo: "",

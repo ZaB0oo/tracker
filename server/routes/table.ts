@@ -2,7 +2,7 @@ import { Router } from "express";
 import { getDb } from "../db/db.js";
 import { mapWhere, scoreWhere, type MetricParams } from "../logic/metrics.js";
 import { ensureMissingFresh } from "../logic/scoreSql.js";
-import { parseRulesetParam, poolWhere } from "../logic/rulesets.js";
+import { keysWhere, maniaKeysSql, parseRulesetParam, poolWhere } from "../logic/rulesets.js";
 import { getBeatmapsByIds } from "../osu/api.js";
 
 export const tableRouter = Router();
@@ -65,6 +65,10 @@ function buildFilters(
   const where: string[] = [poolWhere(ruleset, q.pool), "b.status IN (1, 2, 4)"];
   const params: Record<string, string | number | null> = {};
 
+  // mania key-count filter ("4,7,other")
+  const keys = keysWhere(ruleset, q.keys);
+  if (keys) where.push(keys);
+
   const num = (name: string, sql: string, cmp: string) => {
     if (q[name] != null && q[name] !== "") {
       where.push(`${sql} ${cmp} @${name}`);
@@ -88,9 +92,16 @@ function buildFilters(
     if (sts.length) where.push(`b.status IN (${sts.join(",")})`);
   }
   if (q.mods) {
-    // "contains the mod" filter on the best's mods JSON
+    // "contains the mod" filter on the best's mods JSON; NM = no mods
+    // (CL alone still counts as nomod)
     for (const [i, m] of q.mods.split(",").entries()) {
-      if (!/^[A-Z0-9]{2}$/i.test(m)) continue;
+      if (m.toUpperCase() === "NM") {
+        where.push(
+          `NOT EXISTS (SELECT 1 FROM json_each(s.mods) je WHERE json_extract(je.value,'$.acronym') <> 'CL')`
+        );
+        continue;
+      }
+      if (!/^[A-Z0-9]{2,3}$/i.test(m)) continue;
       where.push(`s.mods LIKE @mod${i}`);
       params[`mod${i}`] = `%"${m.toUpperCase()}"%`;
     }
@@ -135,7 +146,10 @@ function buildFilters(
   num("srMin", SR, ">="); num("srMax", SR, "<=");
   num("arMin", "b.ar", ">="); num("arMax", "b.ar", "<=");
   num("odMin", "b.od", ">="); num("odMax", "b.od", "<=");
-  num("csMin", "b.cs", ">="); num("csMax", "b.cs", "<=");
+  // in mania "CS" IS the key count: filter on the same expression the column
+  // displays, so a convert is never matched on its std circle size
+  const CS = ruleset === 3 ? maniaKeysSql() : "b.cs";
+  num("csMin", CS, ">="); num("csMax", CS, "<=");
   num("hpMin", "b.hp", ">="); num("hpMax", "b.hp", "<=");
   num("lenMin", "b.total_length", ">="); num("lenMax", "b.total_length", "<=");
   num("bpmMin", "b.bpm", ">="); num("bpmMax", "b.bpm", "<=");
@@ -182,6 +196,7 @@ tableRouter.get("/table", (req, res) => {
   // converts: per-mode SR / max combo from convert_attrs when fetched
   const SRX = R === 0 ? "b.star_rating" : "COALESCE(ca.star_rating, b.star_rating)";
   const COMBOX = R === 0 ? "b.max_combo" : "COALESCE(ca.max_combo, b.max_combo)";
+  const CSX = R === 3 ? maniaKeysSql() : "b.cs";
 
   const { where, params } = buildFilters(db, q, missingSql);
 
@@ -191,6 +206,7 @@ tableRouter.get("/table", (req, res) => {
     let sqlCol = SORT_COLUMNS[col];
     if (sqlCol === "b.star_rating") sqlCol = SRX;
     if (sqlCol === "b.max_combo") sqlCol = COMBOX;
+    if (sqlCol === "b.cs") sqlCol = CSX;
     if (sqlCol) sortParts.push(`${sqlCol} ${dir === "asc" ? "ASC" : "DESC"} NULLS LAST`);
   }
   if (sortParts.length === 0) sortParts.push("missing_value DESC");
@@ -211,7 +227,7 @@ tableRouter.get("/table", (req, res) => {
     .prepare(
       `SELECT
         b.id AS beatmap_id, b.beatmapset_id, b.version, b.status,
-        b.total_length, b.bpm, b.cs, b.ar, b.od, b.hp,
+        b.total_length, b.bpm, ${CSX} AS cs, b.ar, b.od, b.hp,
         ${SRX} AS star_rating,
         ${COMBOX} AS map_max_combo,
         st.artist, st.title, st.creator, st.ranked_date,
@@ -249,10 +265,12 @@ tableRouter.get("/table", (req, res) => {
 tableRouter.get("/map/:id", (req, res) => {
   const id = Number(req.params.id);
   const db = getDb();
+  const R = parseRulesetParam(req.query.ruleset);
   const map = db
     .prepare(
       `SELECT b.id, b.beatmapset_id, b.version, b.status, b.total_length, b.bpm,
-         b.cs, b.ar, b.od, b.hp, b.star_rating, b.max_combo,
+         ${R === 3 ? maniaKeysSql() : "b.cs"} AS cs,
+         b.ar, b.od, b.hp, b.star_rating, b.max_combo,
          b.count_circles, b.count_sliders, b.count_spinners,
          st.artist, st.title, st.creator, st.ranked_date,
          st.download_disabled AS dmca

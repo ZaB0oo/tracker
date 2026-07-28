@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   classicFromStandardised,
   classicMax,
+  poolGrowth,
+  packSeedCounts,
+  seedCounts,
+  seedNeedsLookup,
+  withConvertSource,
   RULESET_CATCH,
   RULESET_MANIA,
   RULESET_OSU,
@@ -154,6 +159,92 @@ describe("ruleset registry", () => {
     );
     expect(RULESETS[RULESET_TAIKO].hitFields.map((f) => f.key)).not.toContain(
       "meh"
+    );
+  });
+});
+
+describe("withConvertSource", () => {
+  it("adds osu! as the convert source of any started non-std mode", () => {
+    expect(withConvertSource([3])).toEqual([0, 3]);
+    expect(withConvertSource([1, 2, 3])).toEqual([0, 1, 2, 3]);
+  });
+
+  it("leaves the list alone when osu! is already started, or nothing is", () => {
+    expect(withConvertSource([0])).toEqual([0]);
+    expect(withConvertSource([0, 3])).toEqual([0, 3]);
+    expect(withConvertSource([])).toEqual([]);
+  });
+});
+
+describe("seed catch-up criterion", () => {
+  const OSU = 0, TAIKO = 1, CATCH = 2, MANIA = 3;
+  const counts = (o = 0, t = 0, c = 0, m = 0) => [o, t, c, m];
+  // the user tracks catch + mania, so std is in as their convert source
+  const tracked = [OSU, CATCH, MANIA];
+
+  it("packs and reads back the per-mode diff counts (v2)", () => {
+    const packed = packSeedCounts(counts(6, 0, 5, 0));
+    expect(seedCounts(packed, 2)).toEqual([6, 0, 5, 0]);
+    // clamped at 255 per mode, and a mega-collab does not bleed into the next
+    expect(seedCounts(packSeedCounts(counts(300, 2)), 2)).toEqual([255, 2, 0, 0]);
+  });
+
+  it("v1 bitmask reads as 'at least one diff' per mode", () => {
+    expect(seedCounts(1 | 4, 1)).toEqual([1, 0, 1, 0]);
+  });
+
+  it("catches a set holding SOME of a mode's diffs (the v1 blind spot)", () => {
+    // seed says 5 catch diffs, we hold 3 => 18 maps like this stayed missing
+    expect(seedNeedsLookup(counts(6, 0, 5), counts(6, 0, 3), tracked)).toBe(true);
+    // v1 could not see it: "has catch diffs" was true on both sides
+    expect(seedNeedsLookup(seedCounts(1 | 4, 1), counts(6, 0, 3), tracked)).toBe(false);
+  });
+
+  it("skips modes we do not track", () => {
+    // 12 taiko diffs missing, but taiko is not started
+    expect(seedNeedsLookup(counts(0, 12), counts(0, 0), tracked)).toBe(false);
+  });
+
+  it("leaves a complete set alone, extra local diffs included", () => {
+    expect(seedNeedsLookup(counts(6, 0, 5), counts(6, 0, 5), tracked)).toBe(false);
+    // newly ranked diffs we already have: never a reason to fetch
+    expect(seedNeedsLookup(counts(6), counts(7, 3), tracked)).toBe(false);
+  });
+
+  it("catches a set we never stored at all", () => {
+    expect(seedNeedsLookup(counts(0, 0, 0, 4), counts(), tracked)).toBe(true);
+  });
+});
+
+describe("poolGrowth", () => {
+  it("reports the per-mode pool delta, ignoring modes that did not move", () => {
+    const before = new Map([
+      [0, 100],
+      [2, 50],
+    ]);
+    const after = new Map([
+      [0, 112],
+      [2, 50],
+    ]);
+    expect(poolGrowth(before, after)).toEqual({ total: 12, label: "osu! +12" });
+  });
+
+  it("sums the modes for the gate but names each one", () => {
+    const g = poolGrowth(new Map([[1, 10], [3, 5]]), new Map([[1, 13], [3, 6]]));
+    expect(g.total).toBe(4);
+    expect(g.label).toBe("osu!taiko +3, osu!mania +1");
+  });
+
+  it("says so when nothing entered a pool (the old counter said +200)", () => {
+    expect(poolGrowth(new Map([[0, 100]]), new Map([[0, 100]]))).toEqual({
+      total: 0,
+      label: "no new map",
+    });
+  });
+
+  it("treats a newly started mode (absent from the snapshot) as growth", () => {
+    expect(poolGrowth(new Map([[0, 10]]), new Map([[0, 10], [2, 7]])).label).toBe(
+      "osu!catch +7"
     );
   });
 });

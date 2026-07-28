@@ -1,6 +1,8 @@
 import { useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchAuthStatus, fetchProfileImages, fetchStats } from "../api";
+import { RULESET_NAMES, modeIcon } from "../rulesets";
+import type { PoolMode } from "../types";
 import { useCountryCode } from "../country";
 import { useDisplayPrefs } from "../prefs";
 import { gradeDataUrl } from "./GradeBadge";
@@ -40,14 +42,48 @@ const H = 512;
  * tracker totals and the official grade badges. Downloaded as PNG (SVG →
  * canvas at 2x; every image is a data URL so the canvas stays clean).
  */
-export function ShareCard({ onClose }: { onClose: () => void }) {
+export function ShareCard({
+  onClose,
+  ruleset = 0,
+  pool = "all",
+  keys = [],
+}: {
+  onClose: () => void;
+  /** viewed mode: both the tracker totals and the osu! profile stats follow it */
+  ruleset?: number;
+  pool?: PoolMode;
+  keys?: string[];
+}) {
   const svgRef = useRef<SVGSVGElement | null>(null);
-  const { data: auth } = useQuery({ queryKey: ["auth"], queryFn: fetchAuthStatus });
-  const { data: stats } = useQuery({ queryKey: ["stats"], queryFn: () => fetchStats() });
+  // the profile stats (pp, ranks, accuracy, play time) are PER MODE: /me alone
+  // answers for the account's default mode, which would print osu! pp on a
+  // mania card
+  const { data: auth } = useQuery({
+    queryKey: ["auth", ruleset],
+    queryFn: () => fetchAuthStatus(ruleset),
+  });
+  const { data: stats } = useQuery({
+    queryKey: ["stats", ruleset, pool, keys],
+    queryFn: () => fetchStats(ruleset, pool, keys),
+  });
   const { data: images } = useQuery({
     queryKey: ["profile-images"],
     queryFn: fetchProfileImages,
     staleTime: 10 * 60_000,
+  });
+  // Inlined as a data URL: an SVG rendered from a blob (the PNG export path)
+  // loads NO external resource, not even same-origin ones.
+  const { data: modeIconUrl } = useQuery({
+    queryKey: ["mode-icon", ruleset],
+    queryFn: async () => {
+      const blob = await (await fetch(modeIcon(ruleset))).blob();
+      return await new Promise<string>((resolve) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(String(fr.result));
+        fr.readAsDataURL(blob);
+      });
+    },
+    staleTime: Infinity,
   });
   const country = useCountryCode();
   const prefs = useDisplayPrefs();
@@ -90,7 +126,7 @@ export function ShareCard({ onClose }: { onClose: () => void }) {
         if (!blob) return;
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
-        a.download = `osu-completionist-${date.replaceAll("/", "-")}.png`;
+        a.download = `osu-completionist-${RULESET_NAMES[ruleset] ?? "osu!"}-${date.replaceAll("/", "-")}.png`;
         a.click();
         URL.revokeObjectURL(a.href);
       }, "image/png");
@@ -112,7 +148,9 @@ export function ShareCard({ onClose }: { onClose: () => void }) {
     { label: "Accuracy", value: ps ? `${ps.accuracy.toFixed(2)}%` : "—" },
   ];
   const wideRow = [
-    { label: "Ranked Score", value: ps ? fmtNum(ps.ranked_score) : "—" },
+    // the TRACKER's ranked score (sum of my bests in this mode/pool), not the
+    // profile's: the card is about what the tracker measured
+    { label: "Ranked Score", value: fmtNum(stats.scoreSums.classic) },
     { label: "Total Score", value: ps ? fmtNum(ps.total_score) : "—" },
     { label: "Clears", value: fmtNum(played) },
     { label: "Completion", value: `${completion}%` },
@@ -207,7 +245,25 @@ export function ShareCard({ onClose }: { onClose: () => void }) {
             <rect x="138" y="30" width="6" height="38" rx="3" fill="#ff66aa" />
             <text x="158" y="60" fontSize="32" fontWeight="700" fill="#ffffff">
               {username}
+              {ruleset !== 0 && (pool !== "all" || keys.length > 0) && (
+                <tspan fontSize="18" fontWeight="600" fill="#66ccff">
+                  {"  "}
+                  {pool !== "all" ? pool : ""}
+                  {keys.length
+                    ? `${pool !== "all" ? " · " : ""}${keys
+                        .map((k) => (k === "other" ? "other" : `${k}K`))
+                        .join("/")}`
+                    : ""}
+                </tspan>
+              )}
             </text>
+            {/* mode icon instead of its name: same artwork as the tabs */}
+            {modeIconUrl && (
+              <image
+                x={W - 66} y="30" width="36" height="36"
+                href={modeIconUrl} preserveAspectRatio="xMidYMid meet"
+              />
+            )}
             {ps && (
               <>
                 <g transform="translate(158, 74)">

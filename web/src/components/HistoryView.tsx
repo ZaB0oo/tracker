@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { mapUrl } from "../rulesets";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { fetchClears, fetchCountryHistory, fetchGlobalHistory } from "../api";
 import { firstPlaceLabel, useCountryCode } from "../country";
@@ -58,7 +59,7 @@ function ClearsList({ onCtx, ruleset }: { onCtx: OnMapContext; ruleset: number }
           key={c.id}
           className={`fr-event${i % 2 ? " row-alt" : ""}`}
           onDoubleClick={() =>
-            window.open(`https://osu.ppy.sh/b/${c.beatmap_id}`, "_blank")
+            window.open(mapUrl(c.beatmap_id, ruleset), "_blank")
           }
           onContextMenu={(e) => onCtx(e, c)}
           title="Double-click: open on osu.ppy.sh — right-click: actions"
@@ -139,7 +140,7 @@ function CountryList({
           key={e.id}
           className={`fr-event fr-event-${e.event}${i % 2 ? " row-alt" : ""}`}
           onDoubleClick={() =>
-            window.open(`https://osu.ppy.sh/b/${e.beatmap_id}`, "_blank")
+            window.open(mapUrl(e.beatmap_id, ruleset), "_blank")
           }
           onContextMenu={(ev) => onCtx(ev, e)}
           title="Double-click: open on osu.ppy.sh — right-click: actions"
@@ -243,7 +244,7 @@ function GlobalList({
             key={e.id}
             className={`fr-event fr-event-${gained ? "gained" : "lost"}${i % 2 ? " row-alt" : ""}`}
             onDoubleClick={() =>
-              window.open(`https://osu.ppy.sh/b/${e.beatmap_id}`, "_blank")
+              window.open(mapUrl(e.beatmap_id, ruleset), "_blank")
             }
             onContextMenu={(ev) => onCtx(ev, e)}
             title="Double-click: open on osu.ppy.sh — right-click: actions"
@@ -401,7 +402,7 @@ export function HistoryView({ ruleset = 0 }: { ruleset?: number }) {
         </>
       )}
       {detailId != null && (
-        <MapModal beatmapId={detailId} onClose={() => setDetailId(null)} />
+        <MapModal beatmapId={detailId} ruleset={ruleset} onClose={() => setDetailId(null)} />
       )}
     </div>
   );

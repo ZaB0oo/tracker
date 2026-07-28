@@ -4,6 +4,8 @@
  * SQLite JSON functions for mods and hit counts), so everything stays fast.
  */
 
+import { poolWhere, type PoolMode } from "./rulesets.js";
+
 export interface Range {
   min: number | null;
   max: number | null;
@@ -64,7 +66,7 @@ export interface MetricParams {
   /** ruleset the metric lives in (default 0 = osu!std) */
   ruleset?: number;
   /** map pool for non-std rulesets (converts included by default) */
-  pool?: "all" | "specific";
+  pool?: PoolMode;
   score: MetricScoreConds;
   map: MetricMapConds;
   /** dimension of the per-bucket completion shown on the card (default sr) */
@@ -83,7 +85,7 @@ const GRADE_IN: Record<string, string> = {
   S: "'S','SH','X','XH'",
 };
 const GRADES_ALL = ["XH", "X", "SH", "S", "A", "B", "C", "D"];
-const MOD_RE = /^[A-Z0-9]{2}$/;
+const MOD_RE = /^[A-Z0-9]{2,3}$/;
 const num = (v: unknown): number | null =>
   typeof v === "number" && Number.isFinite(v) ? v : null;
 
@@ -172,14 +174,11 @@ export function scoreWhere(c: MetricScoreConds): string {
  */
 export function mapWhere(
   c: MetricMapConds,
-  opts: { ignoreCountry1?: boolean; ruleset?: number; pool?: "all" | "specific" } = {}
+  opts: { ignoreCountry1?: boolean; ruleset?: number; pool?: PoolMode } = {}
 ): string {
   const R = opts.ruleset ?? 0;
-  const w: string[] = [
-    R === 0 || opts.pool === "specific"
-      ? `b.ruleset = ${R}`
-      : `(b.ruleset = ${R} OR b.ruleset = 0)`,
-  ];
+  // same three-way pool rule as the views (see poolWhere)
+  const w: string[] = [poolWhere(R, opts.pool)];
   const sts = (c.statuses ?? []).filter((n) => [1, 2, 4].includes(n));
   w.push(`b.status IN (${(sts.length ? sts : [1, 2, 4]).join(",")})`);
   const r = (expr: string, lo: unknown, hi: unknown) => {

@@ -73,7 +73,7 @@ export function PresetBar({
         title="Save the current filters and sort as a preset"
         onClick={() => setNamingOpen(true)}
       >
-        💾 Save current filters
+        Save current filters
       </button>
       {namingOpen && (
         <NamePrompt

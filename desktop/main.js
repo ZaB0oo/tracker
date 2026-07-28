@@ -4,8 +4,8 @@
  *
  * Desktop behaviors:
  * - single instance (second launch focuses the existing window)
- * - close-to-tray: closing the window hides it, the tracker keeps polling;
- *   quit from the tray menu
+ * - closing the window asks whether to keep the tracker running in the tray or
+ *   to quit (answer remembered on request, changeable from the tray menu)
  * - first launch: offers to import an existing tracker.db (source install)
  * - optional "start with Windows" (starts hidden in the tray)
  */
@@ -180,16 +180,63 @@ function showWindow() {
     return { action: "deny" };
   });
   void win.loadURL(`http://127.0.0.1:${PORT}`);
-  // close-to-tray: the tracker keeps running (polling, sweeps, Discord)
+  // Closing the window can either keep the tracker running in the tray or stop
+  // everything. Asked once, remembered if the user ticks the box, and always
+  // changeable from the tray menu.
   win.on("close", (e) => {
-    if (!quitting) {
-      e.preventDefault();
-      win?.hide();
-    }
+    if (quitting) return;
+    e.preventDefault();
+    const pref = readClosePref();
+    if (pref === "quit") return doQuit();
+    if (pref === "tray") return void win?.hide();
+    void dialog
+      .showMessageBox(win, {
+        type: "question",
+        buttons: ["Keep it running", "Quit"],
+        defaultId: 0,
+        cancelId: 0,
+        title: "osu!completionist",
+        message: "Close the window, or quit?",
+        detail:
+          "Kept in the tray, the tracker keeps picking up your new scores. Quitting stops it.",
+        checkboxLabel: "Remember this",
+        checkboxChecked: false,
+      })
+      .then(({ response, checkboxChecked }) => {
+        const action = response === 1 ? "quit" : "tray";
+        if (checkboxChecked) writeClosePref(action);
+        refreshTrayMenu();
+        if (action === "quit") doQuit();
+        else win?.hide();
+      });
   });
   win.on("closed", () => {
     win = null;
   });
+}
+
+// ---------- close behaviour ----------
+const CLOSE_PREF = () => path.join(app.getPath("userData"), "close-action.json");
+
+/** "tray", "quit", or null to ask every time. */
+function readClosePref() {
+  try {
+    return JSON.parse(fs.readFileSync(CLOSE_PREF(), "utf8")).action ?? null;
+  } catch {
+    return null;
+  }
+}
+function writeClosePref(action) {
+  try {
+    if (action === null) fs.rmSync(CLOSE_PREF(), { force: true });
+    else fs.writeFileSync(CLOSE_PREF(), JSON.stringify({ action }));
+  } catch {
+    /* preference is a convenience, never worth failing on */
+  }
+}
+function doQuit() {
+  quitting = true;
+  app.quit();
 }
 
 // ---------- tray ----------
@@ -218,12 +265,23 @@ function refreshTrayMenu() {
       },
       { type: "separator" },
       {
-        label: "Quit (stops the tracking)",
-        click: () => {
-          quitting = true;
-          app.quit();
-        },
+        label: "When I close the window",
+        submenu: [
+          ["Ask me", null],
+          ["Keep it running", "tray"],
+          ["Quit", "quit"],
+        ].map(([label, action]) => ({
+          label,
+          type: "radio",
+          checked: readClosePref() === action,
+          click: () => {
+            writeClosePref(action);
+            refreshTrayMenu();
+          },
+        })),
       },
+      { type: "separator" },
+      { label: "Quit (stops the tracking)", click: () => doQuit() },
     ])
   );
 }
