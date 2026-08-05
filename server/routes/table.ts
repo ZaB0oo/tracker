@@ -3,6 +3,7 @@ import { getDb } from "../db/db.js";
 import { mapWhere, scoreWhere, type MetricParams } from "../logic/metrics.js";
 import { ensureMissingFresh } from "../logic/scoreSql.js";
 import { keysWhere, maniaKeysSql, parseRulesetParam, poolWhere } from "../logic/rulesets.js";
+import { parseLengthSeconds, parseSearch, parseStatus } from "../logic/searchQuery.js";
 import { getBeatmapsByIds } from "../osu/api.js";
 
 export const tableRouter = Router();
@@ -106,6 +107,11 @@ function buildFilters(
       params[`mod${i}`] = `%"${m.toUpperCase()}"%`;
     }
   }
+  // mania 1M club: at least one perfect 1,000,000 play on the map
+  if (q.oneMillion === "1")
+    where.push(`EXISTS (SELECT 1 FROM scores s2 WHERE s2.beatmap_id = b.id
+      AND s2.ruleset = 3 AND s2.passed = 1
+      AND COALESCE(json_extract(s2.raw,'$.total_score_without_mods'), s2.total_score) = 1000000)`);
   if (q.countryFirst === "1") where.push("u.country_first = 1");
   // Global top filter: my exact position on the map's global leaderboard
   // (populated by the global tops sweep; any bound excludes unranked maps).
@@ -138,10 +144,73 @@ function buildFilters(
     params.setId = Number(q.setId);
   }
   if (q.q) {
-    where.push(
-      `(st.artist LIKE @text OR st.title LIKE @text OR st.creator LIKE @text OR b.version LIKE @text)`
-    );
-    params.text = `%${q.q}%`;
+    // osu!-style tokens (ar>9, status=r, keys=7, creator=…): constraints out
+    // of the search box, exactly like the in-game search. Leftover = text.
+    const { text, conds } = parseSearch(q.q);
+    let ti = 0;
+    for (const c of conds) {
+      const OPS = ["=", "<", ">", "<=", ">="];
+      if (!OPS.includes(c.op)) continue;
+      const pn = `tok${ti++}`;
+      switch (c.key) {
+        case "star": case "ar": case "od": case "cs": case "hp":
+        case "bpm": case "combo": case "length": {
+          const expr = ({
+            star: SR, ar: "b.ar", od: "b.od",
+            cs: ruleset === 3 ? maniaKeysSql() : "b.cs", hp: "b.hp",
+            bpm: "b.bpm", combo: COMBO, length: "b.total_length",
+          } as Record<string, string>)[c.key];
+          const v = c.key === "length" ? parseLengthSeconds(c.value) : Number(c.value);
+          if (Number.isFinite(v)) {
+            where.push(`${expr} ${c.op} @${pn}`);
+            params[pn] = v;
+          }
+          break;
+        }
+        case "keys": {
+          const v = Number(c.value);
+          if (Number.isFinite(v)) {
+            where.push(`${maniaKeysSql()} ${c.op} @${pn}`);
+            params[pn] = v;
+          }
+          break;
+        }
+        case "status": {
+          const v = parseStatus(c.value);
+          if (v != null) where.push(`b.status = ${v}`);
+          break;
+        }
+        case "year": {
+          where.push(`CAST(strftime('%Y', st.ranked_date) AS INTEGER) ${c.op} @${pn}`);
+          params[pn] = Number(c.value) || 0;
+          break;
+        }
+        case "creator": case "artist": case "title": {
+          const col = ({ creator: "st.creator", artist: "st.artist", title: "st.title" } as Record<string, string>)[c.key];
+          where.push(`${col} LIKE @${pn}`);
+          params[pn] = `%${c.value}%`;
+          break;
+        }
+      }
+    }
+    if (text) {
+      // a digits-only leftover is most likely a beatmap/beatmapset id: match
+      // it directly too (titles made of digits still hit the LIKE branch)
+      if (/^\d+$/.test(text)) {
+        where.push(
+          `(b.id = @textId OR b.beatmapset_id = @textId
+            OR st.artist LIKE @text OR st.title LIKE @text
+            OR st.creator LIKE @text OR b.version LIKE @text)`
+        );
+        params.textId = Number(text);
+        params.text = `%${text}%`;
+      } else {
+        where.push(
+          `(st.artist LIKE @text OR st.title LIKE @text OR st.creator LIKE @text OR b.version LIKE @text)`
+        );
+        params.text = `%${text}%`;
+      }
+    }
   }
   num("srMin", SR, ">="); num("srMax", SR, "<=");
   num("arMin", "b.ar", ">="); num("arMax", "b.ar", "<=");

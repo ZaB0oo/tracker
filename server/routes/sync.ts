@@ -310,6 +310,72 @@ syncRouter.post("/sync/verify-year/:year", async (req, res) => {
 });
 
 // Manual import of a beatmapset by id (tries the API then the web page),
+// Universal import: beatmapset id, beatmap id, score id, or any osu.ppy.sh
+// URL (beatmapsets/X#mode/Y, /b/Y, /beatmaps/Y, /scores/Z). Resolves down to
+// the beatmapset, imports it (works for DMCA'd sets), backfills right after.
+syncRouter.post("/sync/import-any", async (req, res) => {
+  if (!config.hasCredentials)
+    return res.status(400).json({ ok: false, error: "osu! API credentials are not set" });
+  const input = String((req.body as { input?: string } | undefined)?.input ?? "").trim();
+  if (!input) return res.status(400).json({ ok: false, error: "empty input" });
+
+  const { getBeatmapsByIds, getScoreById } = await import("../osu/api.js");
+  /** resolves whatever was pasted into a beatmapset id (+ how it was read) */
+  const resolve = async (): Promise<{ setId: number; kind: string } | string> => {
+    let m = /beatmapsets\/(\d+)/.exec(input);
+    if (m) return { setId: Number(m[1]), kind: "beatmapset URL" };
+    m = /(?:\/b\/|beatmaps\/)(\d+)/.exec(input);
+    if (m) {
+      const [bm] = await getBeatmapsByIds([Number(m[1])], "high");
+      return bm
+        ? { setId: bm.beatmapset_id, kind: "beatmap URL" }
+        : `beatmap ${m[1]} not found`;
+    }
+    m = /scores\/(?:[a-z]+\/)?(\d+)/.exec(input);
+    if (m) {
+      const sc = await getScoreById(Number(m[1]));
+      if (!sc?.beatmap_id) return `score ${m[1]} not found`;
+      const [bm] = await getBeatmapsByIds([sc.beatmap_id], "high");
+      return bm
+        ? { setId: bm.beatmapset_id, kind: "score URL" }
+        : `beatmap ${sc.beatmap_id} of score ${m[1]} not found`;
+    }
+    if (!/^\d+$/.test(input)) return "unrecognized input (expected an id or an osu.ppy.sh URL)";
+    const n = Number(input);
+    // bare number: lazer score ids live in the billions, map/set ids far below
+    if (n >= 1e9) {
+      const sc = await getScoreById(n);
+      if (sc?.beatmap_id) {
+        const [bm] = await getBeatmapsByIds([sc.beatmap_id], "high");
+        if (bm) return { setId: bm.beatmapset_id, kind: "score id" };
+      }
+      return `score ${n} not found`;
+    }
+    // try it as a beatmap id first (what people copy most), then as a set id
+    const [bm] = await getBeatmapsByIds([n], "high");
+    if (bm) return { setId: bm.beatmapset_id, kind: "beatmap id" };
+    return { setId: n, kind: "beatmapset id" };
+  };
+
+  try {
+    const r = await resolve();
+    if (typeof r === "string") return res.status(404).json({ ok: false, error: r });
+    const result = await importSetById(r.setId);
+    const rows = getDb()
+      .prepare(
+        `SELECT CASE WHEN status IN (1, 2) THEN 'ranked'
+                     WHEN status = 4 THEN 'loved'
+                     ELSE 'other' END AS s, COUNT(*) c
+         FROM beatmaps WHERE beatmapset_id = ? GROUP BY s`
+      )
+      .all(r.setId) as { s: string; c: number }[];
+    const statuses = Object.fromEntries(rows.map((x) => [x.s, x.c]));
+    res.json({ ok: true, kind: r.kind, setId: r.setId, ...result, statuses });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
 // scores backfilled right after. Ex: curl -X POST .../api/sync/import-set/2135112
 syncRouter.post("/sync/import-set/:id", async (req, res) => {
   const id = Number(req.params.id);

@@ -122,6 +122,8 @@ export function FilterBar({
         .join("/")}`,
       clear: () => set("statuses", []),
     });
+  if (local.oneMillion)
+    badges.push({ key: "oneM", label: "1M", clear: () => set("oneMillion", false) });
   if (local.keys.length)
     badges.push({
       key: "keys",
@@ -172,21 +174,25 @@ export function FilterBar({
   return (
     <div className="filterbar">
       <div className="filter-row">
-        <div className="seg">
-          <button className={local.mode === "classic" ? "active" : ""} onClick={() => set("mode", "classic")}>
-            Classic
-          </button>
-          <button className={local.mode === "lazer" ? "active" : ""} onClick={() => set("mode", "lazer")}>
-            Standardised
-          </button>
-        </div>
+        {local.ruleset !== 3 && (
+          /* mania: classic IS the standardised score, the toggle is noise */
+          <div className="seg">
+            <button className={local.mode === "classic" ? "active" : ""} onClick={() => set("mode", "classic")}>
+              Classic
+            </button>
+            <button className={local.mode === "lazer" ? "active" : ""} onClick={() => set("mode", "lazer")}>
+              Standardised
+            </button>
+          </div>
+        )}
         {local.ruleset !== 0 && <PoolSeg value={local.pool} onChange={(p) => set("pool", p)} />}
         {local.ruleset === 3 && (
           <KeysChips value={local.keys} onChange={(k) => set("keys", k)} />
         )}
         <input
           className="search"
-          placeholder="Search artist / title / mapper / diff..."
+          placeholder="Search… (ar>9, stars<6, status=r, keys=7, map id)"
+          title={"osu!-style filters in the search box:\nstars<6  ar>9  od>=8  cs=4  hp<5  bpm>200\nlength<90 (seconds; 1:30 works too)  combo>1000  keys=7  status=r/l/a\nyear>=2015  creator=name  artist=name  title=name\nA number alone matches a map / mapset id."}
           value={local.q}
           onChange={(e) => set("q", e.target.value)}
         />
@@ -304,6 +310,15 @@ export function FilterBar({
                 {o.label}
               </button>
             ))}
+            {local.ruleset === 3 && (
+              <button
+                className={`chip ${local.oneMillion ? "on" : ""}`}
+                title="Maps with a perfect 1,000,000 play"
+                onClick={() => set("oneMillion", !local.oneMillion)}
+              >
+                1M
+              </button>
+            )}
           </div>
         </div>
 

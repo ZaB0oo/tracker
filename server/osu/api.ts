@@ -534,6 +534,18 @@ export async function getModdedStarRating(
 }
 
 /** Batch beatmap lookup (max 50 ids / request) — used for max_combo/SR enrichment. */
+/** One score by its (lazer) id — used to resolve a pasted score link/id. */
+export async function getScoreById(
+  id: number,
+  priority: Priority = "high"
+): Promise<{ beatmap_id?: number } | null> {
+  try {
+    return await apiGet<{ beatmap_id?: number }>(`/scores/${id}`, priority);
+  } catch {
+    return null;
+  }
+}
+
 export async function getBeatmapsByIds(
   ids: number[],
   priority: Priority = "low"

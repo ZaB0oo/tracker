@@ -5,7 +5,7 @@ import {
   postDiscordTest,
   postImportDb,
   postSettings,
-  postImportSet,
+  postImportAny,
   postSync,
   postVerifyDump,
 } from "../api";
@@ -299,6 +299,17 @@ export function AdvancedSettings({
             </a>
           </span>
         </label>
+        <p className="set-note">
+          From the same author, WitherFlower also proposes a level rework:{" "}
+          <a
+            href="https://github.com/ppy/osu/discussions/17124#discussioncomment-9581970"
+            target="_blank"
+            rel="noreferrer"
+          >
+            witherlevel
+          </a>
+          .
+        </p>
         </div>
 
         <div className="set-col">
@@ -474,19 +485,18 @@ export function AdvancedSettings({
           <span className="set-path set-import-set">
             <input
               type="text"
-              inputMode="numeric"
-              placeholder="beatmapset id"
+              placeholder="id or osu.ppy.sh URL"
               value={setIdInput}
-              onChange={(e) => setSetIdInput(e.target.value.replace(/\D/g, ""))}
+              onChange={(e) => setSetIdInput(e.target.value)}
             />
             <button
               disabled={!setIdInput}
               onClick={() => {
                 void (async () => {
-                  const id = Number(setIdInput);
-                  setMaintMsg(`Importing set ${id}…`);
+                  const input = setIdInput.trim();
+                  setMaintMsg(`Importing ${input}…`);
                   try {
-                    const r = await postImportSet(id);
+                    const r = await postImportAny(input);
                     if (!r.ok) {
                       setMaintMsg(`Failed: ${r.error ?? "unknown"}`);
                       return;
@@ -495,8 +505,8 @@ export function AdvancedSettings({
                     const counted = (st.ranked ?? 0) + (st.loved ?? 0);
                     setMaintMsg(
                       counted === 0
-                        ? `Set ${id} imported — no ranked/loved diff, it will NOT appear in any pool`
-                        : `Set ${id} imported: ${r.added ?? "no new map"} (${st.ranked ?? 0} ranked, ${st.loved ?? 0} loved in the set)`
+                        ? `Set ${r.setId} imported (${r.kind}, +${r.newDiffs ?? 0} diffs) — no ranked/loved diff, it will NOT appear in any pool`
+                        : `Set ${r.setId} imported (${r.kind}): +${r.newDiffs ?? 0} new diffs (${st.ranked ?? 0} ranked, ${st.loved ?? 0} loved)`
                     );
                     setSetIdInput("");
                   } catch (e) {
@@ -504,9 +514,9 @@ export function AdvancedSettings({
                   }
                 })();
               }}
-              title="Add one beatmapset by id, even a DMCA one. Your scores follow."
+              title="Add a map, set or score — paste an id or any osu.ppy.sh link, even a DMCA'd one. Your scores follow."
             >
-              Import set by id <span className="scope-tag">all modes</span>
+              Import id / URL <span className="scope-tag">all modes</span>
             </button>
           </span>
           </div>

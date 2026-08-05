@@ -88,6 +88,7 @@ function buildTableQuery(
   if (filters.ruleset) p.set("ruleset", String(filters.ruleset));
   if (filters.pool) p.set("pool", filters.pool);
   if (filters.keys.length) p.set("keys", filters.keys.join(","));
+  if (filters.oneMillion) p.set("oneMillion", "1");
   p.set("offset", String(offset));
   p.set("limit", String(limit));
   if (sort.length)
@@ -218,6 +219,10 @@ export interface SnapshotBucket {
   played: number;
   fc: number;
   country: number;
+  pfc?: number;
+  ss?: number;
+  splus?: number;
+  onem?: number;
 }
 
 export interface Snapshot {
@@ -264,10 +269,19 @@ export interface LazerImportResult {
 
 /** Whether direct import into osu!lazer is configured on the server. */
 /** Manual import of one beatmapset by id (existing route, backfills right after). */
-export async function postImportSet(
-  id: number
-): Promise<{ ok: boolean; error?: string; added?: string; statuses?: Record<string, number> }> {
-  const res = await fetch(`/api/sync/import-set/${id}`, { method: "POST" });
+export async function postImportAny(input: string): Promise<{
+  ok: boolean;
+  error?: string;
+  kind?: string;
+  setId?: number;
+  newDiffs?: number;
+  statuses?: Record<string, number>;
+}> {
+  const res = await fetch("/api/sync/import-any", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ input }),
+  });
   return res.json();
 }
 

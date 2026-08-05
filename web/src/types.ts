@@ -100,6 +100,7 @@ export interface TableResponse {
 }
 
 export interface Stats {
+  oneMillions: number;
   totals: {
     total: number;
     played: number;
@@ -130,22 +131,38 @@ export interface Stats {
     top25: number; top50: number; top100: number;
     checked: number;
   };
-  bySr: { sr: number; total: number; played: number; country: number | null; fc: number | null }[];
-  byYear: { year: string; total: number; played: number; country: number | null; fc: number | null }[];
+  bySr: ({ sr: number } & DistCounts)[];
+  byYear: ({ year: string } & DistCounts)[];
   byAr: Bucket[];
   byOd: Bucket[];
   byHp: Bucket[];
   byCs: Bucket[];
   byLen: Bucket[];
   byCombo: Bucket[];
+  /** hero rows: the same gauges bucketed by status ("ranked" / "loved") */
+  byStatus: ({ bucket: string } & DistCounts)[];
 }
 
-export interface Bucket {
-  bucket: number;
+/** shared per-bucket completion counts (extra gauges may be absent) */
+export interface DistCounts {
   total: number;
   played: number;
   country: number | null;
   fc: number | null;
+  pfc?: number | null;
+  ss?: number | null;
+  splus?: number | null;
+  onem?: number | null;
+  top1?: number | null;
+  top8?: number | null;
+  top15?: number | null;
+  top25?: number | null;
+  top50?: number | null;
+  top100?: number | null;
+}
+
+export interface Bucket extends DistCounts {
+  bucket: number;
 }
 
 export interface SkillCurveBucket {
@@ -205,6 +222,8 @@ export interface Filters {
   pool: PoolMode;
   /** mania only: key-count filter ("4", "7", "other"); empty = all */
   keys: string[];
+  /** mania only: maps with a perfect 1,000,000 play */
+  oneMillion: boolean;
   played: "" | "played" | "unplayed";
   q: string;
   grades: string[];
@@ -234,6 +253,7 @@ export const DEFAULT_FILTERS: Filters = {
   ruleset: 0,
   pool: "all",
   keys: [],
+  oneMillion: false,
   played: "",
   q: "",
   grades: [],

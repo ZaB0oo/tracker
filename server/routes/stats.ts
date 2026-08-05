@@ -111,6 +111,17 @@ statsRouter.get("/stats", (req, res) => {
     LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}
     WHERE ${POOL} AND b.status IN (1, 2, 4)`);
 
+  const oneMillions =
+    R === 3
+      ? one<{ c: number }>(`
+          SELECT COUNT(DISTINCT s.beatmap_id) c
+          FROM scores s
+          JOIN beatmaps b ON b.id = s.beatmap_id
+          WHERE s.ruleset = 3 AND s.passed = 1
+            AND COALESCE(json_extract(s.raw,'$.total_score_without_mods'), s.total_score) = 1000000
+            AND ${POOL} AND b.status IN (1, 2, 4)`).c
+      : 0;
+
   // Global tops counters (cumulative: top8 includes top1, etc.). All zeros
   // until the global sweep has run at least once.
   const globalTops = one<{
@@ -154,13 +165,40 @@ statsRouter.get("/stats", (req, res) => {
     )
     .all();
 
+  // Extra completion gauges (PFC / SS / S+), taken from the BEST score only —
+  // osu! leaderboard semantics, same as the Grades card: an old SS beaten by a
+  // higher non-SS play does not count. top100 comes from the live global rank.
+  // mania 1M club: monotone "ever achieved" (a later higher modded best does
+  // not remove the 1M), matching how the community counts them
+  const ONEM_JOIN =
+    R === 3
+      ? `LEFT JOIN (SELECT DISTINCT beatmap_id FROM scores
+           WHERE ruleset = 3 AND passed = 1
+             AND COALESCE(json_extract(raw,'$.total_score_without_mods'), total_score) = 1000000
+         ) om ON om.beatmap_id = b.id`
+      : "";
+  const FLAGS_JOIN = `LEFT JOIN scores bs ON bs.id = u.best_lazer_score_id ${ONEM_JOIN}`;
+  const GAUGE_COLS = `,
+    SUM(CASE WHEN bs.fc_state = 0 THEN 1 ELSE 0 END) pfc,
+    SUM(CASE WHEN bs.rank IN ('X','XH') THEN 1 ELSE 0 END) ss,
+    SUM(CASE WHEN bs.rank IN ('S','SH','X','XH') THEN 1 ELSE 0 END) splus,
+    SUM(CASE WHEN u.global_rank = 1 THEN 1 ELSE 0 END) top1,
+    SUM(CASE WHEN u.global_rank <= 8 THEN 1 ELSE 0 END) top8,
+    SUM(CASE WHEN u.global_rank <= 15 THEN 1 ELSE 0 END) top15,
+    SUM(CASE WHEN u.global_rank <= 25 THEN 1 ELSE 0 END) top25,
+    SUM(CASE WHEN u.global_rank <= 50 THEN 1 ELSE 0 END) top50,
+    SUM(CASE WHEN u.global_rank <= 100 THEN 1 ELSE 0 END) top100${
+      R === 3 ? ",\n    SUM(CASE WHEN om.beatmap_id IS NOT NULL THEN 1 ELSE 0 END) onem" : ""
+    }`;
+
   const bySr = db
     .prepare(
       `SELECT MIN(CAST(b.star_rating AS INTEGER), 10) sr,
         COUNT(*) total, SUM(CASE WHEN u.played = 1 THEN 1 ELSE 0 END) played,
         SUM(COALESCE(u.country_first, 0)) country,
-        SUM(COALESCE(u.any_fc, 0)) fc
+        SUM(COALESCE(u.any_fc, 0)) fc${GAUGE_COLS}
        FROM beatmaps b LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}
+       ${FLAGS_JOIN}
        WHERE ${POOL} AND b.status IN (1, 2, 4) AND b.star_rating IS NOT NULL
        GROUP BY sr ORDER BY sr`
     )
@@ -171,10 +209,11 @@ statsRouter.get("/stats", (req, res) => {
       `SELECT strftime('%Y', st.ranked_date) year,
         COUNT(*) total, SUM(CASE WHEN u.played = 1 THEN 1 ELSE 0 END) played,
         SUM(COALESCE(u.country_first, 0)) country,
-        SUM(COALESCE(u.any_fc, 0)) fc
+        SUM(COALESCE(u.any_fc, 0)) fc${GAUGE_COLS}
        FROM beatmaps b
        JOIN beatmapsets st ON st.id = b.beatmapset_id
        LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}
+       ${FLAGS_JOIN}
        WHERE ${POOL} AND st.ranked_date IS NOT NULL
        GROUP BY year ORDER BY year`
     )
@@ -187,12 +226,27 @@ statsRouter.get("/stats", (req, res) => {
         `SELECT MIN(CAST(${expr} AS INTEGER), ${cap}) AS bucket,
           COUNT(*) total, SUM(CASE WHEN u.played = 1 THEN 1 ELSE 0 END) played,
           SUM(COALESCE(u.country_first, 0)) country,
-          SUM(COALESCE(u.any_fc, 0)) fc
+          SUM(COALESCE(u.any_fc, 0)) fc${GAUGE_COLS}
          FROM beatmaps b LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}
+         ${FLAGS_JOIN}
          WHERE ${POOL} AND b.status IN (1, 2, 4) AND ${expr} IS NOT NULL
          GROUP BY bucket ORDER BY bucket`
       )
       .all();
+
+  // hero rows (Global / Ranked / Loved): same gauges, bucketed by status
+  const byStatus = db
+    .prepare(
+      `SELECT CASE WHEN b.status = 4 THEN 'loved' ELSE 'ranked' END AS bucket,
+        COUNT(*) total, SUM(CASE WHEN u.played = 1 THEN 1 ELSE 0 END) played,
+        SUM(COALESCE(u.country_first, 0)) country,
+        SUM(COALESCE(u.any_fc, 0)) fc${GAUGE_COLS}
+       FROM beatmaps b LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}
+       ${FLAGS_JOIN}
+       WHERE ${POOL} AND b.status IN (1, 2, 4)
+       GROUP BY bucket`
+    )
+    .all();
 
   const byAr = dist("b.ar", 10);
   const byOd = dist("b.od", 10);
@@ -202,11 +256,12 @@ statsRouter.get("/stats", (req, res) => {
   // of them behind a single "10+" bucket.
   const byCs = dist(R === 3 ? maniaKeysSql() : "b.cs", R === 3 ? 18 : 10);
   const byLen = dist("b.total_length / 60", 10); // one-minute buckets
-  const byCombo = dist("b.max_combo / 250", 8); // buckets of 250, 2000+
+  const byCombo = dist("b.max_combo / 250", 10); // buckets of 250, 2500+
 
   const payload = {
     totals, scoreSums: { ...scoreSums, ...missingSums }, grades, fc, globalTops,
-    bySr, byYear, byAr, byOd, byHp, byCs, byLen, byCombo,
+    oneMillions,
+    bySr, byYear, byAr, byOd, byHp, byCs, byLen, byCombo, byStatus,
   };
   statsCache.set(cacheKey, { version, at: Date.now(), payload });
   res.json(payload);
@@ -530,6 +585,7 @@ statsRouter.get("/timeline", (req, res) => {
 interface SnapMap {
   clear: string | null; // first clear day
   fc: string | null; // first FC day
+  onem: string | null; // mania: first 1,000,000 day (null elsewhere)
   rankedDay: string | null; // day the map entered the catalog
   sr: number;
   year: string | null;
@@ -544,6 +600,10 @@ interface SnapIndex {
   version: string;
   maps: SnapMap[];
   country: Map<number, [string, number][]>; // bid -> [day, held 0|1] transitions
+  /** bid -> transitions of the BEST score: [day, rank, fc_state]. The grade
+   * gauges follow leaderboard semantics (grade OF the best), which is not
+   * monotone: an SS beaten later by a higher non-SS play disappears. */
+  bests: Map<number, [string, string, number][]>;
   mapIds: number[];
 }
 // One index per (ruleset, pool): it was built for std only and cached without
@@ -571,7 +631,12 @@ function buildSnapshotIndex(
          b.ar, b.od, ${CS} cs, b.hp, strftime('%Y', st.ranked_date) year,
          date(st.ranked_date) ranked_day,
          MIN(CASE WHEN s.passed = 1 THEN s.ended_at END) clear,
-         MIN(CASE WHEN s.passed = 1 AND s.fc_state <= 1 THEN s.ended_at END) fc
+         MIN(CASE WHEN s.passed = 1 AND s.fc_state <= 1 THEN s.ended_at END) fc,
+         ${R === 3
+           ? `MIN(CASE WHEN s.passed = 1
+                AND COALESCE(json_extract(s.raw,'$.total_score_without_mods'), s.total_score) = 1000000
+                THEN s.ended_at END)`
+           : "NULL"} onem
        FROM beatmaps b
        JOIN beatmapsets st ON st.id = b.beatmapset_id
        ${caJoin}
@@ -583,7 +648,7 @@ function buildSnapshotIndex(
     id: number; sr: number | null; len: number | null; combo: number | null;
     ar: number | null; od: number | null; cs: number | null; hp: number | null;
     year: string | null; ranked_day: string | null;
-    clear: string | null; fc: string | null;
+    clear: string | null; fc: string | null; onem: string | null;
   }[];
   const cap = (v: number | null, c: number) =>
     v == null ? -1 : Math.min(Math.floor(v), c);
@@ -594,11 +659,12 @@ function buildSnapshotIndex(
     maps.push({
       clear: a.clear ? a.clear.slice(0, 10) : null,
       fc: a.fc ? a.fc.slice(0, 10) : null,
+      onem: a.onem ? a.onem.slice(0, 10) : null,
       rankedDay: a.ranked_day,
       sr: cap(a.sr, 10),
       year: a.year,
       len: a.len == null ? -1 : Math.min(Math.floor(a.len / 60), 10),
-      combo: a.combo == null ? -1 : Math.min(Math.floor(a.combo / 250), 8),
+      combo: a.combo == null ? -1 : Math.min(Math.floor(a.combo / 250), 10),
       ar: cap(a.ar, 10), od: cap(a.od, 10), hp: cap(a.hp, 10),
       cs: cap(a.cs, R === 3 ? 18 : 10), // mania: key count, dual stage reaches 18
     });
@@ -632,7 +698,27 @@ function buildSnapshotIndex(
   for (const r of held)
     if (!country.has(r.bid)) country.set(r.bid, [[r.at.slice(0, 10), 1]]);
 
-  return { version: scoresVersion(), maps, country, mapIds };
+  // BEST-score transitions per map: replay the passed scores in order and
+  // record each time the leaderboard best (highest total) changes
+  const allScores = db
+    .prepare(
+      `SELECT s.beatmap_id AS bid, s.ended_at AS at, s.total_score AS total,
+              s.rank, s.fc_state AS fcState
+       FROM scores s WHERE s.ruleset = ${R} AND s.passed = 1
+       ORDER BY s.ended_at`
+    )
+    .all() as { bid: number; at: string; total: number; rank: string; fcState: number }[];
+  const bests = new Map<number, [string, string, number][]>();
+  const bestTotal = new Map<number, number>();
+  for (const sc of allScores) {
+    if ((bestTotal.get(sc.bid) ?? -1) >= sc.total) continue;
+    bestTotal.set(sc.bid, sc.total);
+    const arr = bests.get(sc.bid) ?? [];
+    arr.push([sc.at.slice(0, 10), sc.rank, sc.fcState]);
+    bests.set(sc.bid, arr);
+  }
+
+  return { version: scoresVersion(), maps, country, bests, mapIds };
 }
 
 statsRouter.get("/snapshot", (req, res) => {
@@ -651,7 +737,10 @@ statsRouter.get("/snapshot", (req, res) => {
     snapCaches.set(snapKey, snapCache);
   }
 
-  type Agg = { total: number; played: number; fc: number; country: number };
+  type Agg = {
+    total: number; played: number; fc: number; country: number;
+    pfc: number; ss: number; splus: number; onem: number;
+  };
   const mk = () => new Map<string | number, Agg>();
   const dims = {
     bySr: mk(), byYear: mk(), byLen: mk(), byCombo: mk(),
@@ -660,22 +749,47 @@ statsRouter.get("/snapshot", (req, res) => {
   const bump = (
     m: Map<string | number, Agg>,
     key: string | number | null,
-    inCat: boolean, c: boolean, f: boolean, c1: boolean
+    inCat: boolean, c: boolean, f: boolean, c1: boolean,
+    pf: boolean, xs: boolean, sp: boolean, om: boolean
   ) => {
     if (key == null || key === -1) return;
     let a = m.get(key);
-    if (!a) m.set(key, (a = { total: 0, played: 0, fc: 0, country: 0 }));
+    if (!a)
+      m.set(
+        key,
+        (a = { total: 0, played: 0, fc: 0, country: 0, pfc: 0, ss: 0, splus: 0, onem: 0 })
+      );
     if (inCat) a.total++;
     if (c) a.played++;
     if (f) a.fc++;
     if (c1) a.country++;
+    if (pf) a.pfc++;
+    if (xs) a.ss++;
+    if (sp) a.splus++;
+    if (om) a.onem++;
   };
-  const { maps, country, mapIds } = snapCache;
+  const { maps, country, bests, mapIds } = snapCache;
   for (let i = 0; i < maps.length; i++) {
     const m = maps[i];
     const inCat = m.rankedDay != null && m.rankedDay <= day;
     const cleared = m.clear != null && m.clear <= day;
     const fced = m.fc != null && m.fc <= day;
+    const onemd = m.onem != null && m.onem <= day;
+    // grade gauges = grade OF the best at that date (leaderboard semantics)
+    let pfced = false;
+    let ssed = false;
+    let splused = false;
+    if (cleared) {
+      const tr = bests.get(mapIds[i]);
+      if (tr) {
+        for (const [d, rank, fcState] of tr) {
+          if (d > day) break;
+          pfced = fcState === 0;
+          ssed = rank === "X" || rank === "XH";
+          splused = ssed || rank === "S" || rank === "SH";
+        }
+      }
+    }
     let c1 = false;
     if (cleared) {
       const tr = country.get(mapIds[i]);
@@ -687,14 +801,14 @@ statsRouter.get("/snapshot", (req, res) => {
       }
     }
     if (!inCat && !cleared && !fced && !c1) continue;
-    bump(dims.bySr, m.sr, inCat, cleared, fced, c1);
-    bump(dims.byYear, m.year, inCat, cleared, fced, c1);
-    bump(dims.byLen, m.len, inCat, cleared, fced, c1);
-    bump(dims.byCombo, m.combo, inCat, cleared, fced, c1);
-    bump(dims.byAr, m.ar, inCat, cleared, fced, c1);
-    bump(dims.byOd, m.od, inCat, cleared, fced, c1);
-    bump(dims.byCs, m.cs, inCat, cleared, fced, c1);
-    bump(dims.byHp, m.hp, inCat, cleared, fced, c1);
+    bump(dims.bySr, m.sr, inCat, cleared, fced, c1, pfced, ssed, splused, onemd);
+    bump(dims.byYear, m.year, inCat, cleared, fced, c1, pfced, ssed, splused, onemd);
+    bump(dims.byLen, m.len, inCat, cleared, fced, c1, pfced, ssed, splused, onemd);
+    bump(dims.byCombo, m.combo, inCat, cleared, fced, c1, pfced, ssed, splused, onemd);
+    bump(dims.byAr, m.ar, inCat, cleared, fced, c1, pfced, ssed, splused, onemd);
+    bump(dims.byOd, m.od, inCat, cleared, fced, c1, pfced, ssed, splused, onemd);
+    bump(dims.byCs, m.cs, inCat, cleared, fced, c1, pfced, ssed, splused, onemd);
+    bump(dims.byHp, m.hp, inCat, cleared, fced, c1, pfced, ssed, splused, onemd);
   }
   const out = (m: Map<string | number, Agg>) =>
     [...m.entries()].map(([bucket, a]) => ({ bucket, ...a }));

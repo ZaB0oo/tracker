@@ -267,13 +267,51 @@ h1 { font-size: 21px; margin: 0; }
 .big.accent { color: var(--accent); }
 .big-unit { font-size: 12px; font-weight: 600; color: var(--fg-dim); }
 .card small { color: var(--fg-dim); }
+.bar-wrap { position: relative; flex: 1; min-width: 0; }
 .bar {
   position: relative; height: 20px; background: var(--bg3); border-radius: 10px;
-  overflow: hidden; flex: 1;
+  overflow: hidden;
+}
+.bar-tip {
+  position: absolute; z-index: 40; left: 50%; bottom: calc(100% + 7px);
+  transform: translateX(-50%);
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 7px 11px; font-size: 12px; line-height: 1.55; white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); pointer-events: none;
+}
+.bar-tip-row .gauge-dot { width: 8px; height: 8px; }
+.bar-tip-title { color: var(--accent); margin-right: 8px; }
+.tip-dim { color: var(--fg-dim); }
+.gauge-group-title {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--fg-dim); margin-right: 2px;
 }
 .bar-fill { position: absolute; inset: 0; width: 0; background: linear-gradient(90deg, #4a3a6a, var(--accent)); }
 .bar-fill-gold { background: linear-gradient(90deg, #6a5a2a, var(--yellow)); }
+.bar-fill-pfc { background: #a06ee8; }
+.bar-fill-splus { background: #3fbf9f; }
+.bar-fill-ss { background: #d8d8e8; }
+.bar-fill-t100 { background: #f0a45a; }
+.bar-fill-t50 { background: #e88a3e; }
+.bar-fill-t25 { background: #dd6e2c; }
+.bar-fill-t15 { background: #d0541f; }
+.bar-fill-t8 { background: #c23a18; }
+.bar-fill-t1 { background: #ff4d4d; }
+.bar-fill-onem { background: #f06ec8; }
 .bar-fill-blue { background: linear-gradient(90deg, #2a4a6a, var(--accent2)); }
+.bar-count { font-weight: 700; color: #fff; white-space: nowrap; }
+.bar-count .gauge-dot { width: 8px; height: 8px; vertical-align: baseline; }
+.gauge-legend { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin-right: auto; }
+.gauge-group { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+.gauge-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; padding: 3px 9px; border-radius: 12px;
+  background: var(--bg3); border: 1px solid var(--border); color: var(--fg);
+  cursor: pointer;
+}
+.gauge-chip.off { opacity: 0.42; }
+.gauge-chip.off .gauge-dot { background: var(--fg-dim) !important; }
+.gauge-dot { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
 .bar-label {
   position: relative; display: block; text-align: center; line-height: 20px;
   font-size: 11px; font-weight: 700; color: #fff;

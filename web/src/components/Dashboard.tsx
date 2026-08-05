@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { rulesetStatFields } from "../rulesets";
 import { fetchSkillCurve, fetchSnapshot, fetchStats, fetchTimeline, type Snapshot, type SnapshotBucket } from "../api";
@@ -19,6 +19,7 @@ import {
   type PoolMode,
   type Bucket,
   type SkillCurveBucket,
+  type DistCounts,
 } from "../types";
 
 const fmtK = (n: number) =>
@@ -238,41 +239,152 @@ function SkillCurvePanel({
  * Completion gauge. The yellow portion (country) is overlaid on the played
  * portion: it shows the share of country #1s out of the gauge total.
  */
+/** Selectable completion gauges (one bar layer each). The legend groups them:
+ * grades, global-top tiers (cumulative shades), country #1. */
+export const GAUGES = [
+  { id: "fc", vis: "fc", label: "FC", cls: "bar-fill-blue", color: "#5aa8f0", group: 0 },
+  { id: "splus", vis: "splus", label: "S+", cls: "bar-fill-splus", color: "#4fd0b0", group: 0 },
+  { id: "ss", vis: "ss", label: "SS", cls: "bar-fill-ss", color: "#e8e8f5", group: 0 },
+  { id: "onem", vis: "onem", label: "1M", cls: "bar-fill-onem", color: "#f06ec8", group: 0, maniaOnly: true },
+  { id: "top100", vis: "top100", label: "Top 100", cls: "bar-fill-t100", color: "#f0a45a", group: 1 },
+  { id: "top50", vis: "top50", label: "Top 50", cls: "bar-fill-t50", color: "#e88a3e", group: 1 },
+  { id: "top25", vis: "top25", label: "Top 25", cls: "bar-fill-t25", color: "#dd6e2c", group: 1 },
+  { id: "top15", vis: "top15", label: "Top 15", cls: "bar-fill-t15", color: "#d0541f", group: 1 },
+  { id: "top8", vis: "top8", label: "Top 8", cls: "bar-fill-t8", color: "#c23a18", group: 1 },
+  { id: "top1", vis: "top1", label: "Top 1", cls: "bar-fill-t1", color: "#ff4d4d", group: 1 },
+  { id: "country", vis: "country", label: "#1", cls: "bar-fill-gold", color: "#e8c84a", group: 2 },
+] as const satisfies readonly {
+  id: string; vis: string; label: string; cls: string; color: string;
+  group: number; maniaOnly?: boolean;
+}[];
+export type GaugeId = (typeof GAUGES)[number]["id"];
+export const GAUGES_HIDDEN_DEFAULT = [
+  "splus", "ss", "top1", "top8", "top15", "top25", "top50", "top100",
+];
+
 function Bar({
-  played,
+  row,
   total,
-  country = 0,
-  fc = 0,
+  gaugeHidden,
+  label,
 }: {
-  played: number;
+  row: Partial<Record<GaugeId | "pfc", number | null>> & { played?: number | null };
   total: number;
-  country?: number;
-  fc?: number;
+  gaugeHidden: (id: string) => boolean;
+  /** hovered-row name shown in the tooltip header ("2008", "4★–5★", "Ranked") */
+  label?: string;
 }) {
+  const played = row.played ?? 0;
   const pct = total > 0 ? (played / total) * 100 : 0;
-  const fcPct = total > 0 ? (fc / total) * 100 : 0;
-  const countryPct = total > 0 ? (country / total) * 100 : 0;
-  const done = total > 0 && played >= total;
+  // visible layers, biggest first: each smaller gauge is drawn on top of the
+  // previous one, so every enabled gauge stays visible whatever its value
+  const layers = GAUGES.filter(
+    (g) => !gaugeHidden(g.vis) && (row[g.id] ?? 0) > 0
+  )
+    .map((g) => ({ ...g, v: row[g.id] ?? 0 }))
+    .sort((a, b) => b.v - a.v);
+  // The bar itself only carries the main ratio — consistent whatever the
+  // width (gauge counts used to overflow and vanish on narrow bars). The
+  // full detail lives in a hover tooltip, one line per visible gauge.
+  const [hover, setHover] = useState(false);
+  // Real measurement instead of a guess: the tooltip is rendered fixed, then
+  // placed above the bar if its ACTUAL height fits the viewport, else below,
+  // clamped horizontally — it can never overflow anything again.
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const tipRef = useRef<HTMLDivElement>(null);
+  const [tipStyle, setTipStyle] = useState<React.CSSProperties>();
+  useLayoutEffect(() => {
+    if (!hover || !tipRef.current || !wrapRef.current) return;
+    const bar = wrapRef.current.getBoundingClientRect();
+    const tip = tipRef.current.getBoundingClientRect();
+    const above = bar.top - tip.height - 7;
+    const top = above >= 8 ? above : bar.bottom + 7;
+    const left = Math.max(
+      8,
+      Math.min(bar.left + bar.width / 2 - tip.width / 2, window.innerWidth - tip.width - 8)
+    );
+    setTipStyle({ position: "fixed", top, left, bottom: "auto", transform: "none" });
+  }, [hover]);
   return (
-    <div className="bar">
-      <div className="bar-fill" style={{ width: `${pct}%` }} />
-      {fc > 0 && (
-        <div className="bar-fill bar-fill-blue" style={{ width: `${fcPct}%` }} />
+    <div
+      ref={wrapRef}
+      className="bar-wrap"
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => {
+        setHover(false);
+        setTipStyle(undefined);
+      }}
+    >
+      <div className="bar">
+        <div className="bar-fill" style={{ width: `${pct}%` }} />
+        {layers.map((l) => (
+          <div
+            key={l.id}
+            className={`bar-fill ${l.cls}`}
+            style={{ width: `${total > 0 ? (l.v / total) * 100 : 0}%` }}
+          />
+        ))}
+        <span className="bar-label">
+          {fmtNum(played)} / {fmtNum(total)} ({pct.toFixed(1)}%)
+        </span>
+      </div>
+      {hover && (
+        <div ref={tipRef} className="bar-tip" style={tipStyle}>
+          <div className="bar-tip-row">
+            {label && <b className="bar-tip-title">{label}</b>}
+            <b>{fmtNum(played)} / {fmtNum(total)}</b>&nbsp;({pct.toFixed(1)}%)
+          </div>
+          {/* FIXED order (declaration order), independent from layer sizes */}
+          {GAUGES.filter((g) => !gaugeHidden(g.vis) && (row[g.id] ?? 0) > 0).map((g) => (
+            <div key={g.id} className="bar-tip-row">
+              <span className="gauge-dot" style={{ background: g.color }} />{" "}
+              {g.label} <b>{fmtNum(row[g.id] ?? 0)}</b>
+              {g.id === "fc" && (row.pfc ?? 0) > 0 && (
+                <span className="tip-dim"> (PFC {fmtNum(row.pfc ?? 0)})</span>
+              )}
+            </div>
+          ))}
+        </div>
       )}
-      {country > 0 && (
-        <div className="bar-fill bar-fill-gold" style={{ width: `${countryPct}%` }} />
-      )}
-      <span className="bar-label">
-        {fmtNum(played)} / {fmtNum(total)} ({pct.toFixed(1)}%)
-        {fc > 0 ? ` · FC ${fmtNum(fc)}` : ""}
-        {country > 0 && (
-          <>
-            {" · "}
-            <MedalIcon width={12} /> {fmtNum(country)}
-          </>
-        )}
-      </span>
-      {done && <span className="bar-check">✓</span>}
+    </div>
+  );
+}
+
+/** Colored, clickable legend: teaches the color of each gauge AND toggles it.
+ * Left-aligned, one cluster per family: grades | global tops | country #1. */
+function GaugeLegend({
+  isHidden,
+  onToggle,
+  ruleset = 0,
+}: {
+  isHidden: (id: string) => boolean;
+  onToggle: (id: string) => void;
+  ruleset?: number;
+}) {
+  const groups = [0, 1, 2].map((gr) =>
+    GAUGES.filter(
+      (g) => g.group === gr && (!("maniaOnly" in g) || ruleset === 3)
+    )
+  );
+  const titles = ["Grades", "Global tops", "Country"];
+  return (
+    <div className="gauge-legend">
+      {groups.map((gs, i) => (
+        <div key={i} className="gauge-group">
+          <span className="gauge-group-title">{titles[i]}</span>
+          {gs.map((g) => (
+            <button
+              key={g.vis}
+              className={`gauge-chip${isHidden(g.vis) ? " off" : ""}`}
+              onClick={() => onToggle(g.vis)}
+              title={`${isHidden(g.vis) ? "Show" : "Hide"} the ${g.label} gauge`}
+            >
+              <span className="gauge-dot" style={{ background: g.color }} />
+              {g.label}
+            </button>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }
@@ -283,21 +395,34 @@ interface DistRow {
   played: number | null;
   country?: number | null;
   fc?: number | null;
+  pfc?: number | null;
+  ss?: number | null;
+  splus?: number | null;
+  onem?: number | null;
+  top1?: number | null;
+  top8?: number | null;
+  top15?: number | null;
+  top25?: number | null;
+  top50?: number | null;
+  top100?: number | null;
 }
 
-const DistPanel = memo(function DistPanel({ title, rows }: { title: string; rows: DistRow[] }) {
+const DistPanel = memo(function DistPanel({
+  title,
+  rows,
+  gaugeHidden,
+}: {
+  title: string;
+  rows: DistRow[];
+  gaugeHidden: (id: string) => boolean;
+}) {
   return (
     <div className="panel">
       <h3>Completion by {title}</h3>
       {rows.map((r) => (
         <div key={r.label} className="dist-row">
           <span className="dist-label">{r.label}</span>
-          <Bar
-            played={r.played ?? 0}
-            total={r.total}
-            country={r.country ?? 0}
-            fc={r.fc ?? 0}
-          />
+          <Bar row={r} total={r.total} gaugeHidden={gaugeHidden} label={`${title} ${r.label}`} />
         </div>
       ))}
     </div>
@@ -329,6 +454,7 @@ export function Dashboard({
   const country = useCountryCode();
   const prefs = useDisplayPrefs();
   const distHidden = useHidden("dashboard-dist");
+  const gaugeHidden = useHidden("dashboard-gauges", GAUGES_HIDDEN_DEFAULT);
   const { data, isLoading, error } = useQuery({
     queryKey: ["stats", ruleset, pool, keys],
     queryFn: () => fetchStats(ruleset, pool, keys),
@@ -395,8 +521,8 @@ export function Dashboard({
     const over = (
       dict: Map<string, SnapshotBucket> | null,
       key: string | number,
-      live: { total: number; played: number | null; fc: number | null; country: number | null }
-    ) => {
+      live: Omit<DistRow, "label">
+    ): Omit<DistRow, "label"> => {
       if (!dict) return live;
       const sv = dict.get(String(key));
       return {
@@ -404,8 +530,21 @@ export function Dashboard({
         played: sv?.played ?? 0,
         fc: sv?.fc ?? 0,
         country: sv?.country ?? 0,
+        pfc: sv?.pfc ?? 0,
+        ss: sv?.ss ?? 0,
+        splus: sv?.splus ?? 0,
+        onem: sv?.onem ?? 0,
+        // no positional history: the top gauges simply disappear in the past
+        top1: null, top8: null, top15: null,
+        top25: null, top50: null, top100: null,
       };
     };
+    const liveOf = (b: DistCounts): Omit<DistRow, "label"> => ({
+      total: b.total, played: b.played, country: b.country, fc: b.fc,
+      pfc: b.pfc, ss: b.ss, splus: b.splus, onem: b.onem,
+      top1: b.top1, top8: b.top8, top15: b.top15,
+      top25: b.top25, top50: b.top50, top100: b.top100,
+    });
     const bucketRows = (
       buckets: Bucket[],
       label: (b: number) => string,
@@ -413,21 +552,21 @@ export function Dashboard({
     ): DistRow[] =>
       buckets.map((b) => ({
         label: label(b.bucket),
-        ...over(dict, b.bucket, { total: b.total, played: b.played, country: b.country, fc: b.fc }),
+        ...over(dict, b.bucket, liveOf(b)),
       }));
     return [
       {
         title: "star rating",
         rows: data.bySr.map((b) => ({
           label: b.sr >= 10 ? "10★+" : `${b.sr}★–${b.sr + 1}★`,
-          ...over(snapOf("bySr"), b.sr, { total: b.total, played: b.played, country: b.country, fc: b.fc }),
+          ...over(snapOf("bySr"), b.sr, liveOf(b)),
         })),
       },
       {
         title: "rank year",
         rows: data.byYear.map((b) => ({
           label: b.year,
-          ...over(snapOf("byYear"), b.year, { total: b.total, played: b.played, country: b.country, fc: b.fc }),
+          ...over(snapOf("byYear"), b.year, liveOf(b)),
         })),
       },
       {
@@ -438,7 +577,7 @@ export function Dashboard({
         title: "max combo",
         rows: bucketRows(
           data.byCombo,
-          (b) => (b >= 8 ? "2000+" : `${b * 250}–${(b + 1) * 250}`),
+          (b) => (b >= 10 ? "2500+" : `${b * 250}–${(b + 1) * 250}`),
           snapOf("byCombo")
         ),
       },
@@ -499,6 +638,38 @@ export function Dashboard({
     countryLoved: past ? past.countryLoved : t.country_loved ?? 0,
     rankedClassic: past ? past.ranked : data.scoreSums.classic,
   };
+  // hero gauge rows: live per-status aggregates; in the past only the
+  // reconstructed ones exist (handled by the dists, the hero keeps FC/#1)
+  const stRanked = data.byStatus?.find((b) => b.bucket === "ranked");
+  const stLoved = data.byStatus?.find((b) => b.bucket === "loved");
+  const sumSt = (k: keyof DistCounts) =>
+    ((stRanked?.[k] as number) ?? 0) + ((stLoved?.[k] as number) ?? 0);
+  const heroRow = (
+    played: number, country: number, fc: number,
+    st: typeof stRanked | { [k: string]: number } | undefined
+  ) =>
+    past
+      ? { played, country, fc }
+      : {
+          played, country, fc,
+          pfc: (st as DistCounts | undefined)?.pfc,
+          ss: (st as DistCounts | undefined)?.ss,
+          splus: (st as DistCounts | undefined)?.splus,
+          onem: (st as DistCounts | undefined)?.onem,
+          top1: (st as DistCounts | undefined)?.top1,
+          top8: (st as DistCounts | undefined)?.top8,
+          top15: (st as DistCounts | undefined)?.top15,
+          top25: (st as DistCounts | undefined)?.top25,
+          top50: (st as DistCounts | undefined)?.top50,
+          top100: (st as DistCounts | undefined)?.top100,
+        };
+  const heroGlobal = heroRow(eff.played, eff.country, eff.fc, {
+    pfc: sumSt("pfc"), ss: sumSt("ss"), splus: sumSt("splus"), onem: sumSt("onem"),
+    top1: sumSt("top1"), top8: sumSt("top8"), top15: sumSt("top15"),
+    top25: sumSt("top25"), top50: sumSt("top50"), top100: sumSt("top100"),
+  });
+  const heroRanked = heroRow(eff.rankedPlayed, eff.countryRanked, eff.fcRanked, stRanked);
+  const heroLoved = heroRow(eff.lovedPlayed, eff.countryLoved, eff.fcLoved, stLoved);
 
   // timeline tiers are ordered D..XH; the grid shows XH..D
   const TIER_IDX: Record<string, number> = { D: 0, C: 1, B: 2, A: 3, S: 4, SH: 5, X: 6, XH: 7 };
@@ -527,30 +698,15 @@ export function Dashboard({
           <h3>Completion</h3>
           <div className="dist-row">
             <span className="dist-label">Global</span>
-            <Bar
-              played={eff.played}
-              total={eff.total}
-              country={eff.country}
-              fc={eff.fc}
-            />
+            <Bar row={heroGlobal} total={eff.total} gaugeHidden={gaugeHidden.isHidden} label="Global" />
           </div>
           <div className="dist-row">
             <span className="dist-label">Ranked</span>
-            <Bar
-              played={eff.rankedPlayed}
-              total={eff.totalRanked}
-              country={eff.countryRanked}
-              fc={eff.fcRanked}
-            />
+            <Bar row={heroRanked} total={eff.totalRanked} gaugeHidden={gaugeHidden.isHidden} label="Ranked" />
           </div>
           <div className="dist-row">
             <span className="dist-label">Loved</span>
-            <Bar
-              played={eff.lovedPlayed}
-              total={eff.totalLoved}
-              country={eff.countryLoved}
-              fc={eff.fcLoved}
-            />
+            <Bar row={heroLoved} total={eff.totalLoved} gaugeHidden={gaugeHidden.isHidden} label="Loved" />
           </div>
         </div>
         <div className="hero-stat hero-country">
@@ -582,22 +738,25 @@ export function Dashboard({
         <div className="hero-stat">
           <h3>Ranked score</h3>
           <div className="big">
-            {fmtNum(eff.rankedClassic)} <span className="big-unit">Classic Score</span>
+            {fmtNum(eff.rankedClassic)}{" "}
+            <span className="big-unit">{ruleset === 3 ? "Score" : "Classic Score"}</span>
           </div>
           {prefs.wither && isStd && (
             <div className={`big${past ? " tm-dim" : ""}`}>
               {fmtNum(data.scoreSums.wither)} <span className="big-unit">Wither Score</span>
             </div>
           )}
-          <small className={past ? "tm-dim" : undefined}>
-            Standardised: {fmtNum(data.scoreSums.lazer)}
-          </small>
+          {ruleset !== 3 && (
+            <small className={past ? "tm-dim" : undefined}>
+              Standardised: {fmtNum(data.scoreSums.lazer)}
+            </small>
+          )}
         </div>
         <div className={`hero-stat${past ? " tm-dim" : ""}`}>
           <h3>Missing score (estimate)</h3>
           <div className="big accent">
             {fmtNum(data.scoreSums.missingClassic)}{" "}
-            <span className="big-unit">Classic Score</span>
+            <span className="big-unit">{ruleset === 3 ? "Score" : "Classic Score"}</span>
           </div>
           {prefs.wither && isStd && (
             <div className="big accent">
@@ -605,7 +764,9 @@ export function Dashboard({
               <span className="big-unit">Wither Score</span>
             </div>
           )}
-          <small>Standardised: {fmtNum(data.scoreSums.missing)}</small>
+          {ruleset !== 3 && (
+            <small>Standardised: {fmtNum(data.scoreSums.missing)}</small>
+          )}
         </div>
         <div className="hero-stat hero-grades">
           <h3>Grades</h3>
@@ -624,6 +785,14 @@ export function Dashboard({
                 {fmtNum(f.c)}
               </div>
             ))}
+            {ruleset === 3 && (
+              <div
+                className="grade-pill"
+                title="Maps with a perfect 1,000,000 play"
+              >
+                <b className="fc fc-0">1M</b> {fmtNum(data.oneMillions)}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -631,6 +800,7 @@ export function Dashboard({
       <HeatmapPanel cutoffDay={past?.day ?? null} ruleset={ruleset} pool={pool} keys={keys} />
 
       <div className="view-toolbar">
+        <GaugeLegend isHidden={gaugeHidden.isHidden} onToggle={gaugeHidden.toggle} ruleset={ruleset} />
         <VisibilityMenu
           items={dists.map((d) => ({ id: d.title, label: `Completion by ${d.title}` }))}
           isHidden={distHidden.isHidden}
@@ -642,7 +812,7 @@ export function Dashboard({
         {dists
           .filter((d) => !distHidden.isHidden(d.title))
           .map((d) => (
-            <DistPanel key={d.title} title={d.title} rows={d.rows} />
+            <DistPanel key={d.title} title={d.title} rows={d.rows} gaugeHidden={gaugeHidden.isHidden} />
           ))}
       </div>
 
