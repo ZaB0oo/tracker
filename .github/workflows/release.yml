@@ -6,6 +6,13 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # manual fallback: GitHub sometimes drops the push event for a tag that was
+  # deleted and recreated. Actions tab -> release -> Run workflow -> tag name.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build (e.g. v1.9.2)"
+        required: true
 
 # electron-builder creates the draft release and uploads the installers:
 # the default workflow token is read-only, write access must be granted
@@ -19,11 +26,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: >
-          gh release create "$GITHUB_REF_NAME" --draft
-          --repo "$GITHUB_REPOSITORY" --title "${GITHUB_REF_NAME#v}"
+          gh release create "$TAG" --draft
+          --repo "$GITHUB_REPOSITORY" --title "${TAG#v}"
           --notes "Draft — notes added before publishing." || true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
 
   build:
     needs: draft
@@ -34,6 +42,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # manual run: build the tagged commit, not the branch head
+          ref: ${{ inputs.tag || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
