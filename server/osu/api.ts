@@ -534,6 +534,37 @@ export async function getModdedStarRating(
 }
 
 /** Batch beatmap lookup (max 50 ids / request) — used for max_combo/SR enrichment. */
+export interface ApiPack {
+  tag: string;
+  name: string;
+  date?: string;
+  ruleset_id: number | null;
+  url?: string;
+}
+/** Official pack listing, one page (100/page, cursor-paginated). */
+export async function getPacks(
+  type: string,
+  cursorString: string | null,
+  priority: Priority = "low"
+): Promise<{ beatmap_packs: ApiPack[]; cursor_string: string | null }> {
+  const cursor = cursorString
+    ? `&cursor_string=${encodeURIComponent(cursorString)}`
+    : "";
+  return apiGet(`/beatmaps/packs?type=${type}${cursor}`, priority);
+}
+
+/** One pack's beatmapset ids. */
+export async function getPackSets(
+  tag: string,
+  priority: Priority = "low"
+): Promise<number[]> {
+  const j = await apiGet<{ beatmapsets?: { id: number }[] }>(
+    `/beatmaps/packs/${encodeURIComponent(tag)}?legacy_only=0`,
+    priority
+  );
+  return (j.beatmapsets ?? []).map((s) => s.id);
+}
+
 /** One score by its (lazer) id — used to resolve a pasted score link/id. */
 export async function getScoreById(
   id: number,

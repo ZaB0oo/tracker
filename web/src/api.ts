@@ -8,6 +8,9 @@ import type {
   TableResponse,
 } from "./types";
 
+/** dashboard-wide status scope */
+export type DashScope = "all" | "ranked" | "loved";
+
 export interface OverlayStats {
   totalMaps: number;
   clears: number;
@@ -68,10 +71,11 @@ export async function fetchMapDetail(id: number, ruleset = 0): Promise<MapDetail
 export async function fetchSkillCurve(
   ruleset = 0,
   pool: PoolMode = "all",
-  keys: string[] = []
+  keys: string[] = [],
+  scope: DashScope = "all"
 ): Promise<{ buckets: SkillCurveBucket[] }> {
   const res = await fetch(
-    `/api/skill-curve?ruleset=${ruleset}&pool=${pool}${keysQ(keys)}`
+    `/api/skill-curve?ruleset=${ruleset}&pool=${pool}${keysQ(keys)}&scope=${scope}`
   );
   if (!res.ok) throw new Error(`skill-curve: HTTP ${res.status}`);
   return res.json();
@@ -148,11 +152,14 @@ export async function fetchClears(
   offset: number,
   limit: number,
   day?: string,
-  ruleset = 0
+  ruleset = 0,
+  pool: PoolMode = "all",
+  keys: string[] = [],
+  scope: DashScope = "all"
 ): Promise<{ rows: ClearRow[]; total: number }> {
   const dayQ = day ? `&day=${day}` : "";
   const res = await fetch(
-    `/api/clears?offset=${offset}&limit=${limit}&ruleset=${ruleset}${dayQ}`
+    `/api/clears?offset=${offset}&limit=${limit}&ruleset=${ruleset}&pool=${pool}${keysQ(keys)}&scope=${scope}${dayQ}`
   );
   if (!res.ok) throw new Error(`clears: HTTP ${res.status}`);
   return res.json();
@@ -169,10 +176,11 @@ export async function fetchDaily(
   year?: number,
   ruleset = 0,
   pool: PoolMode = "all",
-  keys: string[] = []
+  keys: string[] = [],
+  scope: DashScope = "all"
 ): Promise<DailyStats> {
   const res = await fetch(
-    `/api/daily?ruleset=${ruleset}&pool=${pool}${keysQ(keys)}${year ? `&year=${year}` : ""}`
+    `/api/daily?ruleset=${ruleset}&pool=${pool}${keysQ(keys)}&scope=${scope}${year ? `&year=${year}` : ""}`
   );
   if (!res.ok) throw new Error(`daily: HTTP ${res.status}`);
   return res.json();
@@ -201,13 +209,14 @@ export interface TimelinePoint {
 export async function fetchTimeline(
   ruleset = 0,
   pool: PoolMode = "all",
-  keys: string[] = []
+  keys: string[] = [],
+  scope: DashScope = "all"
 ): Promise<{
   tiers: string[];
   points: TimelinePoint[];
 }> {
   const res = await fetch(
-    `/api/timeline?ruleset=${ruleset}&pool=${pool}${keysQ(keys)}`
+    `/api/timeline?ruleset=${ruleset}&pool=${pool}${keysQ(keys)}&scope=${scope}`
   );
   if (!res.ok) throw new Error(`timeline: HTTP ${res.status}`);
   return res.json();
@@ -241,10 +250,11 @@ export async function fetchSnapshot(
   day: string,
   ruleset = 0,
   pool: PoolMode = "all",
-  keys: string[] = []
+  keys: string[] = [],
+  scope: DashScope = "all"
 ): Promise<Snapshot> {
   const res = await fetch(
-    `/api/snapshot?day=${day}&ruleset=${ruleset}&pool=${pool}${keysQ(keys)}`
+    `/api/snapshot?day=${day}&ruleset=${ruleset}&pool=${pool}${keysQ(keys)}&scope=${scope}`
   );
   if (!res.ok) throw new Error(`snapshot: HTTP ${res.status}`);
   return res.json();
@@ -268,6 +278,56 @@ export interface LazerImportResult {
 }
 
 /** Whether direct import into osu!lazer is configured on the server. */
+export interface PackRow {
+  tag: string;
+  name: string;
+  type: string;
+  date: string | null;
+  total: number;
+  played: number;
+  fced: number;
+}
+export interface PacksResponse {
+  synced: number;
+  pending: number;
+  categories: { type: string; packs: PackRow[] }[];
+}
+export async function fetchPacks(ruleset = 0): Promise<PacksResponse> {
+  const res = await fetch(`/api/packs?ruleset=${ruleset}`);
+  if (!res.ok) throw new Error(`packs: HTTP ${res.status}`);
+  return res.json();
+}
+
+export interface PackMapRow {
+  id: number;
+  artist: string;
+  title: string;
+  version: string;
+  status: number;
+  star_rating: number | null;
+  played: number;
+  grade: string | null;
+  fc_state: number | null;
+  accuracy: number | null;
+}
+export interface PackDetail {
+  tag: string;
+  name: string;
+  type: string;
+  date: string | null;
+  url: string | null;
+  maps: PackMapRow[];
+}
+export async function fetchPackDetail(tag: string, ruleset = 0): Promise<PackDetail> {
+  const res = await fetch(`/api/packs/${encodeURIComponent(tag)}?ruleset=${ruleset}`);
+  if (!res.ok) throw new Error(`pack: HTTP ${res.status}`);
+  return res.json();
+}
+export async function postPacksImport(): Promise<{ ok: boolean; error?: string }> {
+  const res = await fetch("/api/packs/import", { method: "POST" });
+  return res.json();
+}
+
 /** Manual import of one beatmapset by id (existing route, backfills right after). */
 export async function postImportAny(input: string): Promise<{
   ok: boolean;
@@ -321,9 +381,12 @@ export async function lazerImport(filters: Filters, name: string): Promise<Lazer
 export async function fetchStats(
   ruleset = 0,
   pool: PoolMode = "all",
-  keys: string[] = []
+  keys: string[] = [],
+  scope: DashScope = "all"
 ): Promise<Stats> {
-  const res = await fetch(`/api/stats?ruleset=${ruleset}&pool=${pool}${keysQ(keys)}`);
+  const res = await fetch(
+    `/api/stats?ruleset=${ruleset}&pool=${pool}${keysQ(keys)}&scope=${scope}`
+  );
   if (!res.ok) throw new Error(`stats: HTTP ${res.status}`);
   return res.json();
 }

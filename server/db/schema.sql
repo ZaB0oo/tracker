@@ -156,3 +156,21 @@ CREATE TABLE IF NOT EXISTS modded_sr (
   PRIMARY KEY (beatmap_id, mods)
 );
 
+
+-- Official beatmap packs (opt-in sync: Dashboard -> Packs -> import).
+CREATE TABLE IF NOT EXISTS packs (
+  tag TEXT PRIMARY KEY,             -- "S31", "T12", "FA55"...
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,               -- standard/featured/tournament/loved/chart/theme/artist
+  ruleset INTEGER,                  -- NULL = mode-agnostic (std sets)
+  url TEXT,
+  date TEXT,
+  synced_at TEXT                    -- contents fetched (resumable import)
+);
+CREATE TABLE IF NOT EXISTS pack_sets (
+  tag TEXT NOT NULL,
+  beatmapset_id INTEGER NOT NULL,
+  PRIMARY KEY (tag, beatmapset_id)
+);
+CREATE INDEX IF NOT EXISTS idx_pack_sets_set ON pack_sets (beatmapset_id);
+CREATE INDEX IF NOT EXISTS idx_beatmaps_set ON beatmaps (beatmapset_id);

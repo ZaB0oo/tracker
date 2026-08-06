@@ -1,13 +1,14 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { rulesetStatFields } from "../rulesets";
-import { fetchSkillCurve, fetchSnapshot, fetchStats, fetchTimeline, type Snapshot, type SnapshotBucket } from "../api";
+import { fetchSkillCurve, fetchSnapshot, fetchStats, fetchTimeline, type DashScope, type Snapshot, type SnapshotBucket } from "../api";
 import { firstPlaceLabel, useCountryCode } from "../country";
 import { useDisplayPrefs } from "../prefs";
 import { useHidden } from "../visibility";
 import { GradeBadge } from "./GradeBadge";
 import { HeatmapPanel } from "./Heatmap";
 import { KeysChips } from "./KeysChips";
+import { PacksPanel } from "./PacksPanel";
 import { PoolSeg } from "./PoolSeg";
 import { TimeMachineBar } from "./TimeMachine";
 import { MedalIcon } from "./Icons";
@@ -50,16 +51,18 @@ function SkillCurvePanel({
   ruleset = 0,
   pool = "all",
   keys = [],
+  scope = "all",
 }: {
   ruleset?: number;
   pool?: PoolMode;
   keys?: string[];
+  scope?: DashScope;
 }) {
   const prefs = useDisplayPrefs();
   const showWither = prefs.wither && ruleset === 0;
   const { data } = useQuery({
-    queryKey: ["skill-curve", ruleset, pool, keys],
-    queryFn: () => fetchSkillCurve(ruleset, pool, keys),
+    queryKey: ["skill-curve", ruleset, pool, keys, scope],
+    queryFn: () => fetchSkillCurve(ruleset, pool, keys, scope),
     refetchInterval: 60_000,
   });
   const [hover, setHover] = useState<SkillCurveBucket | null>(null);
@@ -242,7 +245,7 @@ function SkillCurvePanel({
 /** Selectable completion gauges (one bar layer each). The legend groups them:
  * grades, global-top tiers (cumulative shades), country #1. */
 export const GAUGES = [
-  { id: "fc", vis: "fc", label: "FC", cls: "bar-fill-blue", color: "#5aa8f0", group: 0 },
+  { id: "fc", vis: "fc", label: "FC / PFC", cls: "bar-fill-blue", color: "#5aa8f0", group: 0 },
   { id: "splus", vis: "splus", label: "S+", cls: "bar-fill-splus", color: "#4fd0b0", group: 0 },
   { id: "ss", vis: "ss", label: "SS", cls: "bar-fill-ss", color: "#e8e8f5", group: 0 },
   { id: "onem", vis: "onem", label: "1M", cls: "bar-fill-onem", color: "#f06ec8", group: 0, maniaOnly: true },
@@ -267,12 +270,15 @@ function Bar({
   total,
   gaugeHidden,
   label,
+  countryLabel = "#1",
 }: {
   row: Partial<Record<GaugeId | "pfc", number | null>> & { played?: number | null };
   total: number;
   gaugeHidden: (id: string) => boolean;
   /** hovered-row name shown in the tooltip header ("2008", "4★–5★", "Ranked") */
   label?: string;
+  /** "#1 FR" — tells the country first apart from the global Top 1 */
+  countryLabel?: string;
 }) {
   const played = row.played ?? 0;
   const pct = total > 0 ? (played / total) * 100 : 0;
@@ -338,7 +344,8 @@ function Bar({
           {GAUGES.filter((g) => !gaugeHidden(g.vis) && (row[g.id] ?? 0) > 0).map((g) => (
             <div key={g.id} className="bar-tip-row">
               <span className="gauge-dot" style={{ background: g.color }} />{" "}
-              {g.label} <b>{fmtNum(row[g.id] ?? 0)}</b>
+              {g.id === "country" ? countryLabel : g.label}{" "}
+              <b>{fmtNum(row[g.id] ?? 0)}</b>
               {g.id === "fc" && (row.pfc ?? 0) > 0 && (
                 <span className="tip-dim"> (PFC {fmtNum(row.pfc ?? 0)})</span>
               )}
@@ -356,10 +363,12 @@ function GaugeLegend({
   isHidden,
   onToggle,
   ruleset = 0,
+  countryLabel = "#1",
 }: {
   isHidden: (id: string) => boolean;
   onToggle: (id: string) => void;
   ruleset?: number;
+  countryLabel?: string;
 }) {
   const groups = [0, 1, 2].map((gr) =>
     GAUGES.filter(
@@ -380,7 +389,7 @@ function GaugeLegend({
               title={`${isHidden(g.vis) ? "Show" : "Hide"} the ${g.label} gauge`}
             >
               <span className="gauge-dot" style={{ background: g.color }} />
-              {g.label}
+              {g.id === "country" ? countryLabel : g.label}
             </button>
           ))}
         </div>
@@ -411,10 +420,12 @@ const DistPanel = memo(function DistPanel({
   title,
   rows,
   gaugeHidden,
+  countryLabel,
 }: {
   title: string;
   rows: DistRow[];
   gaugeHidden: (id: string) => boolean;
+  countryLabel?: string;
 }) {
   return (
     <div className="panel">
@@ -422,7 +433,7 @@ const DistPanel = memo(function DistPanel({
       {rows.map((r) => (
         <div key={r.label} className="dist-row">
           <span className="dist-label">{r.label}</span>
-          <Bar row={r} total={r.total} gaugeHidden={gaugeHidden} label={`${title} ${r.label}`} />
+          <Bar row={r} total={r.total} gaugeHidden={gaugeHidden} label={`${title} ${r.label}`} countryLabel={countryLabel} />
         </div>
       ))}
     </div>
@@ -455,15 +466,25 @@ export function Dashboard({
   const prefs = useDisplayPrefs();
   const distHidden = useHidden("dashboard-dist");
   const gaugeHidden = useHidden("dashboard-gauges", GAUGES_HIDDEN_DEFAULT);
+  // "Ranked only" scope: the WHOLE dashboard drops loved maps (stats,
+  // distributions, snapshot, skill curve) — persisted like the gauges
+  const [scope, setScope] = useState<DashScope>(() => {
+    const v = localStorage.getItem("dash-scope");
+    return v === "ranked" || v === "loved" ? v : "all";
+  });
+  const setScopePersist = (v: DashScope) => {
+    localStorage.setItem("dash-scope", v);
+    setScope(v);
+  };
   const { data, isLoading, error } = useQuery({
-    queryKey: ["stats", ruleset, pool, keys],
-    queryFn: () => fetchStats(ruleset, pool, keys),
+    queryKey: ["stats", ruleset, pool, keys, scope],
+    queryFn: () => fetchStats(ruleset, pool, keys, scope),
     refetchInterval: 60_000,
   });
   // per ruleset AND pool: one shared key served osu!'s history to every tab
   const { data: timeline } = useQuery({
-    queryKey: ["timeline", ruleset, pool, keys],
-    queryFn: () => fetchTimeline(ruleset, pool, keys),
+    queryKey: ["timeline", ruleset, pool, keys, scope],
+    queryFn: () => fetchTimeline(ruleset, pool, keys, scope),
     refetchInterval: 5 * 60_000,
   });
   const [tmIdx, setTmIdx] = useState<number | null>(null);
@@ -487,7 +508,7 @@ export function Dashboard({
     }
     const run = (day: string) => {
       inFlight.current = true;
-      fetchSnapshot(day, ruleset, pool, keys)
+      fetchSnapshot(day, ruleset, pool, keys, scope)
         .then((sn) => {
           inFlight.current = false;
           setSnap(sn);
@@ -681,14 +702,31 @@ export function Dashboard({
 
   return (
     <div className="dashboard">
-      {!isStd && onPoolChange && (
-        <div className="dash-pool">
-          <PoolSeg value={pool} onChange={onPoolChange} />
-          {ruleset === 3 && onKeysChange && (
-            <KeysChips value={keys} onChange={onKeysChange} />
-          )}
+      <div className="dash-pool">
+        <div className="seg">
+          <button className={scope === "all" ? "active" : ""} onClick={() => setScopePersist("all")}>
+            All
+          </button>
+          <button
+            className={scope === "ranked" ? "active" : ""}
+            title="Ranked/approved maps only, everywhere on this dashboard"
+            onClick={() => setScopePersist("ranked")}
+          >
+            Ranked
+          </button>
+          <button
+            className={scope === "loved" ? "active" : ""}
+            title="Loved maps only, everywhere on this dashboard"
+            onClick={() => setScopePersist("loved")}
+          >
+            Loved
+          </button>
         </div>
-      )}
+        {!isStd && onPoolChange && <PoolSeg value={pool} onChange={onPoolChange} />}
+        {ruleset === 3 && onKeysChange && (
+          <KeysChips value={keys} onChange={onKeysChange} />
+        )}
+      </div>
       {points.length > 1 && (
         <TimeMachineBar points={points} idx={tmIdx} onChange={setTmIdx} />
       )}
@@ -696,18 +734,24 @@ export function Dashboard({
       <div className="card hero">
         <div className="hero-bars">
           <h3>Completion</h3>
-          <div className="dist-row">
-            <span className="dist-label">Global</span>
-            <Bar row={heroGlobal} total={eff.total} gaugeHidden={gaugeHidden.isHidden} label="Global" />
-          </div>
-          <div className="dist-row">
-            <span className="dist-label">Ranked</span>
-            <Bar row={heroRanked} total={eff.totalRanked} gaugeHidden={gaugeHidden.isHidden} label="Ranked" />
-          </div>
-          <div className="dist-row">
-            <span className="dist-label">Loved</span>
-            <Bar row={heroLoved} total={eff.totalLoved} gaugeHidden={gaugeHidden.isHidden} label="Loved" />
-          </div>
+          {scope === "all" && (
+            <div className="dist-row">
+              <span className="dist-label">Global</span>
+              <Bar row={heroGlobal} total={eff.total} gaugeHidden={gaugeHidden.isHidden} countryLabel={firstPlaceLabel(country)} label="Global" />
+            </div>
+          )}
+          {scope !== "loved" && (
+            <div className="dist-row">
+              <span className="dist-label">Ranked</span>
+              <Bar row={heroRanked} total={eff.totalRanked} gaugeHidden={gaugeHidden.isHidden} countryLabel={firstPlaceLabel(country)} label="Ranked" />
+            </div>
+          )}
+          {scope !== "ranked" && (
+            <div className="dist-row">
+              <span className="dist-label">Loved</span>
+              <Bar row={heroLoved} total={eff.totalLoved} gaugeHidden={gaugeHidden.isHidden} countryLabel={firstPlaceLabel(country)} label="Loved" />
+            </div>
+          )}
         </div>
         <div className="hero-stat hero-country">
           <h3>{firstPlaceLabel(country)}</h3>
@@ -797,10 +841,15 @@ export function Dashboard({
         </div>
       </div>
 
-      <HeatmapPanel cutoffDay={past?.day ?? null} ruleset={ruleset} pool={pool} keys={keys} />
+      <HeatmapPanel cutoffDay={past?.day ?? null} ruleset={ruleset} pool={pool} keys={keys} scope={scope} />
 
       <div className="view-toolbar">
-        <GaugeLegend isHidden={gaugeHidden.isHidden} onToggle={gaugeHidden.toggle} ruleset={ruleset} />
+        <GaugeLegend
+          isHidden={gaugeHidden.isHidden}
+          onToggle={gaugeHidden.toggle}
+          ruleset={ruleset}
+          countryLabel={firstPlaceLabel(country)}
+        />
         <VisibilityMenu
           items={dists.map((d) => ({ id: d.title, label: `Completion by ${d.title}` }))}
           isHidden={distHidden.isHidden}
@@ -812,11 +861,13 @@ export function Dashboard({
         {dists
           .filter((d) => !distHidden.isHidden(d.title))
           .map((d) => (
-            <DistPanel key={d.title} title={d.title} rows={d.rows} gaugeHidden={gaugeHidden.isHidden} />
+            <DistPanel key={d.title} title={d.title} rows={d.rows} gaugeHidden={gaugeHidden.isHidden} countryLabel={firstPlaceLabel(country)} />
           ))}
       </div>
 
-      <SkillCurvePanel ruleset={ruleset} pool={pool} keys={keys} />
+      <PacksPanel ruleset={ruleset} />
+
+      <SkillCurvePanel ruleset={ruleset} pool={pool} keys={keys} scope={scope} />
     </div>
   );
 }

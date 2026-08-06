@@ -166,7 +166,7 @@ interface CurveBucket {
   samples: number; // number of bests in the slice
 }
 const curveCaches = new Map<
-  number,
+  string,
   { until: number; caseSql: string; buckets: CurveBucket[] }
 >();
 /** SR expression of a map as seen from `ruleset` (converts: per-mode attrs). */
@@ -175,18 +175,26 @@ function curveSr(ruleset: number): string {
     ? "b.star_rating"
     : "COALESCE(ca.star_rating, b.star_rating)";
 }
-export function computeSkillCurve(ruleset = 0): {
+export function computeSkillCurve(
+  ruleset = 0,
+  statuses = "(1, 2, 4)",
+  /** overrides the default pool (converts included): lets the /skill-curve
+   * route calibrate on exactly the maps the dashboard is looking at */
+  poolOverride?: string
+): {
   until: number;
   caseSql: string;
   buckets: CurveBucket[];
 } {
-  const cached = curveCaches.get(ruleset);
+  const cacheKey = `${ruleset}-${statuses}-${poolOverride ?? ""}`;
+  const cached = curveCaches.get(cacheKey);
   if (cached && Date.now() < cached.until) return cached;
   const db = getDb();
   const pool =
-    ruleset === 0
+    poolOverride ??
+    (ruleset === 0
       ? "b.ruleset = 0"
-      : `(b.ruleset = ${ruleset} OR b.ruleset = 0)`;
+      : `(b.ruleset = ${ruleset} OR b.ruleset = 0)`);
   const caJoin =
     ruleset === 0
       ? ""
@@ -198,7 +206,8 @@ export function computeSkillCurve(ruleset = 0): {
        JOIN scores s ON s.id = u.best_lazer_score_id
        JOIN beatmaps b ON b.id = u.beatmap_id
        ${caJoin}
-       WHERE u.ruleset = ${ruleset} AND ${pool} AND ${curveSr(ruleset)} IS NOT NULL`
+       WHERE u.ruleset = ${ruleset} AND ${pool} AND b.status IN ${statuses}
+         AND ${curveSr(ruleset)} IS NOT NULL`
     )
     .all() as { q: number; ts: number }[];
   const byQ = new Map<number, number[]>();
@@ -261,7 +270,7 @@ export function computeSkillCurve(ruleset = 0): {
   const parts = buckets.map((b) => `WHEN ${b.q} THEN ${b.value}`);
   const caseSql = `CASE MIN(CAST(${curveSr(ruleset)} * 10 AS INTEGER), ${CURVE_STEPS}) ${parts.join(" ")} ELSE ${buckets[buckets.length - 1].value} END`;
   const entry = { until: Date.now() + 10 * 60_000, caseSql, buckets };
-  curveCaches.set(ruleset, entry);
+  curveCaches.set(cacheKey, entry);
   return entry;
 }
 function skillCurveCase(ruleset = 0): string {

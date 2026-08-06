@@ -206,6 +206,7 @@ export function getDaemonStatus(): DaemonStatus & {
   // What is running RIGHT NOW (the old "phase" only covered the pipeline)
   const busy: string[] = [];
   busy.push(...maintenanceTasks);
+  if (packsDeltaRunning) busy.push("packs delta");
   if (status.phase === "catalog" || catalogRunning) {
     const m = currentEnumMode();
     busy.push(
@@ -1052,6 +1053,14 @@ export function startCatalogRefresh(): void {
           .then(() => importMissingKnownSets())
           .then(() => enrichCatalog())
           .then(() => resumeBackfill());
+      // new official packs (no-op until the user imported the definitions)
+      if (!packsDeltaRunning) {
+        packsDeltaRunning = true;
+        void import("./packs.js")
+          .then((m) => m.refreshPacksDelta((msg) => logActivity("packs", msg)))
+          .catch((e) => logError(e, "packs delta"))
+          .finally(() => (packsDeltaRunning = false));
+      }
       const last = getState("catalog_delta_at");
       if (last && Date.now() - Date.parse(last) < MIN_INTERVAL_MS) return;
       await refreshCatalogDelta();
@@ -1603,9 +1612,29 @@ export async function verifyYearAndBackfill(year: number) {
 // A Set, not one slot: two manual actions can overlap (a dump verify while a
 // repair finishes) and the first one to end used to clear the other's label.
 const maintenanceTasks = new Set<string>();
+let packsDeltaRunning = false;
 // Current pass ("score import (catch converts)", …) for the busy list.
 let backfillPassLabel = "score import";
 let backfillPassRuleset: number | null = null;
+
+/** Opt-in import of the official pack definitions, with sync-bar visibility. */
+export async function runPacksImport(): Promise<number> {
+  const { importPacks } = await import("./packs.js");
+  maintenanceTasks.add("packs import");
+  try {
+    const n = await importPacks((m) => {
+      status.message = m;
+      logActivity("packs", m);
+    });
+    if (n == null) {
+      logActivity("packs", "import already running");
+      return 0;
+    }
+    return n;
+  } finally {
+    maintenanceTasks.delete("packs import");
+  }
+}
 
 /** Catalog verification vs a data.ppy.sh dump file, with sync-bar visibility. */
 export async function runDumpVerify(path: string, modes?: number[]): Promise<string> {

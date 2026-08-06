@@ -7,6 +7,7 @@ import {
   fetchTimeline,
   type ClearRow,
   type TimelinePoint,
+  type DashScope,
 } from "../api";
 import { ctxMenuStyle } from "../ctxmenu";
 import type { PoolMode } from "../types";
@@ -79,30 +80,32 @@ export function HeatmapPanel({
   ruleset = 0,
   pool = "all",
   keys = [],
+  scope = "all",
 }: {
   cutoffDay?: string | null;
   ruleset?: number;
   pool?: PoolMode;
   keys?: string[];
+  scope?: DashScope;
 }) {
   const [year, setYear] = useState(new Date().getUTCFullYear());
   const todayIso = new Date().toISOString().slice(0, 10);
   const [selDay, setSelDay] = useState(todayIso);
   const { data } = useQuery({
-    queryKey: ["daily", year, ruleset, pool, keys],
-    queryFn: () => fetchDaily(year, ruleset, pool, keys),
+    queryKey: ["daily", year, ruleset, pool, keys, scope],
+    queryFn: () => fetchDaily(year, ruleset, pool, keys, scope),
     refetchInterval: 5 * 60_000,
   });
   // same key as the dashboard's time machine -> shared cache, no extra request
   const { data: tl } = useQuery({
-    queryKey: ["timeline", ruleset, pool, keys],
-    queryFn: () => fetchTimeline(ruleset, pool, keys),
+    queryKey: ["timeline", ruleset, pool, keys, scope],
+    queryFn: () => fetchTimeline(ruleset, pool, keys, scope),
     refetchInterval: 5 * 60_000,
   });
   // maps played on the selected day (one row per map, day's best play)
   const { data: dayClears } = useQuery({
-    queryKey: ["day-clears", selDay, ruleset],
-    queryFn: () => fetchClears(0, 500, selDay, ruleset),
+    queryKey: ["day-clears", selDay, ruleset, pool, keys, scope],
+    queryFn: () => fetchClears(0, 500, selDay, ruleset, pool, keys, scope),
     refetchInterval: 5 * 60_000,
   });
   const [modalId, setModalId] = useState<number | null>(null);

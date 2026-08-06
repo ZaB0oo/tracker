@@ -67,6 +67,20 @@ const server = app.listen(config.port, () => {
   startPolling();
   startCatalogRefresh();
 });
+server.on("error", (e: NodeJS.ErrnoException) => {
+  if (e.code === "EADDRINUSE") {
+    // The desktop app keeps its own server on the same port (tray!): without
+    // this, the dev web UI silently proxies to the OTHER instance and its
+    // database — very confusing. Fail loudly instead.
+    console.error(
+      `[server] port ${config.port} is already in use — another osu!completionist ` +
+        "is running (check the tray icon of the desktop app). Close it, or you " +
+        "will be looking at ITS database through this UI."
+    );
+    process.exit(1);
+  }
+  throw e;
+});
 
 server.on("error", (e: NodeJS.ErrnoException) => {
   if (e.code === "EADDRINUSE") {
