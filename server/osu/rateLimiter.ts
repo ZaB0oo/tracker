@@ -33,6 +33,20 @@ export class RateLimiter {
   /** Observer of retryable failures: lets the UI say "throttled, waiting Ns"
    * instead of looking dead while every request sits out a 429 penalty. */
   onBackoff: ((waitMs: number, reason: string) => void) | null = null;
+  /**
+   * Adaptive slowdown. Cloudflare's 1015 window can sit FAR below the
+   * configured rate (IP reputation, the game's traffic on the same IP…):
+   * resuming at full speed after each 30 s penalty just re-triggered the
+   * block every ~40 s. Each 429 doubles the request spacing (up to x16),
+   * each success decays it ~5 % — the pace settles just under whatever the
+   * other side currently tolerates, then drifts back to the configured rate.
+   */
+  private slowFactor = 1;
+
+  /** Current pace with the adaptive slowdown applied (~req/min). */
+  get effectiveRpm(): number {
+    return Math.max(1, Math.round(60_000 / (this._minIntervalMs * this.slowFactor)));
+  }
 
   constructor(
     rpm: number,
@@ -72,10 +86,16 @@ export class RateLimiter {
     // The loop runs INSIDE the job's slot: retries go back through the global rate.
     for (;;) {
       try {
-        return await fn();
+        const r = await fn();
+        // slow decay on purpose: ramping back too fast re-trips the block
+        // (double back in ~35 requests, not 14)
+        this.slowFactor = Math.max(1, this.slowFactor * 0.98);
+        return r;
       } catch (e) {
         attempt++;
         if (!(e instanceof RetryableError) || attempt > this.maxRetries) throw e;
+        if (e.message.includes("429"))
+          this.slowFactor = Math.min(this.slowFactor * 2, 16);
         const backoff =
           e.retryAfterMs ??
           Math.min(60_000, 1000 * 2 ** attempt) + Math.random() * 500;
@@ -89,7 +109,10 @@ export class RateLimiter {
   private async waitForSlot(): Promise<void> {
     for (;;) {
       const now = this.now();
-      const next = Math.max(this.lastStart + this.minIntervalMs, this.penaltyUntil);
+      const next = Math.max(
+        this.lastStart + this._minIntervalMs * this.slowFactor,
+        this.penaltyUntil
+      );
       if (now >= next) {
         this.lastStart = now;
         return;

@@ -1200,6 +1200,17 @@ body.overlay-body { background: transparent; }
 .pack-part { background: #95436f; }
 .pack-done { background: var(--accent); }
 .pack-fc { background: var(--yellow); }
+/* tiny check mark on completed packs (white on pink, dark on FC gold) */
+.pack-done::after, .pack-fc::after {
+  content: "✓";
+  display: block;
+  font-size: 9px;
+  line-height: 11px;
+  text-align: center;
+  font-weight: 700;
+}
+.pack-done::after { color: #fff; }
+.pack-fc::after { color: #4a3a00; }
 .pack-modal { max-width: min(96vw, 1050px); width: 96vw; }
 .pack-sub { margin: -4px 0 8px; font-size: 13px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .pack-sub .dim { color: var(--fg-dim); }

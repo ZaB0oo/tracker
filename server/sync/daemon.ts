@@ -439,11 +439,36 @@ export async function fillConvertAttrs(): Promise<void> {
   }
 }
 
+/**
+ * The /beatmaps/{id}/scores endpoints have their OWN, much stricter
+ * Cloudflare rule (~15-20 req/min tolerated in practice, on an hour-scale
+ * bucket): running the sweeps at the full API rate tripped it every minute,
+ * and each 429 slowed every other task through the global penalty. The
+ * background sweeps therefore space their leaderboard checks — a shared gate,
+ * as the country and global sweeps hit the same endpoint class. 12/min is
+ * plenty: re-checking 20k held #1s every 48 h needs ~7/min on average.
+ * Immediate post-score checks (1-2 maps) stay unspaced.
+ */
+const LB_SWEEP_SPACING_MS = 5000;
+let lastLbSweepAt = 0;
+async function lbSweepGate(): Promise<void> {
+  const wait = lastLbSweepAt + LB_SWEEP_SPACING_MS - Date.now();
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  lastLbSweepAt = Date.now();
+}
+
 /** Country checks need a connected account with supporter: once that error
  * shows up, stop the pass instead of failing on every remaining map. */
 function isCountryAuthError(e: unknown): boolean {
   const msg = String(e);
-  return msg.includes("not connected") || msg.includes("supporter");
+  return (
+    msg.includes("not connected") ||
+    msg.includes("supporter") ||
+    // oauth endpoint throttled or refresh cooling down: stop the pass, the
+    // periodic tick will retry — iterating the queue would hammer oauth
+    msg.includes("user oauth") ||
+    msg.includes("backing off")
+  );
 }
 
 // ---------- Polling (high priority) ----------
@@ -735,8 +760,12 @@ export function getCountryRecheckHours(): number {
 // 1015) every request silently sits out 30 s+ penalties and the whole app
 // looked dead — now it says so.
 limiter.onBackoff = (ms, reason) => {
-  const short = reason.includes("429") ? "rate-limited" : reason.slice(0, 60);
-  status.message = `osu! API ${short} — waiting ${Math.ceil(ms / 1000)} s before retrying`;
+  // keep the throttled endpoint visible: an API-wide block and a rule on one
+  // endpoint (oauth!) are different problems
+  const short = reason.replace(/\s+/g, " ").slice(0, 90);
+  status.message =
+    `osu! API throttled (${short}) — waiting ${Math.ceil(ms / 1000)} s, ` +
+    `slowing to ~${limiter.effectiveRpm} req/min until it clears`;
   logActivity("api", status.message);
 };
 
@@ -1136,6 +1165,7 @@ export async function confirmRecentCountryChecks(): Promise<void> {
     .all() as { id: number; r: number }[];
   for (const { id, r } of rows) {
     try {
+      await lbSweepGate(); // up to 100 maps: same endpoint budget as the sweeps
       const top = await getCountryTop(id, "high", rulesetDef(r).apiName);
       applyCountryCheck(id, top, true, r);
       logActivity(
@@ -1242,6 +1272,7 @@ export async function runCountrySweep(force = false): Promise<void> {
       for (const { id, r } of rows) {
         if (!countryWanted) break;
         try {
+          await lbSweepGate();
           const top = await getCountryTop(id, "low", rulesetDef(r).apiName);
           const cc = getStoredCountryCode();
           applyCountryCheck(id, top, false, r);
@@ -1415,6 +1446,7 @@ export async function runGlobalSweep(force = false): Promise<void> {
       for (const { id, r } of rows) {
         if (!globalWanted) break;
         try {
+          await lbSweepGate();
           const pos = await getUserBeatmapPosition(
             id,
             config.osuUserId,

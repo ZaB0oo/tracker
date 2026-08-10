@@ -134,6 +134,13 @@ async function userTokenRequest(body: Record<string, string>): Promise<void> {
   if (!res.ok) {
     const txt = await res.text();
     if (res.status === 401) setState("user_refresh_token", "");
+    // 429 here is Cloudflare guarding the oauth endpoint (its strictest
+    // rule): it MUST back off like any API request — a plain error made the
+    // country sweep re-attempt the refresh on every map, which kept the
+    // block alive at any request rate.
+    if (res.status === 429)
+      throw new RetryableError(`user oauth 429: ${txt}`, retryAfterMs(res));
+    if (res.status >= 500) throw new RetryableError(`user oauth ${res.status}`);
     throw new Error(`User OAuth (${res.status}): ${txt}`);
   }
   const json = (await res.json()) as {
@@ -156,6 +163,8 @@ export async function exchangeAuthCode(code: string): Promise<void> {
   });
 }
 
+let userTokenFailedAt = 0;
+
 async function getUserToken(): Promise<string> {
   if (userToken && Date.now() < userToken.expiresAt - 60_000)
     return userToken.value;
@@ -164,7 +173,19 @@ async function getUserToken(): Promise<string> {
     throw new Error(
       `osu! account not connected: open http://localhost:${config.port}/api/auth/login`
     );
-  await userTokenRequest({ grant_type: "refresh_token", refresh_token: refresh });
+  // After a failed refresh, do NOT re-attempt for every queued map: one try
+  // per cooldown window. The sweep stops on this error and the periodic tick
+  // retries later.
+  if (Date.now() - userTokenFailedAt < 5 * 60_000)
+    throw new Error(
+      "user token refresh failed recently — backing off, auto-retry in a few minutes"
+    );
+  try {
+    await userTokenRequest({ grant_type: "refresh_token", refresh_token: refresh });
+  } catch (e) {
+    userTokenFailedAt = Date.now();
+    throw e;
+  }
   return userToken!.value;
 }
 
@@ -343,7 +364,7 @@ export async function getCountryTopScores(
         "403 on type=country: country leaderboards require an osu!supporter account"
       );
     if (res.status === 429)
-      throw new RetryableError("429", retryAfterMs(res));
+      throw new RetryableError(`429 — country LB ${beatmapId}`, retryAfterMs(res));
     if (res.status >= 500) throw new RetryableError(`HTTP ${res.status}`);
     if (!res.ok) throw new Error(`HTTP ${res.status} on country LB ${beatmapId}`);
     const json = (await res.json()) as {
@@ -371,7 +392,9 @@ async function apiGet<T>(pathAndQuery: string, priority: Priority): Promise<T> {
       throw new RetryableError("401, refreshing token");
     }
     if (res.status === 429)
-      throw new RetryableError("429 rate limited", retryAfterMs(res));
+      // the path names the throttled endpoint in the sync-bar message —
+      // essential to tell an API-wide block from a per-endpoint rule
+      throw new RetryableError(`429 — ${pathAndQuery}`, retryAfterMs(res));
     if (res.status >= 500) throw new RetryableError(`HTTP ${res.status}`);
     if (!res.ok) throw new Error(`HTTP ${res.status} on ${pathAndQuery}`);
     return (await res.json()) as T;

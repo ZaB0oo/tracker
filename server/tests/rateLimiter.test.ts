@@ -83,6 +83,22 @@ describe("RateLimiter", () => {
     expect(secondStart).toBeGreaterThanOrEqual(30_000);
   });
 
+  it("slows down after a 429 and recovers with successes", async () => {
+    const clock = virtualClock();
+    const rl = new RateLimiter(60, 5, clock.now, clock.sleep);
+    let first = true;
+    await rl.schedule(async () => {
+      if (first) {
+        first = false;
+        throw new RetryableError("429", 1000);
+      }
+    });
+    // one 429 doubled the spacing (minus the decay of the final success)
+    expect(rl.effectiveRpm).toBeLessThan(35);
+    for (let i = 0; i < 60; i++) await rl.schedule(async () => {});
+    expect(rl.effectiveRpm).toBeGreaterThan(50);
+  });
+
   it("gives up after maxRetries", async () => {
     const clock = virtualClock();
     const rl = new RateLimiter(60, 2, clock.now, clock.sleep);
