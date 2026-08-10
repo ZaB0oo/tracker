@@ -292,8 +292,11 @@ export interface PacksResponse {
   pending: number;
   categories: { type: string; packs: PackRow[] }[];
 }
-export async function fetchPacks(ruleset = 0): Promise<PacksResponse> {
-  const res = await fetch(`/api/packs?ruleset=${ruleset}`);
+export async function fetchPacks(
+  ruleset = 0,
+  at?: string | null
+): Promise<PacksResponse> {
+  const res = await fetch(`/api/packs?ruleset=${ruleset}${at ? `&at=${at}` : ""}`);
   if (!res.ok) throw new Error(`packs: HTTP ${res.status}`);
   return res.json();
 }
@@ -304,6 +307,7 @@ export interface PackMapRow {
   title: string;
   version: string;
   status: number;
+  ranked_date: string | null;
   star_rating: number | null;
   played: number;
   grade: string | null;
@@ -316,10 +320,18 @@ export interface PackDetail {
   type: string;
   date: string | null;
   url: string | null;
+  /** time-machine day the state was replayed at (null = live) */
+  at?: string | null;
   maps: PackMapRow[];
 }
-export async function fetchPackDetail(tag: string, ruleset = 0): Promise<PackDetail> {
-  const res = await fetch(`/api/packs/${encodeURIComponent(tag)}?ruleset=${ruleset}`);
+export async function fetchPackDetail(
+  tag: string,
+  ruleset = 0,
+  at?: string | null
+): Promise<PackDetail> {
+  const res = await fetch(
+    `/api/packs/${encodeURIComponent(tag)}?ruleset=${ruleset}${at ? `&at=${at}` : ""}`
+  );
   if (!res.ok) throw new Error(`pack: HTTP ${res.status}`);
   return res.json();
 }
@@ -708,6 +720,7 @@ export async function putMetric(payload: {
 
 export interface VersionInfo {
   current: string;
+  desktop?: boolean;
   update: { version: string; url: string } | null;
 }
 export async function fetchVersion(): Promise<VersionInfo> {
@@ -794,10 +807,8 @@ export interface DisplayPrefs {
 
 export interface Settings {
   apiRpm: number;
-  /** highest rate the server accepts (60, or more once a grant is declared) */
+  /** highest rate the server accepts (60, the documented osu! limit) */
   apiRpmMax: number;
-  /** the user declared an osu!-team approved higher rate limit */
-  apiRpmApproved: boolean;
   pollIntervalSeconds: number;
   countryRecheckHours: number;
   globalRecheckHours: number;
@@ -840,7 +851,6 @@ export async function fetchSettings(): Promise<Settings> {
 
 export async function postSettings(payload: {
   apiRpm?: number;
-  apiRpmApproved?: boolean;
   pollIntervalSeconds?: number;
   countryRecheckHours?: number;
   globalRecheckHours?: number;
@@ -857,5 +867,10 @@ export async function postSettings(payload: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error(`settings: HTTP ${res.status}`);
+  if (!res.ok) {
+    // surface the server's explanation ("invalid apiRpm (1..60...)"), not
+    // just the status code
+    const json = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(json.error ?? `settings: HTTP ${res.status}`);
+  }
 }

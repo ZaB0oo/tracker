@@ -45,8 +45,6 @@ historyRouter.get("/clears", (req, res) => {
   const R = parseRulesetParam(q.ruleset);
   const { POOL, STATUSES } = clearsScope(R, q);
   const { limit, offset } = paging(q);
-  // Optional day filter (heatmap day card): one row per map, the day's best
-  // (classic) play on it, oldest first.
   const day = q.day && /^\d{4}-\d{2}-\d{2}$/.test(q.day) ? q.day : null;
 
   if (day) {
@@ -60,10 +58,9 @@ historyRouter.get("/clears", (req, res) => {
              AND date(s2.ended_at) = @day
            ORDER BY COALESCE(s2.classic_total_score, s2.total_score) DESC
            LIMIT 1)
-         ORDER BY s.ended_at
-         LIMIT @limit OFFSET @offset`
+         ORDER BY s.ended_at`
       )
-      .all({ day, limit, offset });
+      .all({ day });
     const total = (
       db
         .prepare(

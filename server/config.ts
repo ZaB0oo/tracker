@@ -54,7 +54,10 @@ export const config = {
   // file exists), the UI offers direct import of collections into osu!lazer.
   lazerImporterPath: process.env.LAZER_IMPORTER_PATH ?? null,
   dbPath: path.resolve(process.env.DB_PATH ?? "./data/tracker.db"),
-  apiRpm: 60,
+  // Default 50 (max 60, the documented osu! limit): the margin leaves room
+  // for the game/website's own traffic on the same IP — running flat out at
+  // 60 for long stretches trips Cloudflare's site-wide rate limit (1015).
+  apiRpm: 50,
   pollIntervalSeconds: Number(process.env.POLL_INTERVAL_SECONDS ?? 120),
   userAgent:
     "osu-completionist-tracker (single-user; https://github.com/osu-completionist-tracker)",

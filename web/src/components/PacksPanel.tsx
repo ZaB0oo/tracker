@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   fetchPackDetail,
@@ -34,7 +34,7 @@ function packState(p: PackRow): "off" | "part" | "done" | "fc" {
   return "off";
 }
 
-type SortKey = "map" | "sr" | "grade" | "acc";
+type SortKey = "map" | "sr" | "grade" | "acc" | "date";
 const GRADE_RANK: Record<string, number> = {
   XH: 7, X: 6, SH: 5, S: 4, A: 3, B: 2, C: 1, D: 0,
 };
@@ -42,15 +42,19 @@ const GRADE_RANK: Record<string, number> = {
 function PackModal({
   tag,
   ruleset,
+  at,
+  onViewPack,
   onClose,
 }: {
   tag: string;
   ruleset: number;
+  at?: string | null;
+  onViewPack?: (tag: string) => void;
   onClose: () => void;
 }) {
   const { data } = useQuery({
-    queryKey: ["pack", tag, ruleset],
-    queryFn: () => fetchPackDetail(tag, ruleset),
+    queryKey: ["pack", tag, ruleset, at ?? null],
+    queryFn: () => fetchPackDetail(tag, ruleset, at),
   });
   const [missingOnly, setMissingOnly] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("map");
@@ -69,6 +73,9 @@ function PackModal({
             `${b.artist} ${b.title} ${b.version}`, undefined, { sensitivity: "base" });
           break;
         case "sr": cmp = (a.star_rating ?? -1) - (b.star_rating ?? -1); break;
+        case "date":
+          cmp = (a.ranked_date ?? "").localeCompare(b.ranked_date ?? "");
+          break;
         case "grade":
           cmp = (a.grade ? GRADE_RANK[a.grade] ?? -1 : -1) - (b.grade ? GRADE_RANK[b.grade] ?? -1 : -1);
           break;
@@ -83,7 +90,7 @@ function PackModal({
     if (key === sortKey) setSortDesc((d) => !d);
     else {
       setSortKey(key);
-      setSortDesc(key === "sr" || key === "grade" || key === "acc");
+      setSortDesc(key === "sr" || key === "grade" || key === "acc" || key === "date");
     }
   };
   const arrow = (key: SortKey) => (sortKey === key ? (sortDesc ? " ▼" : " ▲") : "");
@@ -103,16 +110,31 @@ function PackModal({
         {data && (
           <>
             <div className="pack-sub">
+              {data.at && <span className="pack-asof">as of {fmtDate(data.at)} · </span>}
               {data.date && <span className="dim">Date: {fmtDate(data.date)} · </span>}
               <b>{cleared} / {total}</b> cleared
               {" "}({total ? ((cleared / total) * 100).toFixed(1) : 0}%)
               {data.url && (
-                <>
-                  {" · "}
-                  <a href={data.url} target="_blank" rel="noreferrer">
-                    Download pack ↗
-                  </a>
-                </>
+                <a
+                  className="pack-action"
+                  href={data.url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Download ↗
+                </a>
+              )}
+              {onViewPack && (
+                <button
+                  className="pack-action"
+                  onClick={() => {
+                    onViewPack(tag);
+                    onClose();
+                  }}
+                  title={`Open the Maps tab filtered on this pack (search: pack=${tag})`}
+                >
+                  View in Maps
+                </button>
               )}
               <label className="mb-check pack-missing-toggle">
                 <input
@@ -139,6 +161,9 @@ function PackModal({
                     <th>FC</th>
                     <th className="sortable th-left" onClick={() => setSort("map")}>
                       Map{arrow("map")}
+                    </th>
+                    <th className="sortable" onClick={() => setSort("date")}>
+                      Ranked{arrow("date")}
                     </th>
                     <th className="sortable" onClick={() => setSort("acc")}>
                       Acc{arrow("acc")}
@@ -174,6 +199,9 @@ function PackModal({
                         </span>{" "}
                         <span className="pack-map-diff">[{m.version}]</span>
                         {m.status === 4 && <span className="pack-map-loved"> ♥</span>}
+                      </td>
+                      <td className="pack-td-date">
+                        {m.ranked_date ? fmtDate(m.ranked_date) : "—"}
                       </td>
                       <td className="pack-td-acc">
                         {m.accuracy != null ? `${(m.accuracy * 100).toFixed(2)}%` : ""}
@@ -241,15 +269,34 @@ function PackModal({
  * Pack completion, the classic completionist way: one dot per official pack
  * (gray untouched, pink started, filled completed, gold full FC), grouped by
  * category. Definitions are an opt-in one-off import (~1h, resumable).
+ * `at` (time machine day): the dots replay the state as of that date.
  */
-export function PacksPanel({ ruleset = 0 }: { ruleset?: number }) {
+export function PacksPanel({
+  ruleset = 0,
+  at = null,
+  onViewPack,
+}: {
+  ruleset?: number;
+  at?: string | null;
+  onViewPack?: (tag: string) => void;
+}) {
+  // The time-machine slider changes `at` on every tick and the ?at= query is
+  // heavier than the live one: debounce it instead of firing per day dragged.
+  const [atDeb, setAtDeb] = useState<string | null>(at);
+  useEffect(() => {
+    if (at === atDeb) return;
+    const t = setTimeout(() => setAtDeb(at), 250);
+    return () => clearTimeout(t);
+  }, [at, atDeb]);
   const { data, refetch } = useQuery({
-    queryKey: ["packs", ruleset],
-    queryFn: () => fetchPacks(ruleset),
-    refetchInterval: 60_000,
+    queryKey: ["packs", ruleset, atDeb],
+    queryFn: () => fetchPacks(ruleset, atDeb),
+    refetchInterval: atDeb ? false : 60_000,
+    placeholderData: (prev) => prev, // keep the grid during slider moves
   });
   const [openTag, setOpenTag] = useState<string | null>(null);
   const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
   if (!data) return null;
 
   if (data.synced === 0)
@@ -285,15 +332,76 @@ export function PacksPanel({ ruleset = 0 }: { ruleset?: number }) {
   const cats = [...data.categories].sort(
     (a, b) => TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type)
   );
+  // search: match on tag or name, case-insensitive; matches are shown as a
+  // NAMED list (the anonymous dots are useless for finding a specific pack)
+  const needle = search.trim().toLowerCase();
+  const found = needle
+    ? cats.flatMap(({ type, packs }) =>
+        packs
+          .filter(
+            (p) =>
+              p.tag.toLowerCase().includes(needle) ||
+              p.name.toLowerCase().includes(needle)
+          )
+          .map((p) => ({ type, p }))
+      )
+    : [];
   return (
     <div className="panel packs-panel">
       <h3>
         Packs
+        {atDeb && <span className="dim"> — as of {fmtDate(atDeb)}</span>}
         {data.pending > 0 && (
           <span className="dim"> — import in progress, {fmtNum(data.pending)} to go</span>
         )}
+        <input
+          className="pack-search"
+          type="search"
+          placeholder="Find a pack (tag or name)…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <button
+          className="pack-resync"
+          title="Re-list every pack category and fetch anything missing (resumable; already-imported packs cost nothing)"
+          onClick={() => {
+            void postPacksImport().then((r) => {
+              setImportMsg(
+                r.ok
+                  ? "Re-sync started — missing packs are being fetched (sync bar)."
+                  : `Failed: ${r.error ?? "unknown"}`
+              );
+              setTimeout(() => void refetch(), 5000);
+            });
+          }}
+        >
+          ↻ Re-sync
+        </button>
       </h3>
-      {cats.map(({ type, packs }) => {
+      {importMsg && <p className="set-note">{importMsg}</p>}
+      {needle && (
+        <div className="pack-results">
+          {found.length === 0 && <span className="dim">No pack matches.</span>}
+          {found.slice(0, 50).map(({ type, p }) => (
+            <button
+              key={p.tag}
+              className="pack-result"
+              onClick={() => setOpenTag(p.tag)}
+            >
+              <span className={`pack-dot pack-${packState(p)}`} />
+              <b>({p.tag})</b> {p.name}
+              <span className="dim">
+                {" "}— {TYPE_LABELS[type] ?? type} · {p.played}/{p.total}
+                {p.fced >= p.total && p.total > 0 ? " · full FC" : ""}
+              </span>
+            </button>
+          ))}
+          {found.length > 50 && (
+            <span className="dim">…{found.length - 50} more, refine the search</span>
+          )}
+        </div>
+      )}
+      {!needle && cats.map(({ type, packs }) => {
         const done = packs.filter((p) => packState(p) === "done" || packState(p) === "fc");
         const fc = packs.filter((p) => packState(p) === "fc");
         return (
@@ -320,7 +428,13 @@ export function PacksPanel({ ruleset = 0 }: { ruleset?: number }) {
         );
       })}
       {openTag && (
-        <PackModal tag={openTag} ruleset={ruleset} onClose={() => setOpenTag(null)} />
+        <PackModal
+          tag={openTag}
+          ruleset={ruleset}
+          at={atDeb}
+          onViewPack={onViewPack}
+          onClose={() => setOpenTag(null)}
+        />
       )}
     </div>
   );

@@ -450,6 +450,7 @@ export function Dashboard({
   onPoolChange,
   keys = [],
   onKeysChange,
+  onViewPack,
 }: {
   ruleset?: number;
   /** map pool of the viewed ruleset — same choice as the Maps view */
@@ -458,6 +459,8 @@ export function Dashboard({
   /** mania key-count filter, shared with the Maps view */
   keys?: string[];
   onKeysChange?: (keys: string[]) => void;
+  /** opens the Maps tab filtered on a pack (search token pack=TAG) */
+  onViewPack?: (tag: string) => void;
 }) {
   // witherscore is an osu!std-only proposal; everything else (time machine,
   // skill curve, missing) is per-ruleset
@@ -865,7 +868,7 @@ export function Dashboard({
           ))}
       </div>
 
-      <PacksPanel ruleset={ruleset} />
+      <PacksPanel ruleset={ruleset} at={tmDay} onViewPack={onViewPack} />
 
       <SkillCurvePanel ruleset={ruleset} pool={pool} keys={keys} scope={scope} />
     </div>

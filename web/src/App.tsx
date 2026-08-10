@@ -62,6 +62,14 @@ export default function App() {
 
   return (
     <div className="app">
+      {import.meta.env.DEV && ver?.desktop && (
+        <div className="dev-wrong-server">
+          ⚠ This dev UI is talking to the DESKTOP app's server (port 3727 was
+          already taken, your dev server never started). Everything you see —
+          and change — is the desktop app's database. Close the tray app, then
+          restart <code>npm run dev</code>.
+        </div>
+      )}
       <header>
         <h1>
           osu!<span className="accent">completionist</span>
@@ -146,6 +154,18 @@ export default function App() {
           onPoolChange={(pool) => setFilters({ ...filters, pool })}
           keys={filters.keys}
           onKeysChange={(keys) => setFilters({ ...filters, keys })}
+          onViewPack={(tag) => {
+            // Maps tab filtered on the pack via the search token (editable)
+            setFilters({
+              ...DEFAULT_FILTERS,
+              mode: filters.mode,
+              pool: filters.pool,
+              keys: filters.keys,
+              ruleset,
+              q: `pack=${tag}`,
+            });
+            setView("table");
+          }}
         />
       )}
     </div>

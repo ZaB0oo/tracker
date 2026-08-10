@@ -7,29 +7,13 @@ import type {
   SoloScore,
 } from "./types.js";
 
-/**
- * 60 req/min is the documented osu! API limit and stays the default. The osu!
- * team does grant higher limits on request (that is how osu!alternative-style
- * projects run): the user declares that grant in Settings (api_rpm_approved),
- * which is the ONLY way a higher rate is honoured. MAX_APPROVED_RPM is just a
- * typo guard, not a policy number.
- */
-const POLITE_RPM = 60;
-const MAX_APPROVED_RPM = 600;
-
-/** Highest rate the user is currently allowed to set. */
-export function maxAllowedRpm(): number {
-  try {
-    return getState("api_rpm_approved") === "1" ? MAX_APPROVED_RPM : POLITE_RPM;
-  } catch {
-    return POLITE_RPM; // DB not ready yet
-  }
-}
+/** 60 req/min is the documented osu! API limit: hard ceiling, no override. */
+export const MAX_RPM = 60;
 
 function initialRpm(): number {
   try {
     const v = Number(getState("api_rpm"));
-    if (Number.isFinite(v) && v >= 1 && v <= maxAllowedRpm()) return v;
+    if (Number.isFinite(v) && v >= 1 && v <= MAX_RPM) return v;
   } catch {
     /* DB not ready yet */
   }
@@ -43,7 +27,7 @@ export function getCurrentRpm(): number {
 }
 
 export function applyApiRpm(rpm: number): void {
-  limiter.setRpm(rpm, maxAllowedRpm());
+  limiter.setRpm(rpm, MAX_RPM);
 }
 
 /** Call after an OAuth client change: forgets all tokens. */
@@ -66,6 +50,12 @@ async function netFetch(url: string, init?: RequestInit): Promise<Response> {
   }
 }
 
+/** 429 penalty: Retry-After when given, else the 30 s Cloudflare asks for. */
+function retryAfterMs(res: Response): number {
+  const ra = Number(res.headers.get("Retry-After"));
+  return Number.isFinite(ra) && ra > 0 ? ra * 1000 : 30_000;
+}
+
 let token: { value: string; expiresAt: number } | null = null;
 
 async function getToken(): Promise<string> {
@@ -86,7 +76,12 @@ async function getToken(): Promise<string> {
   });
   if (!res.ok) {
     const body = await res.text();
-    if (res.status >= 500 || res.status === 429)
+    // 429 here is usually Cloudflare (error 1015) blocking the whole zone:
+    // honor Retry-After (30 s typically) — the exponential backoff alone
+    // retried too fast and kept the block alive
+    if (res.status === 429)
+      throw new RetryableError(`oauth 429: ${body}`, retryAfterMs(res));
+    if (res.status >= 500)
       throw new RetryableError(`oauth ${res.status}: ${body}`);
     throw new Error(
       `OAuth failed (${res.status}) — check OSU_CLIENT_ID/OSU_CLIENT_SECRET in .env: ${body}`
@@ -347,10 +342,8 @@ export async function getCountryTopScores(
       throw new Error(
         "403 on type=country: country leaderboards require an osu!supporter account"
       );
-    if (res.status === 429) {
-      const ra = res.headers.get("Retry-After");
-      throw new RetryableError("429", ra ? Number(ra) * 1000 : undefined);
-    }
+    if (res.status === 429)
+      throw new RetryableError("429", retryAfterMs(res));
     if (res.status >= 500) throw new RetryableError(`HTTP ${res.status}`);
     if (!res.ok) throw new Error(`HTTP ${res.status} on country LB ${beatmapId}`);
     const json = (await res.json()) as {
@@ -377,13 +370,8 @@ async function apiGet<T>(pathAndQuery: string, priority: Priority): Promise<T> {
       token = null; // expired/revoked token -> retry with a fresh one
       throw new RetryableError("401, refreshing token");
     }
-    if (res.status === 429) {
-      const ra = res.headers.get("Retry-After");
-      throw new RetryableError(
-        "429 rate limited",
-        ra ? Number(ra) * 1000 : undefined
-      );
-    }
+    if (res.status === 429)
+      throw new RetryableError("429 rate limited", retryAfterMs(res));
     if (res.status >= 500) throw new RetryableError(`HTTP ${res.status}`);
     if (!res.ok) throw new Error(`HTTP ${res.status} on ${pathAndQuery}`);
     return (await res.json()) as T;
@@ -569,9 +557,9 @@ export async function getPackSets(
 export async function getScoreById(
   id: number,
   priority: Priority = "high"
-): Promise<{ beatmap_id?: number } | null> {
+): Promise<SoloScore | null> {
   try {
-    return await apiGet<{ beatmap_id?: number }>(`/scores/${id}`, priority);
+    return await apiGet<SoloScore>(`/scores/${id}`, priority);
   } catch {
     return null;
   }

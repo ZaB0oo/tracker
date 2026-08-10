@@ -24,6 +24,7 @@ const KEY_ALIASES: Record<string, string> = {
   creator: "creator", mapper: "creator",
   artist: "artist", title: "title",
   year: "year", ranked: "year",
+  pack: "pack",
 };
 
 const TOKEN_RE = /^([a-z]+)(<=|>=|==|=|<|>)(.+)$/i;

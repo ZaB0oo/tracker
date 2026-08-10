@@ -21,8 +21,14 @@ function packWhere(R: number): string {
   return R === 0 ? "(p.ruleset = 0 OR p.ruleset IS NULL)" : `(p.ruleset = ${R} OR p.ruleset IS NULL)`;
 }
 
+/** Time-machine day (YYYY-MM-DD), or null for the live state. */
+function parseAt(v: unknown): string | null {
+  return typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
+}
+
 packsRouter.get("/packs", (req, res) => {
   const R = parseRulesetParam(req.query.ruleset);
+  const at = parseAt(req.query.at);
   const db = getDb();
   const synced = (
     db.prepare("SELECT COUNT(*) c FROM packs WHERE synced_at IS NOT NULL").get() as { c: number }
@@ -31,19 +37,29 @@ packsRouter.get("/packs", (req, res) => {
     return res.json({ synced: 0, pending: 0, categories: [] });
 
   const version = scoresVersion();
-  const key = `packs-${R}`;
+  const key = `packs-${R}-${at ?? "now"}`;
   const hit = cache.get(key);
   if (hit && hit.version === version && Date.now() - hit.at < TTL_MS)
     return res.json(hit.payload);
 
   // per-pack aggregates over the maps of its sets, seen from this mode's
-  // pool: total diffs, played, cleared, FC'd (only ranked/approved/loved)
+  // pool: total diffs, played, cleared, FC'd (only ranked/approved/loved).
+  // Time machine (at): replayed from the stored scores instead of the live
+  // flags — same definitions (passed = played, fc_state <= 1 = FC) as any_fc.
+  const playedCol = at
+    ? `SUM(CASE WHEN EXISTS(SELECT 1 FROM scores s WHERE s.beatmap_id = b.id
+         AND s.ruleset = ${R} AND s.passed = 1 AND date(s.ended_at) <= @at)
+         THEN 1 ELSE 0 END) AS played,
+       SUM(CASE WHEN EXISTS(SELECT 1 FROM scores s WHERE s.beatmap_id = b.id
+         AND s.ruleset = ${R} AND s.passed = 1 AND s.fc_state <= 1
+         AND date(s.ended_at) <= @at) THEN 1 ELSE 0 END) AS fced`
+    : `SUM(CASE WHEN u.played = 1 THEN 1 ELSE 0 END) AS played,
+       SUM(COALESCE(u.any_fc, 0)) AS fced`;
   const rows = db
     .prepare(
       `SELECT p.tag, p.name, p.type, p.date,
         COUNT(b.id) AS total,
-        SUM(CASE WHEN u.played = 1 THEN 1 ELSE 0 END) AS played,
-        SUM(COALESCE(u.any_fc, 0)) AS fced
+        ${playedCol}
        FROM packs p
        JOIN pack_sets ps ON ps.tag = p.tag
        JOIN beatmaps b ON b.beatmapset_id = ps.beatmapset_id
@@ -55,7 +71,7 @@ packsRouter.get("/packs", (req, res) => {
        -- the tag tie-break numeric (S2 < S19 < S100, not S100 < S19 < S2)
        ORDER BY p.type, p.date, LENGTH(p.tag), p.tag`
     )
-    .all() as {
+    .all(at ? { at } : {}) as {
     tag: string; name: string; type: string; date: string | null;
     total: number; played: number; fced: number;
   }[];
@@ -81,6 +97,7 @@ packsRouter.get("/packs", (req, res) => {
 
 packsRouter.get("/packs/:tag", (req, res) => {
   const R = parseRulesetParam(req.query.ruleset);
+  const at = parseAt(req.query.at);
   const db = getDb();
   const pack = db
     .prepare("SELECT tag, name, type, date, url FROM packs WHERE tag = ?")
@@ -89,11 +106,25 @@ packsRouter.get("/packs/:tag", (req, res) => {
     | undefined;
   if (!pack) return res.status(404).json({ error: "unknown pack" });
 
+  // Time machine: the displayed best is the best score MADE BY the date —
+  // same definition as the live best pointer (refreshBest): highest CLASSIC
+  // score, even if its grade is worse.
+  const bestJoin = at
+    ? `LEFT JOIN scores s ON s.id = (
+         SELECT s2.id FROM scores s2
+         WHERE s2.beatmap_id = b.id AND s2.ruleset = ${R} AND s2.passed = 1
+           AND date(s2.ended_at) <= @at
+         ORDER BY COALESCE(s2.classic_total_score, s2.total_score) DESC
+         LIMIT 1)`
+    : "LEFT JOIN scores s ON s.id = u.best_lazer_score_id";
+  const playedCol = at
+    ? "CASE WHEN s.id IS NULL THEN 0 ELSE 1 END AS played"
+    : "COALESCE(u.played, 0) AS played";
   const maps = db
     .prepare(
-      `SELECT b.id, st.artist, st.title, b.version, b.status,
+      `SELECT b.id, st.artist, st.title, b.version, b.status, st.ranked_date,
         COALESCE(ca.star_rating, b.star_rating) AS star_rating,
-        COALESCE(u.played, 0) AS played,
+        ${playedCol},
         s.rank AS grade, s.fc_state, s.accuracy
        FROM pack_sets ps
        JOIN beatmaps b ON b.beatmapset_id = ps.beatmapset_id
@@ -101,12 +132,12 @@ packsRouter.get("/packs/:tag", (req, res) => {
        JOIN beatmapsets st ON st.id = b.beatmapset_id
        LEFT JOIN convert_attrs ca ON ca.beatmap_id = b.id AND ca.ruleset = ${R} AND b.ruleset != ${R}
        LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}
-       LEFT JOIN scores s ON s.id = u.best_lazer_score_id
-       WHERE ps.tag = ?
+       ${bestJoin}
+       WHERE ps.tag = @tag
        ORDER BY st.artist, st.title, COALESCE(ca.star_rating, b.star_rating)`
     )
-    .all(pack.tag);
-  res.json({ ...pack, maps });
+    .all(at ? { tag: pack.tag, at } : { tag: pack.tag });
+  res.json({ ...pack, at, maps });
 });
 
 // Opt-in import of the pack definitions (~1 req/pack, resumable, progress in

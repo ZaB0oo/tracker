@@ -68,6 +68,9 @@ versionRouter.get("/version", async (_req, res) => {
   const update = latest && isNewer(latest.tag, APP_VERSION) ? latest : null;
   res.json({
     current: APP_VERSION,
+    // true when this server was launched by the desktop app — the dev UI uses
+    // it to detect that its /api proxy landed on the WRONG server (port taken)
+    desktop: Boolean(process.env.TRACKER_DESKTOP),
     update: update
       ? { version: update.tag.replace(/^v/, ""), url: update.url }
       : null,

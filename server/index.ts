@@ -10,6 +10,13 @@ import { getCurrentRpm } from "./osu/api.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Node kills the process on any unhandled promise rejection: one failing
+// background task (backfill resume, sweep kick-off, …) must not take the
+// whole tracker down with it. Log and keep serving.
+process.on("unhandledRejection", (e) => {
+  console.error("[server] unhandled rejection:", e);
+});
+
 const app = express();
 app.use(express.json());
 app.use("/api", router);
@@ -74,20 +81,8 @@ server.on("error", (e: NodeJS.ErrnoException) => {
     // database — very confusing. Fail loudly instead.
     console.error(
       `[server] port ${config.port} is already in use — another osu!completionist ` +
-        "is running (check the tray icon of the desktop app). Close it, or you " +
-        "will be looking at ITS database through this UI."
-    );
-    process.exit(1);
-  }
-  throw e;
-});
-
-server.on("error", (e: NodeJS.ErrnoException) => {
-  if (e.code === "EADDRINUSE") {
-    console.error(
-      `\n[ERROR] Port ${config.port} is already in use: an OLD server is still running!\n` +
-        `Close all old terminals / node processes (taskkill /F /IM node.exe on Windows),\n` +
-        `then restart npm run dev. Otherwise the old code keeps running.\n`
+        "is running (check the tray icon of the desktop app, or an old dev " +
+        "server). Close it, or you will be looking at ITS database through this UI."
     );
     process.exit(1);
   }

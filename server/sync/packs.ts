@@ -85,17 +85,30 @@ export async function importPacks(
   if (packsSyncRunning) return null;
   packsSyncRunning = true;
   try {
+    // One failing type must not abort the others: during a rate-limit block
+    // the listing used to die mid-way and whole categories went missing until
+    // a manual re-run. Failed types are reported and picked up next re-sync.
+    const failed: string[] = [];
     for (const type of PACK_TYPES) {
-      let cursor: string | null = null;
-      let pages = 0;
-      do {
-        const page = await getPacks(type, cursor);
-        upsertHeaders(page.beatmap_packs, type);
-        cursor = page.cursor_string;
-        pages++;
-      } while (cursor);
-      onProgress?.(`packs: ${type} listed (${pages} page(s))`);
+      try {
+        let cursor: string | null = null;
+        let pages = 0;
+        do {
+          const page = await getPacks(type, cursor);
+          upsertHeaders(page.beatmap_packs, type);
+          cursor = page.cursor_string;
+          pages++;
+        } while (cursor);
+        onProgress?.(`packs: ${type} listed (${pages} page(s))`);
+      } catch (e) {
+        failed.push(type);
+        console.error(`[packs] listing ${type}:`, e instanceof Error ? e.message : e);
+      }
     }
+    if (failed.length > 0)
+      onProgress?.(
+        `packs: listing failed for ${failed.join(", ")} — re-run the import (Dashboard → Packs → Re-sync) to complete them`
+      );
     const filled = await fillContents(onProgress);
     onProgress?.(`packs import done: ${filled} pack(s) fetched`);
     return filled;

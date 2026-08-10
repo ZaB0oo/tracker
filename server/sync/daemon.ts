@@ -731,6 +731,15 @@ export function getCountryRecheckHours(): number {
   return Number.isFinite(v) && v >= 1 ? Math.round(v) : 48;
 }
 
+// API backoffs surfaced in the sync bar: during a Cloudflare block (error
+// 1015) every request silently sits out 30 s+ penalties and the whole app
+// looked dead — now it says so.
+limiter.onBackoff = (ms, reason) => {
+  const short = reason.includes("429") ? "rate-limited" : reason.slice(0, 60);
+  status.message = `osu! API ${short} — waiting ${Math.ceil(ms / 1000)} s before retrying`;
+  logActivity("api", status.message);
+};
+
 export function startPolling(): void {
   if (pollTimer) return;
   const tick = () => {
@@ -1580,16 +1589,47 @@ export async function importMissingKnownSets(): Promise<number> {
 
 /** Manual import of a set (API then web page) + backfill of its diffs. */
 export async function importSetById(
-  setId: number
+  setId: number,
+  opts: { backfillInBackground?: boolean } = {}
 ): Promise<{ source: "api" | "web" | null; added: string }> {
   const before = poolCounts();
   const { source, newIds } = await importOneSet(setId);
   // measured before the (rate-limited, minutes-long) backfill, so a concurrent
   // delta import cannot inflate what THIS set added
   const added = poolGrowth(before, poolCounts()).label;
-  for (const id of newIds)
-    await backfillMap(id, "high", `import set ${setId}: backfill map ${id}`);
+  const backfill = async () => {
+    for (const id of newIds)
+      await backfillMap(id, "high", `import set ${setId}: backfill map ${id}`);
+  };
+  // Manual imports answer NOW: on a big new set the backfill takes minutes at
+  // the rate limit, and the UI looked frozen while its request waited for it.
+  // backfillMap logs and swallows per-map errors, so nothing is lost.
+  if (opts.backfillInBackground)
+    void backfill().catch((e) => console.error(`[sync] import set ${setId}:`, e));
+  else await backfill();
   return { source, added };
+}
+
+/**
+ * Manual re-fetch of MY scores on every already-fetched diff of a set, all
+ * started rulesets. The recent-scores endpoint only covers 24 h, so plays made
+ * while the app was off are invisible to polling — this recovers what the
+ * per-map endpoint exposes (the best score per mod combination; other offline
+ * plays are not retrievable, except one by one via their score id).
+ */
+export async function refetchSetScores(setId: number): Promise<number> {
+  const rows = getDb()
+    .prepare(
+      `SELECT u.beatmap_id AS id, u.ruleset AS r FROM beatmap_user u
+       JOIN beatmaps b ON b.id = u.beatmap_id
+       WHERE b.beatmapset_id = ? AND u.fetched_at IS NOT NULL`
+    )
+    .all(setId) as { id: number; r: number }[];
+  for (const { id, r } of rows)
+    await backfillMap(id, "high", `re-fetch set ${setId}: map ${id}`, r);
+  if (rows.length > 0)
+    logActivity("import", `set ${setId}: ${rows.length} diff(s) re-checked for scores`);
+  return rows.length;
 }
 
 /** Targeted year verification (search vs local DB) + backfill. */

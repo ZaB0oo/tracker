@@ -122,6 +122,9 @@ function startServer() {
       ...process.env,
       PORT: String(PORT),
       DB_PATH: path.join(dataDir(), "tracker.db"),
+      // lets /api/version identify this server as the desktop app's: the dev
+      // UI shows a warning when its proxy lands here (port already taken)
+      TRACKER_DESKTOP: "1",
     },
     stdio: "inherit",
     serviceName: "osu-completionist-server",

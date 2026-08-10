@@ -1,5 +1,7 @@
 import { Router } from "express";
 import { config } from "../config.js";
+import { saveScores } from "../logic/repo.js";
+import type { SoloScore } from "../osu/types.js";
 import { packSeedCounts } from "../logic/rulesets.js";
 import { getActiveRulesets, getDb, getStartedRulesets, setState } from "../db/db.js";
 import { isUserConnected } from "../osu/api.js";
@@ -14,6 +16,7 @@ import {
   pauseGlobalSweep,
   pollRecentScores,
   recomputeAllBests,
+  refetchSetScores,
   refreshCatalogDelta,
   resumeBackfill,
   runCatalogRepair,
@@ -320,8 +323,9 @@ syncRouter.post("/sync/import-any", async (req, res) => {
   if (!input) return res.status(400).json({ ok: false, error: "empty input" });
 
   const { getBeatmapsByIds, getScoreById } = await import("../osu/api.js");
+  type Resolved = { setId: number; kind: string; score?: SoloScore };
   /** resolves whatever was pasted into a beatmapset id (+ how it was read) */
-  const resolve = async (): Promise<{ setId: number; kind: string } | string> => {
+  const resolve = async (): Promise<Resolved | string> => {
     let m = /beatmapsets\/(\d+)/.exec(input);
     if (m) return { setId: Number(m[1]), kind: "beatmapset URL" };
     m = /(?:\/b\/|beatmaps\/)(\d+)/.exec(input);
@@ -337,7 +341,7 @@ syncRouter.post("/sync/import-any", async (req, res) => {
       if (!sc?.beatmap_id) return `score ${m[1]} not found`;
       const [bm] = await getBeatmapsByIds([sc.beatmap_id], "high");
       return bm
-        ? { setId: bm.beatmapset_id, kind: "score URL" }
+        ? { setId: bm.beatmapset_id, kind: "score URL", score: sc }
         : `beatmap ${sc.beatmap_id} of score ${m[1]} not found`;
     }
     if (!/^\d+$/.test(input)) return "unrecognized input (expected an id or an osu.ppy.sh URL)";
@@ -347,7 +351,7 @@ syncRouter.post("/sync/import-any", async (req, res) => {
       const sc = await getScoreById(n);
       if (sc?.beatmap_id) {
         const [bm] = await getBeatmapsByIds([sc.beatmap_id], "high");
-        if (bm) return { setId: bm.beatmapset_id, kind: "score id" };
+        if (bm) return { setId: bm.beatmapset_id, kind: "score id", score: sc };
       }
       return `score ${n} not found`;
     }
@@ -360,7 +364,31 @@ syncRouter.post("/sync/import-any", async (req, res) => {
   try {
     const r = await resolve();
     if (typeof r === "string") return res.status(404).json({ ok: false, error: r });
-    const result = await importSetById(r.setId);
+    const result = await importSetById(r.setId, { backfillInBackground: true });
+    // Plays made while the app was off are gone from the 24 h recent window:
+    // re-fetch my scores on the set's known diffs (best per mod combo — all
+    // the API exposes). Background, progress in the sync bar.
+    void refetchSetScores(r.setId).catch((e) =>
+      console.error(`[sync] re-fetch set ${r.setId}:`, e)
+    );
+    // A pasted score id was fetched WHOLE: store that exact score directly —
+    // even an old play the per-map endpoint no longer exposes.
+    let scoreSaved = false;
+    if (r.score && r.score.user_id === config.osuUserId && r.score.passed) {
+      const st = (
+        getDb()
+          .prepare("SELECT status FROM beatmaps WHERE id = ?")
+          .get(r.score.beatmap_id) as { status: number } | undefined
+      )?.status;
+      // same rule as polling: no phantom scores on non-ranked/loved maps
+      if (st === 1 || st === 2 || st === 4) {
+        saveScores(r.score.beatmap_id, [r.score], {
+          markFetched: false,
+          ruleset: r.score.ruleset_id,
+        });
+        scoreSaved = true;
+      }
+    }
     const rows = getDb()
       .prepare(
         `SELECT CASE WHEN status IN (1, 2) THEN 'ranked'
@@ -370,7 +398,7 @@ syncRouter.post("/sync/import-any", async (req, res) => {
       )
       .all(r.setId) as { s: string; c: number }[];
     const statuses = Object.fromEntries(rows.map((x) => [x.s, x.c]));
-    res.json({ ok: true, kind: r.kind, setId: r.setId, ...result, statuses });
+    res.json({ ok: true, kind: r.kind, setId: r.setId, scoreSaved, ...result, statuses });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e) });
   }

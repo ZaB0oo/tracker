@@ -30,6 +30,9 @@ export class RateLimiter {
   private lastStart = 0;
   private penaltyUntil = 0;
   private _minIntervalMs: number;
+  /** Observer of retryable failures: lets the UI say "throttled, waiting Ns"
+   * instead of looking dead while every request sits out a 429 penalty. */
+  onBackoff: ((waitMs: number, reason: string) => void) | null = null;
 
   constructor(
     rpm: number,
@@ -45,11 +48,8 @@ export class RateLimiter {
     return this._minIntervalMs;
   }
 
-  /**
-   * Change the rate on the fly (UI setting). Capped at `maxRpm`, 60 by default:
-   * anything above the documented osu! limit requires the caller to pass the
-   * ceiling it is allowed to use (see maxAllowedRpm in osu/api.ts).
-   */
+  /** Change the rate on the fly (UI setting). Capped at `maxRpm` (60: the
+   * documented osu! limit). */
   setRpm(rpm: number, maxRpm = 60): void {
     const clamped = Math.min(Math.max(rpm, 1), Math.max(maxRpm, 1));
     this._minIntervalMs = Math.ceil(60_000 / clamped);
@@ -80,6 +80,7 @@ export class RateLimiter {
           e.retryAfterMs ??
           Math.min(60_000, 1000 * 2 ** attempt) + Math.random() * 500;
         this.penaltyUntil = Math.max(this.penaltyUntil, this.now() + backoff);
+        this.onBackoff?.(backoff, e.message);
         await this.waitForSlot();
       }
     }

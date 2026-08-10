@@ -66,6 +66,7 @@ export function AdvancedSettings({
   const lbl = firstPlaceLabel(country);
 
   // null = untouched (keep current value)
+  const [rpm, setRpm] = useState<string | null>(null);
   const [poll, setPoll] = useState<string | null>(null);
   const [countryH, setCountryH] = useState<string | null>(null);
   const [globalH, setGlobalH] = useState<string | null>(null);
@@ -76,6 +77,7 @@ export function AdvancedSettings({
   const [dBests, setDBests] = useState<boolean | null>(null);
   const [wither, setWither] = useState<boolean | null>(null);
   const [testMsg, setTestMsg] = useState<string | null>(null);
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [importerPath, setImporterPath] = useState<string | null>(null);
   const [rulesets, setRulesets] = useState<number[] | null>(null);
   const importInput = useRef<HTMLInputElement>(null);
@@ -119,6 +121,9 @@ export function AdvancedSettings({
           bests: dBests ?? data!.discord.bests,
         },
       };
+      // clamp instead of erroring: typing 91 saves the 60 ceiling
+      if (rpm != null && rpm !== "")
+        payload.apiRpm = Math.min(Math.max(Number(rpm) || 1, 1), data!.apiRpmMax);
       if (poll != null) payload.pollIntervalSeconds = Number(poll);
       if (countryH != null) payload.countryRecheckHours = Number(countryH);
       if (globalH != null) payload.globalRecheckHours = Number(globalH);
@@ -139,7 +144,7 @@ export function AdvancedSettings({
       );
       onClose();
     },
-    onError: (e: Error) => setTestMsg(e.message),
+    onError: (e: Error) => setSaveMsg(e.message),
   });
 
   const test = useMutation({
@@ -212,6 +217,16 @@ export function AdvancedSettings({
 
         <h3>Synchronization</h3>
         <div className="set-grid">
+          <Field
+            label="API rate (req/min)"
+            hint="Shared by EVERYTHING (score import, sweeps, packs…). Default 50 leaves headroom for the game's own traffic; 60 (the documented osu! API limit) is the maximum."
+          >
+            <input
+              type="number" min={1} max={data.apiRpmMax} step={1}
+              value={rpm ?? String(data.apiRpm)}
+              onChange={(e) => setRpm(e.target.value)}
+            />
+          </Field>
           <Field
             label="Score polling (s)"
             hint="How often your recent scores are fetched (10 to 3600 s)"
@@ -578,6 +593,7 @@ export function AdvancedSettings({
             {save.isPending ? "Saving…" : "Save settings"}
           </button>
           <button onClick={onClose}>Cancel</button>
+          {saveMsg && <span className="save-error">⚠ {saveMsg}</span>}
         </div>
       </div>
     </>

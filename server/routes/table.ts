@@ -191,6 +191,16 @@ function buildFilters(
           params[pn] = `%${c.value}%`;
           break;
         }
+        case "pack": {
+          // maps of an official pack, by tag (pack=S100) — needs the pack
+          // definitions imported (Dashboard → Packs)
+          where.push(
+            `EXISTS (SELECT 1 FROM pack_sets ps
+              WHERE ps.beatmapset_id = b.beatmapset_id AND ps.tag = @${pn} COLLATE NOCASE)`
+          );
+          params[pn] = c.value;
+          break;
+        }
       }
     }
     if (text) {

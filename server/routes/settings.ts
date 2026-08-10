@@ -8,7 +8,7 @@ import {
   applyApiRpm,
   getCurrentRpm,
   logoutUser,
-  maxAllowedRpm,
+  MAX_RPM,
   resetAuthTokens,
 } from "../osu/api.js";
 import {
@@ -62,8 +62,7 @@ function getPollSeconds(): number {
 settingsRouter.get("/settings", (_req, res) =>
   res.json({
     apiRpm: getCurrentRpm(),
-    apiRpmMax: maxAllowedRpm(),
-    apiRpmApproved: getState("api_rpm_approved") === "1",
+    apiRpmMax: MAX_RPM,
     pollIntervalSeconds: getPollSeconds(),
     countryRecheckHours: getCountryRecheckHours(),
     globalRecheckHours: getGlobalRecheckHours(),
@@ -114,7 +113,6 @@ settingsRouter.post(
 settingsRouter.post("/settings", (req, res) => {
   const body = req.body as {
     apiRpm?: unknown;
-    apiRpmApproved?: unknown;
     pollIntervalSeconds?: unknown;
     countryRecheckHours?: unknown;
     globalRecheckHours?: unknown;
@@ -177,28 +175,12 @@ settingsRouter.post("/settings", (req, res) => {
         .json({ ok: false, error: "invalid globalRecheckHours (1..720)" });
     setState("global_recheck_hours", String(Math.round(h)));
   }
-  // Read BEFORE apiRpm: the same save can declare the grant and raise the rate.
-  // Revoking it clamps the live rate back down — otherwise an un-declared
-  // install would keep hammering at the rate it was left at.
-  if (body.apiRpmApproved != null) {
-    const on = body.apiRpmApproved === true || body.apiRpmApproved === "1";
-    setState("api_rpm_approved", on ? "1" : "0");
-    if (!on) {
-      const kept = Math.min(Number(getState("api_rpm")) || 60, 60);
-      setState("api_rpm", String(kept));
-      applyApiRpm(kept);
-    }
-  }
   if (body.apiRpm != null) {
-    const max = maxAllowedRpm();
     const r = Number(body.apiRpm);
-    if (!Number.isFinite(r) || r < 1 || r > max)
+    if (!Number.isFinite(r) || r < 1 || r > MAX_RPM)
       return res.status(400).json({
         ok: false,
-        error:
-          max === 60
-            ? "invalid apiRpm (1..60, documented osu! limit)"
-            : `invalid apiRpm (1..${max})`,
+        error: `invalid apiRpm (1..${MAX_RPM}, documented osu! limit)`,
       });
     setState("api_rpm", String(Math.round(r)));
     applyApiRpm(Math.round(r));

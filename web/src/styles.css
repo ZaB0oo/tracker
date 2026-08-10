@@ -67,6 +67,51 @@ header {
   background: var(--bg2); border-bottom: 1px solid var(--border); flex-wrap: wrap;
 }
 .app-version { color: var(--fg-dim); font-size: 12px; font-weight: 400; margin-left: 8px; }
+/* dev only: the /api proxy answered but it was the desktop app's server */
+.dev-wrong-server {
+  background: #7a1f1f;
+  color: #fff;
+  padding: 10px 16px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+.dev-wrong-server code { background: rgba(0, 0, 0, 0.3); padding: 1px 5px; border-radius: 4px; }
+.pack-td-date { color: var(--fg-dim); white-space: nowrap; font-size: 12px; text-align: center; }
+.pack-asof { color: var(--accent); font-weight: 600; }
+.pack-search {
+  float: right;
+  font-size: 12px;
+  padding: 4px 8px;
+  background: var(--bg2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  width: 210px;
+}
+.pack-results { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
+.pack-result {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--fg);
+  cursor: pointer;
+  padding: 3px 6px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.pack-result:hover { background: var(--bg2); }
+.pack-result .pack-dot { cursor: pointer; flex: none; }
+.save-error { color: var(--red); font-size: 13px; align-self: center; }
+.pack-resync {
+  float: right;
+  margin-right: 8px;
+  font-size: 12px;
+  padding: 4px 8px;
+}
 .app-update {
   margin-left: 8px; font-size: 12px; font-weight: 600;
   color: #7fe08a; text-decoration: none;
@@ -1158,6 +1203,22 @@ body.overlay-body { background: transparent; }
 .pack-modal { max-width: min(96vw, 1050px); width: 96vw; }
 .pack-sub { margin: -4px 0 8px; font-size: 13px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .pack-sub .dim { color: var(--fg-dim); }
+/* actions of the pack modal header: small pills, consistent with the app
+   buttons instead of raw inline links */
+.pack-action {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 10px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--fg);
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  text-decoration: none;
+  cursor: pointer;
+}
+.pack-action:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
 .pack-missing-toggle { margin-left: auto; }
 .pack-progress {
   height: 6px; border-radius: 3px; background: var(--bg3);

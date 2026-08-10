@@ -25,6 +25,12 @@ describe("parseSearch (osu!-style tokens)", () => {
     ]);
   });
 
+  it("recognises the pack token", () => {
+    const r = parseSearch("pack=S100 remainder");
+    expect(r.conds).toEqual([{ key: "pack", op: "=", value: "S100" }]);
+    expect(r.text).toBe("remainder");
+  });
+
   it("keeps quoted values whole", () => {
     const r = parseSearch('creator="foo bar" hello');
     expect(r.conds).toEqual([{ key: "creator", op: "=", value: "foo bar" }]);
