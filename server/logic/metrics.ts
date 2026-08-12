@@ -74,6 +74,11 @@ export interface MetricParams {
   /** count kind (countdown): the conditions select the maps still TO FIX;
    * the count heads to 0, with downward milestones */
   descending?: boolean;
+  /** countdown only: the conditions describe the GOAL instead — the metric
+   * counts the PLAYED maps whose best does not meet them yet. The exact
+   * complement of the matching count, even when the goal mixes several hit
+   * bounds (impossible to express as direct to-fix ranges: it needs an OR). */
+  invert?: boolean;
   /** "milestone": progress toward the next step. "total": X / all available maps. */
   progressMode: "milestone" | "total";
   step: number;
@@ -104,9 +109,13 @@ function range(expr: string, r: Range | undefined, out: string[]): void {
   if (hi != null) out.push(`${expr} <= ${hi}`);
 }
 
-/** SQL conditions on a score row (alias `s`). */
-export function scoreWhere(c: MetricScoreConds): string {
-  const w: string[] = ["s.passed = 1"];
+/**
+ * SQL conditions on a score row (alias `s`).
+ * `invert`: passed stays required, everything else is negated — "a (passed)
+ * best that does NOT meet the goal". No condition at all then matches nothing.
+ */
+export function scoreWhere(c: MetricScoreConds, invert = false): string {
+  const w: string[] = [];
   if (c.fc === "any") w.push("s.fc_state <= 1");
   else if (c.fc === "pfc") w.push("s.fc_state = 0");
   else if (c.fc === "nonfc") w.push("s.fc_state = 2");
@@ -163,7 +172,9 @@ export function scoreWhere(c: MetricScoreConds): string {
   range(NMISS, co.nMiss, w);
   range(SLIDER_END_MISS, co.nSliderEnd, w);
   range(`(${N100} + ${SLIDER_END_MISS})`, co.imperfections, w);
-  return w.join(" AND ");
+  if (invert)
+    return `s.passed = 1 AND NOT (${w.length ? w.join(" AND ") : "1"})`;
+  return ["s.passed = 1", ...w].join(" AND ");
 }
 
 /**

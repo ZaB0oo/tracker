@@ -646,6 +646,9 @@ export interface MetricParams {
   /** count kind (countdown): the conditions select the maps still TO FIX;
    * the count heads to 0, with downward milestones */
   descending?: boolean;
+  /** countdown only: conditions describe the GOAL — counts the played maps
+   * whose best does not meet it yet (exact complement of the goal count) */
+  invert?: boolean;
   progressMode: "milestone" | "total";
   step: number;
   showEvolution: boolean;

@@ -129,10 +129,13 @@ function buildFilters(
       .get(Number(q.metricMissing)) as { params: string } | undefined;
     if (row) {
       const p = JSON.parse(row.params) as MetricParams;
+      // goal-mode countdown (invert): its "matching" maps are the played maps
+      // whose best FAILS the goal — same inverted predicate as the evaluation
+      const inv = p.kind === "count" && p.descending === true && p.invert === true;
       where.push(mapWhere(p.map, { ruleset: p.ruleset ?? 0, pool: p.pool }));
       where.push(
         `${q.metricMatching === "1" ? "EXISTS" : "NOT EXISTS"} (SELECT 1 FROM scores s
-           WHERE s.id = u.best_lazer_score_id AND ${scoreWhere(p.score)})`
+           WHERE s.id = u.best_lazer_score_id AND ${scoreWhere(p.score, inv)})`
       );
     }
   }

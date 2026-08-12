@@ -592,7 +592,7 @@ export function MetricBuilder({
           {isCount && (
             <label
               className="mb-check"
-              title="The conditions select the maps still to fix: the count heads down to 0, milestones are celebrated downward, and the list button shows those maps"
+              title="The count heads down to 0, milestones are celebrated downward, and the list button shows the maps to fix"
             >
               <input
                 type="checkbox" checked={p.descending ?? false}
@@ -600,6 +600,30 @@ export function MetricBuilder({
               />
               Countdown — maps to fix (goal 0)
             </label>
+          )}
+          {isCount && (p.descending ?? false) && (
+            <div className="mb-invert">
+              <label
+                className="mb-check"
+                title="Ex: to fix = misses >= 1. The score conditions directly describe the maps still to fix."
+              >
+                <input
+                  type="radio" name="mb-cd-mode" checked={!(p.invert ?? false)}
+                  onChange={() => setP((s) => ({ ...s, invert: false }))}
+                />
+                conditions select the maps to fix
+              </label>
+              <label
+                className="mb-check"
+                title="Ex: goal = 0x50, 0 miss, imperfections <= 1. The card counts the PLAYED maps whose best does not meet the goal yet — the exact complement of the goal count, even when no direct 'to fix' bounds can express it."
+              >
+                <input
+                  type="radio" name="mb-cd-mode" checked={p.invert ?? false}
+                  onChange={() => setP((s) => ({ ...s, invert: true }))}
+                />
+                conditions describe the GOAL (counts played maps not meeting it)
+              </label>
+            </div>
           )}
           <label className="mb-check">
             <input
@@ -614,7 +638,9 @@ export function MetricBuilder({
           <div className="mb-preview-count">
             {isCount
               ? p.descending
-                ? "Maps to fix now: "
+                ? p.invert
+                  ? "Maps not meeting the goal yet: "
+                  : "Maps to fix now: "
                 : "Maps matching now: "
               : p.kind === "pp"
                 ? "Weighted pp now: "

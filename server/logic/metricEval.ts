@@ -97,7 +97,12 @@ function baseFrom(p: MetricParams, bestOnly: boolean): string {
     JOIN beatmapsets st ON st.id = b.beatmapset_id
     LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}
     WHERE s.ruleset = ${R}
-      AND ${bestOnly ? "s.id = u.best_lazer_score_id AND " : ""}${mapWhere(p.map, { ruleset: R, pool: p.pool })} AND ${scoreWhere(p.score)}`;
+      AND ${bestOnly ? "s.id = u.best_lazer_score_id AND " : ""}${mapWhere(p.map, { ruleset: R, pool: p.pool })} AND ${scoreWhere(p.score, isInverted(p))}`;
+}
+
+/** Goal-mode countdown: count the played maps whose best fails the conditions. */
+function isInverted(p: MetricParams): boolean {
+  return p.kind === "count" && p.descending === true && p.invert === true;
 }
 
 /**
@@ -160,7 +165,7 @@ function evalCount(p: MetricParams, gran: "month" | "day"): MetricResult {
     .prepare(
       `SELECT s.beatmap_id AS bid, s.ended_at AS at,
          COALESCE(s.classic_total_score, s.total_score) AS v,
-         (${scoreWhere(p.score)}) AS matches
+         (${scoreWhere(p.score, isInverted(p))}) AS matches
        FROM scores s
        JOIN beatmaps b ON b.id = s.beatmap_id
        JOIN beatmapsets st ON st.id = b.beatmapset_id

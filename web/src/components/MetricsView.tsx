@@ -110,7 +110,8 @@ function describeParams(p: Metric["params"]): string {
   if (m.ids?.length) parts.push(`${fmtNum(m.ids.length)}-map pool`);
 
   if (p.kind === "ranked_score") parts.unshift("ranked score");
-  if (p.kind === "count" && p.descending) parts.unshift("to fix");
+  if (p.kind === "count" && p.descending)
+    parts.unshift(p.invert ? "below goal" : "to fix");
   return parts.join(" · ") || "all clears";
 }
 
