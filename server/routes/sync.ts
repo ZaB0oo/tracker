@@ -3,7 +3,7 @@ import { config } from "../config.js";
 import { saveScores } from "../logic/repo.js";
 import type { SoloScore } from "../osu/types.js";
 import { packSeedCounts } from "../logic/rulesets.js";
-import { getActiveRulesets, getDb, getStartedRulesets, setState } from "../db/db.js";
+import { getActiveRulesets, getDb, getStartedRulesets, setState, sqlIn } from "../db/db.js";
 import { isUserConnected } from "../osu/api.js";
 import {
   clearSyncErrors,
@@ -32,7 +32,7 @@ export const syncRouter = Router();
 // Manual country leaderboard sweep (otherwise: auto after login, after each
 // new score, and daily re-check of held #1s)
 syncRouter.post("/sync/country-sweep", (_req, res) => {
-  void runCountrySweep(true); // manual start: overrides the backfill deferral
+  void runCountrySweep(true).catch((e) => console.error("[sync] country sweep:", e)); // manual start: overrides the backfill deferral
   res.json({ ok: true, started: true });
 });
 syncRouter.post("/sync/country-pause", (_req, res) => {
@@ -44,7 +44,7 @@ syncRouter.post("/sync/country-pause", (_req, res) => {
 // the periodic re-checks; pausing disables them (single toggle in the UI).
 syncRouter.post("/sync/global-sweep", (_req, res) => {
   setState("global_tracking", "1");
-  void runGlobalSweep(true);
+  void runGlobalSweep(true).catch((e) => console.error("[sync] global sweep:", e));
   res.json({ ok: true, started: true });
 });
 syncRouter.post("/sync/global-pause", (_req, res) => {
@@ -68,7 +68,7 @@ syncRouter.post("/sync/global-recheck-all", (req, res) => {
     )
     .run().changes;
   setState("global_tracking", "1");
-  void runGlobalSweep(true);
+  void runGlobalSweep(true).catch((e) => console.error("[sync] global sweep:", e));
   res.json({ ok: true, requeued: Number(n) });
 });
 
@@ -125,9 +125,15 @@ syncRouter.post("/sync/refresh-top-pp", async (req, res) => {
     } catch {
       // keep going with the local top only
     }
-    for (const id of ids) n += Number(upd.run(id, R).changes);
+    // post-await DB writes: an async throw here would hang the request
+    // (Express 4 does not catch async handler errors)
+    try {
+      for (const id of ids) n += Number(upd.run(id, R).changes);
+    } catch (e) {
+      return res.status(500).json({ ok: false, error: String(e) });
+    }
   }
-  void resumeBackfill();
+  void resumeBackfill().catch((e) => console.error("[sync] backfill:", e));
   res.json({ ok: true, requeued: n, fromOfficialTop: fromOfficial });
 });
 
@@ -136,17 +142,18 @@ syncRouter.post("/sync/refresh-top-pp", async (req, res) => {
 syncRouter.post("/sync/rebackfill", (req, res) => {
   const db = getDb();
   const rq = req.query.ruleset != null ? Number(req.query.ruleset) : null;
-  const started = (
+  // sqlIn: an empty started list must yield "IN (-1)", not the "IN ()" error
+  const started = sqlIn(
     rq != null && [0, 1, 2, 3].includes(rq) ? [rq] : getStartedRulesets()
-  ).join(",");
-  db.exec(`UPDATE beatmap_user SET fetched_at = NULL WHERE ruleset IN (${started})`);
+  );
+  db.exec(`UPDATE beatmap_user SET fetched_at = NULL WHERE ruleset IN ${started}`);
   // integrated country re-sweep: all played maps go back to the #1 check
   // (also catches "inherited" #1s without replaying)
   db.exec(
-    `UPDATE beatmap_user SET country_checked_at = NULL WHERE ruleset IN (${started}) AND played = 1`
+    `UPDATE beatmap_user SET country_checked_at = NULL WHERE ruleset IN ${started} AND played = 1`
   );
-  void resumeBackfill();
-  if (isUserConnected()) void runCountrySweep();
+  void resumeBackfill().catch((e) => console.error("[sync] backfill:", e));
+  if (isUserConnected()) void runCountrySweep().catch((e) => console.error("[sync] country sweep:", e));
   res.json({
     ok: true,
     note: "Score re-import + country re-sweep started, tracked in the sync bar",
@@ -260,19 +267,25 @@ syncRouter.post("/sync/backfill-resume/:r", (req, res) => {
   if (![0, 1, 2, 3].includes(r))
     return res.status(400).json({ ok: false, error: "ruleset must be 0-3" });
   setState(`backfill_paused_m${r}`, "0");
-  void resumeBackfill();
+  void resumeBackfill().catch((e) => console.error("[sync] backfill:", e));
   res.json({ ok: true });
 });
 
 syncRouter.post("/sync/resume", (_req, res) => {
   for (const r of [0, 1, 2, 3]) setState(`backfill_paused_m${r}`, "0");
-  void resumeBackfill();
+  void resumeBackfill().catch((e) => console.error("[sync] backfill:", e));
   res.json({ ok: true });
 });
 
 syncRouter.post("/sync/poll-now", async (_req, res) => {
   try {
     const n = await pollRecentScores();
+    if (n == null)
+      return res.json({
+        ok: true,
+        newScores: 0,
+        note: "a score check is already running — its result appears in the sync bar",
+      });
     res.json({ ok: true, newScores: n });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e) });
@@ -496,6 +509,10 @@ syncRouter.get("/debug/pp-diff", async (_req, res) => {
 // Diagnostic: which channel sees a set (API / web page / local DB)?
 syncRouter.get("/debug/set/:id", async (req, res) => {
   const id = Number(req.params.id);
+  // NaN would throw at bind time AFTER an await: Express 4 never sees async
+  // throws and the request would hang forever with no response
+  if (!Number.isInteger(id) || id <= 0)
+    return res.status(400).json({ ok: false, error: "invalid set id" });
   const { getBeatmapsetById } = await import("../osu/api.js");
   const { fetchBeatmapsetFromWeb, keptDiffCount } = await import("../sync/catalog.js");
   const db = getDb();

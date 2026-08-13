@@ -5,7 +5,17 @@ import {
   type MetricBreakdown,
   type MetricParams,
 } from "./metrics.js";
+import { parseRulesetParam } from "./rulesets.js";
 import { scoresVersion } from "./scoreSql.js";
+
+/**
+ * Params come from the HTTP body (preview) or from persisted JSON — never
+ * trust them: `ruleset` is interpolated into SQL everywhere below, so a
+ * non-numeric value would be an SQL injection. Coerced to 0-3, always.
+ */
+function sanitized(p: MetricParams): MetricParams {
+  return { ...p, ruleset: parseRulesetParam(p.ruleset) };
+}
 
 export interface MetricResult {
   count: number;
@@ -24,7 +34,7 @@ const BUCKETS: Record<MetricBreakdown, { expr: string; notNull: string }> = {
   sr: { expr: "MIN(CAST(b.star_rating AS INTEGER), 10)", notNull: "b.star_rating" },
   year: { expr: "strftime('%Y', st.ranked_date)", notNull: "st.ranked_date" },
   length: { expr: "MIN(CAST(b.total_length / 60 AS INTEGER), 10)", notNull: "b.total_length" },
-  combo: { expr: "MIN(CAST(b.max_combo / 250 AS INTEGER), 8)", notNull: "b.max_combo" },
+  combo: { expr: "MIN(CAST(b.max_combo / 250 AS INTEGER), 10)", notNull: "b.max_combo" },
   ar: { expr: "MIN(CAST(b.ar AS INTEGER), 10)", notNull: "b.ar" },
   od: { expr: "MIN(CAST(b.od AS INTEGER), 10)", notNull: "b.od" },
   cs: { expr: "MIN(CAST(b.cs AS INTEGER), 10)", notNull: "b.cs" },
@@ -128,7 +138,10 @@ function mapTotal(p: MetricParams): number {
 function countByBucket(p: MetricParams): MetricResult["byBucket"] {
   const db = getDb();
   const base = baseFrom(p, true);
-  const dim = BUCKETS[p.breakdown ?? "sr"] ?? BUCKETS.sr;
+  // hasOwn: "constructor" as breakdown would reach Object.prototype
+  const dim = Object.hasOwn(BUCKETS, p.breakdown ?? "sr")
+    ? BUCKETS[p.breakdown ?? "sr"]
+    : BUCKETS.sr;
   const matched = db
     .prepare(
       `SELECT ${dim.expr} AS bucket, COUNT(DISTINCT s.beatmap_id) AS value
@@ -311,6 +324,7 @@ export function evalMetric(
   p: MetricParams,
   gran: "month" | "day"
 ): MetricResult {
+  p = sanitized(p);
   const version = scoresVersion();
   const key = `${JSON.stringify(p)}|${gran}`;
   const hit = cache.get(key);
@@ -331,6 +345,7 @@ export function previewMetric(p: MetricParams): {
   count: number;
   byBucket: { bucket: number | string; value: number; total: number }[];
 } {
+  p = sanitized(p);
   if (p.kind === "pp") {
     const r = evalPp({ ...p, showEvolution: false }, "month");
     return { count: Math.round(r.count), byBucket: [] };

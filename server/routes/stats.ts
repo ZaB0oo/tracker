@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { getDb } from "../db/db.js";
-import { keysWhere, maniaKeysSql, parseRulesetParam, poolWhere } from "../logic/rulesets.js";
+import { keysWhere, maniaKeysSql, parseRulesetParam, poolWhere, statusIn } from "../logic/rulesets.js";
 import {
   CURVE_STEPS,
   N_OBJ,
@@ -39,12 +39,7 @@ statsRouter.get("/stats", (req, res) => {
   const R = parseRulesetParam(req.query.ruleset);
   const POOL = withKeys(R, req, poolWhere(R, String(req.query.pool ?? "")));
   // scope=ranked: the whole dashboard ignores loved maps
-  const STATUSES =
-    req.query.scope === "ranked"
-      ? "(1, 2)"
-      : req.query.scope === "loved"
-        ? "(4)"
-        : "(1, 2, 4)";
+  const STATUSES = statusIn(String(req.query.scope ?? ""));
 
   const version = scoresVersion();
   const cacheKey = `${R}-${String(req.query.pool ?? "")}-${String(req.query.keys ?? "")}-${String(req.query.scope ?? "")}`;
@@ -95,9 +90,15 @@ statsRouter.get("/stats", (req, res) => {
     SELECT
       COALESCE(SUM(s.total_score), 0) lazer,
       COALESCE(SUM(COALESCE(s.classic_total_score, s.total_score)), 0) classic,
-      COALESCE(SUM(CASE WHEN ${N_OBJ} > 0
+      ${
+        // wither is std-only (its formula uses std object counts): the other
+        // modes showed a non-zero total next to a missing_wither of NULL
+        R === 0
+          ? `COALESCE(SUM(CASE WHEN ${N_OBJ} > 0
         THEN ${witherSql("s.total_score")}
-        ELSE s.total_score END), 0) wither
+        ELSE s.total_score END), 0)`
+          : "0"
+      } wither
     FROM beatmap_user u
     JOIN beatmaps b ON b.id = u.beatmap_id AND u.ruleset = ${R}
     LEFT JOIN scores s ON s.id = u.best_lazer_score_id
@@ -198,15 +199,27 @@ statsRouter.get("/stats", (req, res) => {
       R === 3 ? ",\n    SUM(CASE WHEN om.beatmap_id IS NOT NULL THEN 1 ELSE 0 END) onem" : ""
     }`;
 
+  // Converts bucket by their PER-MODE attributes (like /table and /snapshot):
+  // without this the live "by star rating"/"by max combo" panels and the time
+  // machine at today's date disagreed by construction on non-std tabs.
+  const CA_JOIN =
+    R === 0
+      ? ""
+      : `LEFT JOIN convert_attrs ca ON ca.beatmap_id = b.id AND ca.ruleset = ${R} AND b.ruleset != ${R}`;
+  const SR_EXPR =
+    R === 0 ? "b.star_rating" : "COALESCE(ca.star_rating, b.star_rating)";
+  const COMBO_EXPR =
+    R === 0 ? "b.max_combo" : "COALESCE(ca.max_combo, b.max_combo)";
+
   const bySr = db
     .prepare(
-      `SELECT MIN(CAST(b.star_rating AS INTEGER), 10) sr,
+      `SELECT MIN(CAST(${SR_EXPR} AS INTEGER), 10) sr,
         COUNT(*) total, SUM(CASE WHEN u.played = 1 THEN 1 ELSE 0 END) played,
         SUM(COALESCE(u.country_first, 0)) country,
         SUM(COALESCE(u.any_fc, 0)) fc${GAUGE_COLS}
        FROM beatmaps b LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}
-       ${FLAGS_JOIN}
-       WHERE ${POOL} AND b.status IN ${STATUSES} AND b.star_rating IS NOT NULL
+       ${FLAGS_JOIN} ${CA_JOIN}
+       WHERE ${POOL} AND b.status IN ${STATUSES} AND ${SR_EXPR} IS NOT NULL
        GROUP BY sr ORDER BY sr`
     )
     .all();
@@ -235,7 +248,7 @@ statsRouter.get("/stats", (req, res) => {
           SUM(COALESCE(u.country_first, 0)) country,
           SUM(COALESCE(u.any_fc, 0)) fc${GAUGE_COLS}
          FROM beatmaps b LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}
-         ${FLAGS_JOIN}
+         ${FLAGS_JOIN} ${CA_JOIN}
          WHERE ${POOL} AND b.status IN ${STATUSES} AND ${expr} IS NOT NULL
          GROUP BY bucket ORDER BY bucket`
       )
@@ -263,7 +276,7 @@ statsRouter.get("/stats", (req, res) => {
   // of them behind a single "10+" bucket.
   const byCs = dist(R === 3 ? maniaKeysSql() : "b.cs", R === 3 ? 18 : 10);
   const byLen = dist("b.total_length / 60", 10); // one-minute buckets
-  const byCombo = dist("b.max_combo / 250", 10); // buckets of 250, 2500+
+  const byCombo = dist(`${COMBO_EXPR} / 250`, 10); // buckets of 250, 2500+
 
   const payload = {
     totals, scoreSums: { ...scoreSums, ...missingSums }, grades, fc, globalTops,
@@ -284,12 +297,7 @@ statsRouter.get("/skill-curve", (req, res) => {
   const db = getDb();
   const R = parseRulesetParam(req.query.ruleset);
   const POOL = withKeys(R, req, poolWhere(R, String(req.query.pool ?? "")));
-  const STATUSES =
-    req.query.scope === "ranked"
-      ? "(1, 2)"
-      : req.query.scope === "loved"
-        ? "(4)"
-        : "(1, 2, 4)";
+  const STATUSES = statusIn(String(req.query.scope ?? ""));
   const SRX = R === 0 ? "b.star_rating" : "COALESCE(ca.star_rating, b.star_rating)";
   const caJoin =
     R === 0
@@ -343,12 +351,7 @@ statsRouter.get("/skill-curve", (req, res) => {
  * map) for the heatmap, plus all-time streak stats. Cheap: one GROUP BY.
  */
 statsRouter.get("/daily", (req, res) => {
-  const STATUSES =
-    req.query.scope === "ranked"
-      ? "(1, 2)"
-      : req.query.scope === "loved"
-        ? "(4)"
-        : "(1, 2, 4)";
+  const STATUSES = statusIn(String(req.query.scope ?? ""));
   const R = parseRulesetParam(req.query.ruleset);
   const POOL = withKeys(R, req, poolWhere(R, String(req.query.pool ?? "")));
 
@@ -432,12 +435,7 @@ const timelineCache = new Map<string, { version: string; payload: unknown }>();
 const TIERS = ["D", "C", "B", "A", "S", "SH", "X", "XH"];
 
 statsRouter.get("/timeline", (req, res) => {
-  const STATUSES =
-    req.query.scope === "ranked"
-      ? "(1, 2)"
-      : req.query.scope === "loved"
-        ? "(4)"
-        : "(1, 2, 4)";
+  const STATUSES = statusIn(String(req.query.scope ?? ""));
   const R = parseRulesetParam(req.query.ruleset);
   const pool = String(req.query.pool ?? "");
   const POOL = withKeys(R, req, poolWhere(R, pool));
@@ -742,7 +740,8 @@ function buildSnapshotIndex(
   // record each time the leaderboard best (highest total) changes
   const allScores = db
     .prepare(
-      `SELECT s.beatmap_id AS bid, s.ended_at AS at, s.total_score AS total,
+      `SELECT s.beatmap_id AS bid, s.ended_at AS at,
+              COALESCE(s.classic_total_score, s.total_score) AS total,
               s.rank, s.fc_state AS fcState
        FROM scores s WHERE s.ruleset = ${R} AND s.passed = 1
        ORDER BY s.ended_at`
@@ -769,19 +768,23 @@ statsRouter.get("/snapshot", (req, res) => {
   const day = String(req.query.day ?? "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day))
     return res.status(400).json({ ok: false, error: "day=YYYY-MM-DD required" });
-  const STATUSES =
-    req.query.scope === "ranked"
-      ? "(1, 2)"
-      : req.query.scope === "loved"
-        ? "(4)"
-        : "(1, 2, 4)";
+  const STATUSES = statusIn(String(req.query.scope ?? ""));
   const db = getDb();
   const snapKey = `${R}-${pool}-${String(req.query.keys ?? "")}-${String(req.query.scope ?? "")}`;
   let snapCache = snapCaches.get(snapKey);
+  if (snapCache) {
+    // refresh recency (Map keeps insertion order)
+    snapCaches.delete(snapKey);
+    snapCaches.set(snapKey, snapCache);
+  }
   if (!snapCache || snapCache.version !== scoresVersion()) {
     snapCache = buildSnapshotIndex(db, R, POOL, STATUSES);
     snapCaches.set(snapKey, snapCache);
   }
+  // each entry holds ~180k map objects (tens of MB): LRU-cap instead of
+  // keeping one entry per (ruleset, pool, keys, scope) combination forever
+  while (snapCaches.size > 2)
+    snapCaches.delete(snapCaches.keys().next().value!);
 
   type Agg = {
     total: number; played: number; fc: number; country: number;
@@ -871,6 +874,9 @@ statsRouter.get("/snapshot", (req, res) => {
 statsRouter.get("/overlay", (req, res) => {
   const R = parseRulesetParam(req.query.ruleset);
   const POOL = withKeys(R, req, poolWhere(R, String(req.query.pool ?? "")));
+  // &scope=ranked|loved in the overlay URL: same three-way rule as the
+  // dashboard (this endpoint used to hardcode all statuses)
+  const STATUSES = statusIn(String(req.query.scope ?? ""));
 
   const GRADE_KEYS = ["XH", "X", "SH", "S", "A", "B", "C", "D"] as const;
   const gradeCols = GRADE_KEYS.map(
@@ -891,13 +897,20 @@ statsRouter.get("/overlay", (req, res) => {
         SUM(CASE WHEN u.global_rank <= 50 THEN 1 ELSE 0 END) top50,
         SUM(CASE WHEN u.global_rank <= 100 THEN 1 ELSE 0 END) top100,
         COALESCE(SUM(COALESCE(s.classic_total_score, s.total_score)), 0) ranked_classic,
-        COALESCE(SUM(CASE WHEN ${N_OBJ} > 0
+        ${
+          // wither is a std-only proposal (its formula uses std object
+          // counts): a non-zero total next to a missing of 0 on the other
+          // tabs was a contradiction
+          R === 0
+            ? `COALESCE(SUM(CASE WHEN ${N_OBJ} > 0
           THEN ${witherSql("s.total_score")}
-          ELSE s.total_score END), 0) ranked_wither
+          ELSE s.total_score END), 0)`
+            : "0"
+        } ranked_wither
       FROM beatmaps b
       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}
       LEFT JOIN scores s ON s.id = u.best_lazer_score_id
-      WHERE ${POOL} AND b.status IN (1, 2, 4)`
+      WHERE ${POOL} AND b.status IN ${STATUSES}`
     )
     .get() as Record<string, number | null> & { total_maps: number };
   const grades: Record<string, number> = {};

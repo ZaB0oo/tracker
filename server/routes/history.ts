@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { getDb } from "../db/db.js";
-import { keysWhere, parseRulesetParam, poolWhere } from "../logic/rulesets.js";
+import { keysWhere, parseRulesetParam, poolWhere, statusIn } from "../logic/rulesets.js";
 
 /** pool + mania keys + status scope, shared by the day/history queries */
 function clearsScope(
@@ -12,7 +12,7 @@ function clearsScope(
   return {
     POOL: keys ? `${pool} AND ${keys}` : pool,
     STATUSES:
-      q.scope === "ranked" ? "(1, 2)" : q.scope === "loved" ? "(4)" : "(1, 2, 4)",
+      statusIn(String(q.scope ?? "")),
   };
 }
 
@@ -23,8 +23,9 @@ function paging(q: Record<string, string | undefined>): {
   offset: number;
 } {
   return {
-    limit: Math.min(Number(q.limit ?? 100), 500),
-    offset: Math.max(Number(q.offset ?? 0), 0),
+    // clamped both ends: limit=-1 means "unlimited" in SQLite
+    limit: Math.min(Math.max(Number(q.limit) || 100, 1), 500),
+    offset: Math.max(Number(q.offset) || 0, 0),
   };
 }
 

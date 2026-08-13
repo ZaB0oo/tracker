@@ -294,9 +294,14 @@ export interface PacksResponse {
 }
 export async function fetchPacks(
   ruleset = 0,
-  at?: string | null
+  at?: string | null,
+  pool: PoolMode = "all",
+  keys: string[] = [],
+  scope: DashScope = "all"
 ): Promise<PacksResponse> {
-  const res = await fetch(`/api/packs?ruleset=${ruleset}${at ? `&at=${at}` : ""}`);
+  const res = await fetch(
+    `/api/packs?ruleset=${ruleset}&pool=${pool}${keysQ(keys)}&scope=${scope}${at ? `&at=${at}` : ""}`
+  );
   if (!res.ok) throw new Error(`packs: HTTP ${res.status}`);
   return res.json();
 }
@@ -327,10 +332,13 @@ export interface PackDetail {
 export async function fetchPackDetail(
   tag: string,
   ruleset = 0,
-  at?: string | null
+  at?: string | null,
+  pool: PoolMode = "all",
+  keys: string[] = [],
+  scope: DashScope = "all"
 ): Promise<PackDetail> {
   const res = await fetch(
-    `/api/packs/${encodeURIComponent(tag)}?ruleset=${ruleset}${at ? `&at=${at}` : ""}`
+    `/api/packs/${encodeURIComponent(tag)}?ruleset=${ruleset}&pool=${pool}${keysQ(keys)}&scope=${scope}${at ? `&at=${at}` : ""}`
   );
   if (!res.ok) throw new Error(`pack: HTTP ${res.status}`);
   return res.json();

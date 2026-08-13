@@ -26,7 +26,7 @@ import { parseOsuBeatmapsSql } from "./dumpParse.js";
 async function openDump(
   path: string,
   onHeartbeat?: (msg: string) => void
-): Promise<NodeJS.ReadableStream> {
+): Promise<NodeJS.ReadableStream & { closeAll?: () => void }> {
   const isSql = /\.sql$/i.test(path);
   const isSqlBz2 = /\.sql\.bz2$/i.test(path);
   const isTar = /\.(tar\.bz2|tbz2?)$/i.test(path);
@@ -56,8 +56,29 @@ async function openDump(
   // the data listener switched src to flowing: pause until a consumer
   // (pipe/iteration) attaches, so no chunk is emitted into the void
   src.pause();
-  if (isSql) return src;
-  if (isSqlBz2) return src.pipe(bz2!());
+  // closeAll: the caller MUST call it when it stops consuming — an aborted
+  // scan (bad file, parse error) used to leak the fd and the decompression
+  // pipeline for the process lifetime, once per failed attempt.
+  const withClose = <T extends NodeJS.ReadableStream>(
+    stream: T,
+    ...others: { destroy: (e?: Error) => void }[]
+  ): T & { closeAll: () => void } =>
+    Object.assign(stream, {
+      closeAll: () => {
+        for (const o of [src, ...others]) {
+          try {
+            o.destroy();
+          } catch {
+            /* already closed */
+          }
+        }
+      },
+    });
+  if (isSql) return withClose(src);
+  if (isSqlBz2) {
+    const un = bz2!();
+    return withClose(src.pipe(un) as NodeJS.ReadableStream, un);
+  }
   {
     const extract = tar!.extract();
     const unzip = bz2!();
@@ -66,7 +87,7 @@ async function openDump(
     // and with it the entry stream we still need to read (STREAM_DESTROYED).
     // next() is only called for skipped entries: tar parsing then pauses on
     // the matched one, which keeps flowing as we consume it.
-    return await new Promise<NodeJS.ReadableStream>((resolve, reject) => {
+    return await new Promise<NodeJS.ReadableStream & { closeAll: () => void }>((resolve, reject) => {
       extract.on(
         "entry",
         (
@@ -86,7 +107,7 @@ async function openDump(
             src.on("error", fail);
             unzip.on("error", fail);
             extract.on("error", fail);
-            resolve(stream);
+            resolve(withClose(stream, unzip, extract));
           } else {
             stream.resume(); // skip (the scores tables are the bulk)
             next();
@@ -127,21 +148,27 @@ export async function verifyCatalogFromDump(
     let deleted = 0;
     onProgress?.("scanning the dump…");
     const stream = await openDump(path, onHeartbeat);
-    for await (const d of parseOsuBeatmapsSql(stream)) {
-      scanned++;
-      if (scanned % 200_000 === 0)
-        onHeartbeat(`dump scan: ${scanned} diffs read…`);
-      // deleted from osu! but still marked ranked: no lookup can ever bring it
-      // back, counting it as a hole made every run report the same phantoms
-      if (d.deleted) {
-        deleted++;
-        continue;
+    try {
+      for await (const d of parseOsuBeatmapsSql(stream)) {
+        scanned++;
+        if (scanned % 200_000 === 0)
+          onHeartbeat(`dump scan: ${scanned} diffs read…`);
+        // deleted from osu! but still marked ranked: no lookup can ever bring it
+        // back, counting it as a hole made every run report the same phantoms
+        if (d.deleted) {
+          deleted++;
+          continue;
+        }
+        if (![1, 2, 4].includes(d.approved)) continue;
+        if (!wanted.has(d.playmode)) continue;
+        if (local.has(d.beatmapId)) continue;
+        missing.set(d.beatmapId, { mode: d.playmode, setId: d.setId });
+        sets.add(d.setId);
       }
-      if (![1, 2, 4].includes(d.approved)) continue;
-      if (!wanted.has(d.playmode)) continue;
-      if (local.has(d.beatmapId)) continue;
-      missing.set(d.beatmapId, { mode: d.playmode, setId: d.setId });
-      sets.add(d.setId);
+    } finally {
+      // an aborted scan (parse error, bad file) must not leak the fd and the
+      // bzip2/tar pipeline — the user typically retries with another file
+      stream.closeAll?.();
     }
     // 0 rows = nothing was read (wrong file, empty archive): saying "complete"
     // here would be the exact opposite of the truth

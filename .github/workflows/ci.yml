@@ -1,0 +1,23 @@
+# Typecheck + unit tests on every push and pull request. The release workflow
+# only runs on tags, so nothing used to catch a broken build until release day.
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # typecheck (server + web) then vitest — the `check` script of package.json
+      - run: npm run check
+      # the web build catches what tsc alone does not (asset/import resolution)
+      - run: npm run build

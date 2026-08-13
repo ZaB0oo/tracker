@@ -7,6 +7,22 @@ import { parseRulesetParam, poolWhere } from "../logic/rulesets.js";
 
 const KINDS = ["count", "ranked_score", "pp"] as const;
 
+/**
+ * Parses stored metric params. Guards two things at once: a corrupt row must
+ * not 500 every metrics endpoint (skip it, loudly), and `ruleset` is
+ * interpolated into SQL downstream so it is coerced to 0-3 no matter what the
+ * stored JSON says.
+ */
+function loadParams(row: { id: number; params: string }): MetricParams | null {
+  try {
+    const p = JSON.parse(row.params) as MetricParams;
+    return { ...p, ruleset: parseRulesetParam(p.ruleset) };
+  } catch (e) {
+    console.error(`[metrics] metric ${row.id} has corrupt params, skipped:`, e);
+    return null;
+  }
+}
+
 // mods that change star rating (HD counts since the 2026 reading rework)
 const DIFF_MODS = new Set(["DT", "NC", "HT", "DC", "HR", "EZ", "FL", "HD", "TD"]);
 
@@ -82,9 +98,10 @@ metricsRouter.get("/metrics", (req, res) => {
     .prepare("SELECT id, name, params FROM metrics ORDER BY sort_order, id")
     .all() as { id: number; name: string; params: string }[];
   res.json({
-    metrics: rows.map((r) => {
-      const params = JSON.parse(r.params) as MetricParams;
-      return { id: r.id, name: r.name, params, ...evalMetric(params, gran) };
+    metrics: rows.flatMap((r) => {
+      const params = loadParams(r);
+      if (!params) return [];
+      return [{ id: r.id, name: r.name, params, ...evalMetric(params, gran) }];
     }),
   });
 });
@@ -118,18 +135,19 @@ metricsRouter.get("/overlay-metrics", (req, res) => {
         .get() as { c: number }
     ).c;
   res.json({
-    metrics: rows.map((r) => {
-      const params = JSON.parse(r.params) as MetricParams;
+    metrics: rows.flatMap((r) => {
+      const params = loadParams(r);
+      if (!params) return [];
       const { count, total } = evalMetric(params, "month");
       const whole = catalogTotal(params.ruleset ?? 0, params.pool);
-      return {
+      return [{
         id: r.id,
         name: r.name,
         kind: params.kind,
         ruleset: params.ruleset ?? 0,
         count,
         total: total !== whole ? total : 0,
-      };
+      }];
     }),
   });
 });
@@ -221,7 +239,8 @@ metricsRouter.get("/metrics/:id/pp-top", (req, res) => {
     .prepare("SELECT params FROM metrics WHERE id = ?")
     .get(id) as { params: string } | undefined;
   if (!row) return res.status(404).json({ ok: false, error: "unknown metric" });
-  const p = JSON.parse(row.params) as MetricParams;
+  const p = loadParams({ id, params: row.params });
+  if (!p) return res.status(500).json({ ok: false, error: "corrupt metric params" });
   const bound = isDay
     ? "date(s.ended_at) <= @period"
     : "strftime('%Y-%m', s.ended_at) <= @period";

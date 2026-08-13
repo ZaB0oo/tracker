@@ -176,10 +176,11 @@ function SkillCurvePanel({
               stroke="var(--accent)" strokeWidth="1.2"
             />
           ))}
-          {/* hover by vertical band: the whole column triggers the tooltip */}
+          {/* hover by vertical band, aligned with the REAL slice [sr, sr+0.1)
+              — the point sits on the slice's lower bound */}
           {hover && (
             <rect
-              x={x(hover.sr) - bandW / 2} y={MT}
+              x={x(hover.sr)} y={MT}
               width={bandW} height={plotBot - MT}
               fill="var(--accent)" fillOpacity="0.09"
               pointerEvents="none"
@@ -188,7 +189,7 @@ function SkillCurvePanel({
           {buckets.map((b) => (
             <rect
               key={`h${b.sr}`}
-              x={x(b.sr) - bandW / 2} y={MT}
+              x={x(b.sr)} y={MT}
               width={bandW} height={plotBot - MT}
               fill="transparent"
               onMouseEnter={() => setHover(b)}
@@ -200,7 +201,12 @@ function SkillCurvePanel({
             className="curve-tip"
             style={tipPos(x(hover.sr) / W, y(hover.predicted) / H)}
           >
-            <b>{hover.sr.toFixed(1)}★</b> Prediction: {fmtNum(hover.predicted)}
+            <b>
+              {hover.sr >= 10
+                ? "10★+"
+                : `${hover.sr.toFixed(1)}–${(hover.sr + 0.1).toFixed(1)}★`}
+            </b>{" "}
+            Prediction: {fmtNum(hover.predicted)}
             {hover.inherited ? " (inherited)" : ""}
             <br />
             {fmtNum(hover.played)}/{fmtNum(hover.total)}{" "}
@@ -215,7 +221,8 @@ function SkillCurvePanel({
               </>
             )}
             <br />
-            Cumulative missing (≤ {hover.sr.toFixed(1)}★):
+            Cumulative missing (
+            {hover.sr >= 10 ? "all" : `< ${(hover.sr + 0.1).toFixed(1)}★`}):
             <br />
             - {fmtNum(cumByQ.get(hover.sr)?.classic ?? 0)} Classic Score
             {showWither && (
@@ -868,7 +875,14 @@ export function Dashboard({
           ))}
       </div>
 
-      <PacksPanel ruleset={ruleset} at={tmDay} onViewPack={onViewPack} />
+      <PacksPanel
+        ruleset={ruleset}
+        at={tmDay}
+        pool={pool}
+        keys={keys}
+        scope={scope}
+        onViewPack={onViewPack}
+      />
 
       <SkillCurvePanel ruleset={ruleset} pool={pool} keys={keys} scope={scope} />
     </div>

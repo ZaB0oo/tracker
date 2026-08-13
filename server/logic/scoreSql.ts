@@ -73,9 +73,12 @@ export function missingExprs(
   const curve = `(${skillCurveCase(ruleset)})`;
   const pred =
     mode === "classic" ? classicFromStdRuleset(ruleset, curve) : curve;
+  // classic best: when classic_total_score is NULL, CONVERT the standardised
+  // score instead of using it raw — subtracting a ~1M standardised value from
+  // a ~20M classic prediction inflated the missing by the whole prediction
   const best =
     mode === "classic"
-      ? "COALESCE(s.classic_total_score, s.total_score, 0)"
+      ? `COALESCE(s.classic_total_score, ${classicFromStdRuleset(ruleset, "s.total_score")}, 0)`
       : "COALESCE(s.total_score, 0)";
   return { predExpr: pred, missingSql: `MAX(0, ${pred} - ${best})` };
 }
@@ -96,16 +99,32 @@ function witherMissingSql(): string {
 
 let missingStamp = "";
 
-/** Cache key over the scores table: any insert bumps count and/or max id. */
+// In-memory version of the scores table. The old implementation ran
+// `SELECT COUNT(*), MAX(id), TOTAL(pp) FROM scores` — a full scan of the
+// biggest table — on EVERY call, and nearly every read endpoint calls it
+// (several times per page load, per metric, per slider tick). The write path
+// is a single process, so a counter bumped by every writer (saveScores,
+// score deletes, fc repairs) is exact; the DB triplet is only computed once
+// to seed the value after a restart (it still catches offline edits AND the
+// silent pp recalcs TOTAL(pp) was there for).
+let scoresStamp: string | null = null;
+let scoresBump = 0;
+
 export function scoresVersion(): string {
-  // TOTAL(pp) catches in-place refreshes (osu! silently recalculates pp of
-  // existing scores): count+max id alone would keep serving stale caches.
-  const v = getDb()
-    .prepare(
-      "SELECT COUNT(*) c, COALESCE(MAX(id), 0) m, TOTAL(pp) p FROM scores"
-    )
-    .get() as { c: number; m: number; p: number };
-  return `${v.c}-${v.m}-${v.p.toFixed(3)}`;
+  if (scoresStamp == null) {
+    const v = getDb()
+      .prepare(
+        "SELECT COUNT(*) c, COALESCE(MAX(id), 0) m, TOTAL(pp) p FROM scores"
+      )
+      .get() as { c: number; m: number; p: number };
+    scoresStamp = `${v.c}-${v.m}-${v.p.toFixed(3)}`;
+  }
+  return `${scoresStamp}-${scoresBump}`;
+}
+
+/** Call after ANY write to the scores table (insert, delete, pp/fc update). */
+export function bumpScoresVersion(): void {
+  scoresBump++;
 }
 
 export function ensureMissingFresh(): void {

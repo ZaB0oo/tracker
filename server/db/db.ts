@@ -94,9 +94,42 @@ function applyStagedImport(): void {
     for (const ext of ["", "-wal", "-shm"])
       if (fs.existsSync(config.dbPath + ext))
         fs.copyFileSync(config.dbPath + ext, `${config.dbPath}.bak${ext}`);
-    for (const ext of ["-wal", "-shm"])
-      fs.rmSync(config.dbPath + ext, { force: true });
-    fs.renameSync(staged, config.dbPath);
+    // Order matters: move the LIVE trio aside FIRST — a lock (antivirus,
+    // second instance) then aborts with everything intact. The old sequence
+    // deleted the live WAL before the rename, so a locked .db lost its
+    // uncheckpointed transactions.
+    const old = `${config.dbPath}.old`;
+    // A leftover .old means a previous attempt died between the two renames:
+    // THAT file is the real database — restore it instead of deleting it.
+    if (fs.existsSync(old) && !fs.existsSync(config.dbPath)) {
+      for (const ext of ["", "-wal", "-shm"])
+        if (fs.existsSync(old + ext)) fs.renameSync(old + ext, config.dbPath + ext);
+      console.warn("[db] recovered the database left by an interrupted import");
+    }
+    for (const ext of ["", "-wal", "-shm"]) fs.rmSync(old + ext, { force: true });
+    // sidecars move WITH their database: deleting them before the swap was
+    // the very data loss this reorder is about
+    const moved: string[] = [];
+    for (const ext of ["", "-wal", "-shm"])
+      if (fs.existsSync(config.dbPath + ext)) {
+        fs.renameSync(config.dbPath + ext, old + ext);
+        moved.push(ext);
+      }
+    try {
+      fs.renameSync(staged, config.dbPath);
+      // the new database owns the name now: the old sidecars must not be
+      // reattached to it (their content is preserved in .old* and .bak*)
+      for (const ext of ["-wal", "-shm"]) fs.rmSync(old + ext, { force: true });
+      fs.rmSync(old, { force: true }); // superseded by the .bak trio
+    } catch (e) {
+      // put the previous database (and its WAL) back before reporting
+      try {
+        for (const ext of moved) fs.renameSync(old + ext, config.dbPath + ext);
+      } catch {
+        /* the .bak trio still holds everything */
+      }
+      throw e;
+    }
     console.log(
       `[db] staged import applied (previous database saved as ${path.basename(config.dbPath)}.bak)`
     );
@@ -117,6 +150,10 @@ function applyStagedImport(): void {
         : `[db] your import is kept and will be retried at the next start. Delete ` +
             `${staged} to cancel it.`
     );
+    console.error(
+      `[db] your previous database (with its WAL) was restored in place; a ` +
+        `full backup also exists as ${path.basename(config.dbPath)}.bak*`
+    );
   }
 }
 
@@ -128,9 +165,32 @@ export function getDb(): DatabaseSync {
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA synchronous = NORMAL");
   db.exec("PRAGMA foreign_keys = OFF"); // bulk imports, order is not guaranteed
+  // 64 MB page cache (default is 2 MB for a 250 MB+ database) and in-memory
+  // temp b-trees: the dashboard aggregates group/sort over 150k+ rows.
+  db.exec("PRAGMA cache_size = -65536");
+  db.exec("PRAGMA temp_store = MEMORY");
   const schema = fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8");
   db.exec(schema);
   migrate(db);
+  // Query-planner statistics: the dashboard joins 4-5 tables and SQLite was
+  // choosing join orders blind. Run once per version-ish (cheap: seconds on
+  // this schema), tracked by a state key so it is not repeated on every boot.
+  try {
+    const ANALYZE_KEY = "analyze_v2";
+    const done = (
+      db
+        .prepare("SELECT value FROM sync_state WHERE key = ?")
+        .get(ANALYZE_KEY) as { value: string } | undefined
+    )?.value;
+    if (done !== "1") {
+      db.exec("ANALYZE");
+      db.prepare(
+        "INSERT INTO sync_state (key, value) VALUES (?, '1') ON CONFLICT(key) DO UPDATE SET value = '1'"
+      ).run(ANALYZE_KEY);
+    }
+  } catch (e) {
+    console.error("[db] ANALYZE skipped:", e);
+  }
   return db;
 }
 

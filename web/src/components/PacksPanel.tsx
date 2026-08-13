@@ -4,9 +4,11 @@ import {
   fetchPackDetail,
   fetchPacks,
   postPacksImport,
+  type DashScope,
   type PackMapRow,
   type PackRow,
 } from "../api";
+import type { PoolMode } from "../types";
 import { mapUrl } from "../rulesets";
 import { ctxMenuStyle } from "../ctxmenu";
 import { fmtDate, fmtNum } from "../format";
@@ -43,18 +45,24 @@ function PackModal({
   tag,
   ruleset,
   at,
+  pool,
+  keys,
+  scope,
   onViewPack,
   onClose,
 }: {
   tag: string;
   ruleset: number;
   at?: string | null;
+  pool: PoolMode;
+  keys: string[];
+  scope: DashScope;
   onViewPack?: (tag: string) => void;
   onClose: () => void;
 }) {
   const { data } = useQuery({
-    queryKey: ["pack", tag, ruleset, at ?? null],
-    queryFn: () => fetchPackDetail(tag, ruleset, at),
+    queryKey: ["pack", tag, ruleset, at ?? null, pool, keys, scope],
+    queryFn: () => fetchPackDetail(tag, ruleset, at, pool, keys, scope),
   });
   const [missingOnly, setMissingOnly] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("map");
@@ -274,10 +282,17 @@ function PackModal({
 export function PacksPanel({
   ruleset = 0,
   at = null,
+  pool = "all",
+  keys = [],
+  scope = "all",
   onViewPack,
 }: {
   ruleset?: number;
   at?: string | null;
+  /** same map pool / keys / status scope as the rest of the dashboard */
+  pool?: PoolMode;
+  keys?: string[];
+  scope?: DashScope;
   onViewPack?: (tag: string) => void;
 }) {
   // The time-machine slider changes `at` on every tick and the ?at= query is
@@ -289,8 +304,8 @@ export function PacksPanel({
     return () => clearTimeout(t);
   }, [at, atDeb]);
   const { data, refetch } = useQuery({
-    queryKey: ["packs", ruleset, atDeb],
-    queryFn: () => fetchPacks(ruleset, atDeb),
+    queryKey: ["packs", ruleset, atDeb, pool, keys, scope],
+    queryFn: () => fetchPacks(ruleset, atDeb, pool, keys, scope),
     refetchInterval: atDeb ? false : 60_000,
     placeholderData: (prev) => prev, // keep the grid during slider moves
   });
@@ -432,6 +447,9 @@ export function PacksPanel({
           tag={openTag}
           ruleset={ruleset}
           at={atDeb}
+          pool={pool}
+          keys={keys}
+          scope={scope}
           onViewPack={onViewPack}
           onClose={() => setOpenTag(null)}
         />

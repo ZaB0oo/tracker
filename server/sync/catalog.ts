@@ -652,8 +652,11 @@ async function enrichMaxComboInner(
   shouldStop?: () => boolean
 ): Promise<number> {
   const db = getDb();
+  // star_rating: COALESCE — the "id not returned" branch below used to WIPE
+  // the SR of existing maps (they dropped out of every star bucket)
   const update = db.prepare(
-    `UPDATE beatmaps SET max_combo = @max_combo, star_rating = @sr,
+    `UPDATE beatmaps SET max_combo = @max_combo,
+       star_rating = COALESCE(@sr, star_rating),
        count_circles = COALESCE(@cc, count_circles),
        count_sliders = COALESCE(@cs, count_sliders),
        count_spinners = COALESCE(@csp, count_spinners),

@@ -107,8 +107,10 @@ function buildFilters(
       params[`mod${i}`] = `%"${m.toUpperCase()}"%`;
     }
   }
-  // mania 1M club: at least one perfect 1,000,000 play on the map
-  if (q.oneMillion === "1")
+  // mania 1M club: at least one perfect 1,000,000 play on the map.
+  // Mania-only concept: on another tab the filter is ignored instead of
+  // silently emptying the table with a ruleset-3 EXISTS.
+  if (q.oneMillion === "1" && ruleset === 3)
     where.push(`EXISTS (SELECT 1 FROM scores s2 WHERE s2.beatmap_id = b.id
       AND s2.ruleset = 3 AND s2.passed = 1
       AND COALESCE(json_extract(s2.raw,'$.total_score_without_mods'), s2.total_score) = 1000000)`);
@@ -127,8 +129,15 @@ function buildFilters(
     const row = db
       .prepare("SELECT params FROM metrics WHERE id = ?")
       .get(Number(q.metricMissing)) as { params: string } | undefined;
-    if (row) {
-      const p = JSON.parse(row.params) as MetricParams;
+    let p: MetricParams | null = null;
+    try {
+      if (row) p = JSON.parse(row.params) as MetricParams;
+    } catch {
+      p = null; // corrupt metric params: ignore the filter
+    }
+    if (p) {
+      // interpolated into SQL below: coerce whatever the stored JSON says
+      p = { ...p, ruleset: parseRulesetParam(p.ruleset) };
       // goal-mode countdown (invert): its "matching" maps are the played maps
       // whose best FAILS the goal — same inverted predicate as the evaluation
       const inv = p.kind === "count" && p.descending === true && p.invert === true;
@@ -293,8 +302,10 @@ tableRouter.get("/table", (req, res) => {
   }
   if (sortParts.length === 0) sortParts.push("missing_value DESC");
 
-  const limit = Math.min(Number(q.limit ?? 100), 500);
-  const offset = Math.max(Number(q.offset ?? 0), 0);
+  // clamp BOTH ends: limit=-1 is "unlimited" in SQLite (150k-row responses),
+  // and NaN would throw at bind time
+  const limit = Math.min(Math.max(Number(q.limit) || 100, 1), 500);
+  const offset = Math.max(Number(q.offset) || 0, 0);
 
   const baseSql = `
     FROM beatmaps b
@@ -346,17 +357,23 @@ tableRouter.get("/table", (req, res) => {
 // Detailed view of a map: metadata + ALL my scores + country events.
 tableRouter.get("/map/:id", (req, res) => {
   const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0)
+    return res.status(400).json({ error: "invalid map id" });
   const db = getDb();
   const R = parseRulesetParam(req.query.ruleset);
+  // convert-aware SR/combo, like the row the user clicked in /table
   const map = db
     .prepare(
       `SELECT b.id, b.beatmapset_id, b.version, b.status, b.total_length, b.bpm,
          ${R === 3 ? maniaKeysSql() : "b.cs"} AS cs,
-         b.ar, b.od, b.hp, b.star_rating, b.max_combo,
+         b.ar, b.od, b.hp,
+         COALESCE(ca.star_rating, b.star_rating) AS star_rating,
+         COALESCE(ca.max_combo, b.max_combo) AS max_combo,
          b.count_circles, b.count_sliders, b.count_spinners,
          st.artist, st.title, st.creator, st.ranked_date,
          st.download_disabled AS dmca
        FROM beatmaps b JOIN beatmapsets st ON st.id = b.beatmapset_id
+       LEFT JOIN convert_attrs ca ON ca.beatmap_id = b.id AND ca.ruleset = ${R} AND b.ruleset != ${R}
        WHERE b.id = ?`
     )
     .get(id);
@@ -486,12 +503,18 @@ export async function buildCollectionDb(
  * import endpoint below, or any external collection tool).
  */
 tableRouter.get("/export-collection", async (req, res) => {
-  const built = await buildCollectionDb(req.query as Record<string, string | undefined>);
-  if ("error" in built)
-    return res.status(built.status).json({ ok: false, error: built.error });
+  // async handler: Express 4 does not catch async throws — without this the
+  // request would hang forever instead of answering 500
+  try {
+    const built = await buildCollectionDb(req.query as Record<string, string | undefined>);
+    if ("error" in built)
+      return res.status(built.status).json({ ok: false, error: built.error });
 
-  const safe = built.name.replace(/[^\w\- ]+/g, "_");
-  res.setHeader("Content-Type", "application/octet-stream");
-  res.setHeader("Content-Disposition", `attachment; filename="${safe}.db"`);
-  res.send(built.buffer);
+    const safe = built.name.replace(/[^\w\- ]+/g, "_");
+    res.setHeader("Content-Type", "application/octet-stream");
+    res.setHeader("Content-Disposition", `attachment; filename="${safe}.db"`);
+    res.send(built.buffer);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e) });
+  }
 });

@@ -7,7 +7,7 @@
 import { Router } from "express";
 import { config } from "../config.js";
 import { getDb } from "../db/db.js";
-import { parseRulesetParam } from "../logic/rulesets.js";
+import { keysWhere, parseRulesetParam, poolWhere, statusIn } from "../logic/rulesets.js";
 import { scoresVersion } from "../logic/scoreSql.js";
 import { runPacksImport } from "../sync/daemon.js";
 
@@ -15,10 +15,20 @@ export const packsRouter = Router();
 
 const cache = new Map<string, { version: string; at: number; payload: unknown }>();
 const TTL_MS = 60_000;
+const CACHE_MAX = 32; // ?at= has one key per slider date: LRU-cap, don't grow forever
 
 /** packs visible on this tab: native series + mode-agnostic (std-set) packs */
 function packWhere(R: number): string {
   return R === 0 ? "(p.ruleset = 0 OR p.ruleset IS NULL)" : `(p.ruleset = ${R} OR p.ruleset IS NULL)`;
+}
+
+/** Map-side conditions: same pool / mania keys / scope rules as the dashboard
+ * around the panel (this used to hardcode the "all" pool and every status). */
+function mapScope(req: { query: Record<string, unknown> }, R: number): string {
+  const pool = poolWhere(R, String(req.query.pool ?? ""));
+  const keys = keysWhere(R, typeof req.query.keys === "string" ? req.query.keys : undefined);
+  const statuses = statusIn(String(req.query.scope ?? ""));
+  return `${pool}${keys ? ` AND ${keys}` : ""} AND b.status IN ${statuses}`;
 }
 
 /** Time-machine day (YYYY-MM-DD), or null for the live state. */
@@ -37,7 +47,8 @@ packsRouter.get("/packs", (req, res) => {
     return res.json({ synced: 0, pending: 0, categories: [] });
 
   const version = scoresVersion();
-  const key = `packs-${R}-${at ?? "now"}`;
+  const MAPS = mapScope(req, R);
+  const key = `packs-${R}-${at ?? "now"}-${MAPS}`;
   const hit = cache.get(key);
   if (hit && hit.version === version && Date.now() - hit.at < TTL_MS)
     return res.json(hit.payload);
@@ -62,8 +73,7 @@ packsRouter.get("/packs", (req, res) => {
         ${playedCol}
        FROM packs p
        JOIN pack_sets ps ON ps.tag = p.tag
-       JOIN beatmaps b ON b.beatmapset_id = ps.beatmapset_id
-         AND (b.ruleset = ${R} OR b.ruleset = 0) AND b.status IN (1, 2, 4)
+       JOIN beatmaps b ON b.beatmapset_id = ps.beatmapset_id AND ${MAPS}
        LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}
        WHERE ${packWhere(R)} AND p.synced_at IS NOT NULL
        GROUP BY p.tag
@@ -92,6 +102,7 @@ packsRouter.get("/packs", (req, res) => {
     categories: [...byType.entries()].map(([type, packs]) => ({ type, packs })),
   };
   cache.set(key, { version, at: Date.now(), payload });
+  while (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value!);
   res.json(payload);
 });
 
@@ -127,8 +138,7 @@ packsRouter.get("/packs/:tag", (req, res) => {
         ${playedCol},
         s.rank AS grade, s.fc_state, s.accuracy
        FROM pack_sets ps
-       JOIN beatmaps b ON b.beatmapset_id = ps.beatmapset_id
-         AND (b.ruleset = ${R} OR b.ruleset = 0) AND b.status IN (1, 2, 4)
+       JOIN beatmaps b ON b.beatmapset_id = ps.beatmapset_id AND ${mapScope(req, R)}
        JOIN beatmapsets st ON st.id = b.beatmapset_id
        LEFT JOIN convert_attrs ca ON ca.beatmap_id = b.id AND ca.ruleset = ${R} AND b.ruleset != ${R}
        LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}

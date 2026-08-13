@@ -174,3 +174,26 @@ CREATE TABLE IF NOT EXISTS pack_sets (
 );
 CREATE INDEX IF NOT EXISTS idx_pack_sets_set ON pack_sets (beatmapset_id);
 CREATE INDEX IF NOT EXISTS idx_beatmaps_set ON beatmaps (beatmapset_id);
+
+-- Read paths that were full scans of the biggest table / of beatmap_user.
+-- scores(ruleset, passed, ended_at): the timeline, the daily heatmap, the
+-- snapshot index and every metric replay read "my passed scores of a mode in
+-- chronological order" — ruleset was not indexed at all.
+CREATE INDEX IF NOT EXISTS idx_scores_mode_time
+  ON scores (ruleset, passed, ended_at);
+-- The sweep queues and their progress counters (polled every few seconds).
+CREATE INDEX IF NOT EXISTS idx_bu_country_check
+  ON beatmap_user (ruleset, country_checked_at);
+CREATE INDEX IF NOT EXISTS idx_bu_global_check
+  ON beatmap_user (ruleset, global_checked_at);
+-- Default sort of the Maps table (realistic missing, descending).
+CREATE INDEX IF NOT EXISTS idx_bu_missing
+  ON beatmap_user (ruleset, missing_lazer);
+-- Per-map history lookups (map details modal, country/global checks).
+CREATE INDEX IF NOT EXISTS idx_country_events_map
+  ON country_events (beatmap_id, ruleset);
+CREATE INDEX IF NOT EXISTS idx_global_events_map
+  ON global_events (beatmap_id, ruleset);
+-- Catalog growth by year (timeline) and the "by rank year" distribution.
+CREATE INDEX IF NOT EXISTS idx_sets_ranked_date
+  ON beatmapsets (ranked_date);

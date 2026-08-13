@@ -60,6 +60,9 @@ lazerRouter.post("/lazer-import", async (req, res) => {
         "LazerCollectionImporter path is not set (or the file does not exist) — Settings → Integrations",
     });
 
+  // Express 4 does not catch async throws: without this outer try, a failure
+  // in buildCollectionDb/mkdtemp (or the finally's rm) hung the request.
+  try {
   const built = await buildCollectionDb(req.query as Record<string, string | undefined>);
   if ("error" in built)
     return res.status(built.status).json({ ok: false, error: built.error });
@@ -112,5 +115,11 @@ lazerRouter.post("/lazer-import", async (req, res) => {
     });
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
+  }
+  } catch (e) {
+    // the response may already be sent (a temp-dir cleanup failure in the
+    // finally above lands here AFTER the success json)
+    if (!res.headersSent) res.status(500).json({ ok: false, error: String(e) });
+    else console.error("[lazer-import] after responding:", e);
   }
 });

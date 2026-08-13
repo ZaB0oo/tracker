@@ -12,9 +12,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Node kills the process on any unhandled promise rejection: one failing
 // background task (backfill resume, sweep kick-off, …) must not take the
-// whole tracker down with it. Log and keep serving.
+// whole tracker down with it. Log and keep serving. Same for synchronous
+// throws in timer callbacks (a transient SQLITE_BUSY in the poll tick used to
+// kill the server, and the desktop app quit with it).
 process.on("unhandledRejection", (e) => {
   console.error("[server] unhandled rejection:", e);
+});
+process.on("uncaughtException", (e) => {
+  console.error("[server] uncaught exception:", e);
 });
 
 const app = express();
@@ -36,11 +41,17 @@ getDb();
 
 // Startup repair: drop stored scores osu! does not honor (played while the
 // map had no leaderboard) and recompute the affected bests. No-op when clean.
-import { cleanupPreLeaderboardScores } from "./logic/repo.js";
+import { cleanupPreLeaderboardScores, repairZeroComboFc } from "./logic/repo.js";
 const cleaned = cleanupPreLeaderboardScores();
 if (cleaned.deleted > 0)
   console.log(
     `[db] cleanup: ${cleaned.deleted} pre-leaderboard score(s) removed on ${cleaned.maps} map(s)`
+  );
+// Startup repair: phantom perfect FCs minted by the max_combo = 0 sentinel.
+const fcFix = repairZeroComboFc();
+if (fcFix.scores > 0)
+  console.log(
+    `[db] repair: fc_state of ${fcFix.scores} score(s) on ${fcFix.maps} map(s) without a combo reference recomputed`
   );
 
 // OAuth settings saved from the UI (take priority over .env)
@@ -52,7 +63,11 @@ applyOAuthOverrides({
   userId: Number(getState("oauth_user_id")) || null,
 });
 
-const server = app.listen(config.port, () => {
+// Loopback by default: the API has no authentication, and exposing it to the
+// LAN exposes the whole database (and CSRF-able maintenance actions). Set
+// HOST=0.0.0.0 explicitly to serve other devices (e.g. OBS on another PC).
+const HOST = process.env.HOST ?? "127.0.0.1";
+const server = app.listen(config.port, HOST, () => {
   console.log(`[server] http://localhost:${config.port}`);
   if (config.hasCredentials) {
     console.log(

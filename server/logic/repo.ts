@@ -1,6 +1,8 @@
 import { getDb, transaction } from "../db/db.js";
 import type { SoloScore } from "../osu/types.js";
+import { classicFromStandardised } from "./rulesets.js";
 import { computeFcState } from "./score.js";
+import { bumpScoresVersion } from "./scoreSql.js";
 
 /**
  * Insert/update a beatmap's scores and refresh the bests + played state.
@@ -24,7 +26,9 @@ export function saveScores(
   const nativeRow = db
     .prepare("SELECT ruleset, max_combo FROM beatmaps WHERE id = ?")
     .get(beatmapId) as { ruleset: number; max_combo: number | null } | undefined;
-  let maxCombo = nativeRow?.max_combo ?? null;
+  // `|| null`: 0 is the enrichment's "API returned nothing" sentinel — as an
+  // FC reference it made EVERY score a perfect FC (combo >= 0)
+  let maxCombo = nativeRow?.max_combo || null;
   if (nativeRow && nativeRow.ruleset !== ruleset) {
     maxCombo =
       (
@@ -33,7 +37,7 @@ export function saveScores(
             "SELECT max_combo FROM convert_attrs WHERE beatmap_id = ? AND ruleset = ?"
           )
           .get(beatmapId, ruleset) as { max_combo: number | null } | undefined
-      )?.max_combo ?? null;
+      )?.max_combo || null;
   }
 
   const upsertScore = db.prepare(`
@@ -100,6 +104,7 @@ export function saveScores(
       ).run(beatmapId, ruleset);
   });
 
+  bumpScoresVersion();
   const after = db
     .prepare(
       "SELECT best_lazer_score_id FROM beatmap_user WHERE beatmap_id = ? AND ruleset = ?"
@@ -134,11 +139,37 @@ export function refreshBest(
   }[];
 
   // The score that "counts" for a map = the one with the highest CLASSIC
-  // (the tracker's main metric), even if its grade is worse.
+  // (the tracker's main metric), even if its grade is worse. Rows without a
+  // stored classic are CONVERTED before comparing: mixing a ~1M standardised
+  // value with ~20M classic ones let the wrong score win either way.
+  let n = 0;
+  if (ruleset !== 3 && rows.some((r) => r.classic_total_score == null)) {
+    const m = db
+      .prepare(
+        `SELECT max_combo,
+           (COALESCE(count_circles,0) + COALESCE(count_sliders,0) + COALESCE(count_spinners,0)) AS n
+         FROM beatmaps WHERE id = ?`
+      )
+      .get(beatmapId) as { max_combo: number | null; n: number } | undefined;
+    const caCombo =
+      ruleset !== 0
+        ? (
+            db
+              .prepare(
+                "SELECT max_combo FROM convert_attrs WHERE beatmap_id = ? AND ruleset = ?"
+              )
+              .get(beatmapId, ruleset) as { max_combo: number | null } | undefined
+          )?.max_combo
+        : null;
+    // std: object count; taiko/catch: basic count ≈ (per-mode) max combo
+    n = ruleset === 0 ? m?.n || 0 : caCombo || m?.max_combo || m?.n || 0;
+  }
   let bestLazer: number | null = null;
   let bestLazerVal = -1;
   for (const r of rows) {
-    const v = r.classic_total_score ?? r.total_score;
+    const v =
+      r.classic_total_score ??
+      classicFromStandardised(ruleset, r.total_score, n);
     if (v > bestLazerVal) {
       bestLazerVal = v;
       bestLazer = r.id;
@@ -199,7 +230,135 @@ export function cleanupPreLeaderboardScores(): { deleted: number; maps: number }
     );
     for (const r of ids) refreshBest(r.id, false, r.ruleset);
   });
+  if (deleted > 0) bumpScoresVersion();
   return { deleted, maps: ids.length };
+}
+
+/**
+ * Re-evaluates the fc_state of a map's scores for one ruleset — call when the
+ * FC reference arrives AFTER the scores were stored (convert_attrs filled in
+ * the background): fc_state is frozen at insert time, so a convert backfilled
+ * before its per-mode max_combo could never resolve to PERFECT by combo.
+ */
+export function recomputeFcForMap(beatmapId: number, ruleset: number): void {
+  const db = getDb();
+  const nativeRow = db
+    .prepare("SELECT ruleset, max_combo FROM beatmaps WHERE id = ?")
+    .get(beatmapId) as { ruleset: number; max_combo: number | null } | undefined;
+  let maxCombo = nativeRow?.max_combo || null;
+  if (nativeRow && nativeRow.ruleset !== ruleset)
+    maxCombo =
+      (
+        db
+          .prepare(
+            "SELECT max_combo FROM convert_attrs WHERE beatmap_id = ? AND ruleset = ?"
+          )
+          .get(beatmapId, ruleset) as { max_combo: number | null } | undefined
+      )?.max_combo || null;
+  const rows = db
+    .prepare(
+      `SELECT id, fc_state, is_perfect_combo, legacy_perfect, legacy_score_id,
+              max_combo, statistics
+       FROM scores WHERE beatmap_id = ? AND ruleset = ?`
+    )
+    .all(beatmapId, ruleset) as {
+    id: number; fc_state: number; is_perfect_combo: number;
+    legacy_perfect: number | null; legacy_score_id: number | null;
+    max_combo: number; statistics: string;
+  }[];
+  if (rows.length === 0) return;
+  const upd = db.prepare("UPDATE scores SET fc_state = ? WHERE id = ?");
+  let changed = 0;
+  for (const r of rows) {
+    let stats: Record<string, number> = {};
+    try {
+      stats = JSON.parse(r.statistics) as Record<string, number>;
+    } catch {
+      /* fall back to the flags */
+    }
+    const fc = computeFcState(
+      {
+        is_perfect_combo: r.is_perfect_combo === 1,
+        legacy_perfect: r.legacy_perfect == null ? null : r.legacy_perfect === 1,
+        legacy_score_id: r.legacy_score_id,
+        max_combo: r.max_combo,
+        statistics: stats,
+      },
+      maxCombo,
+      ruleset
+    );
+    if (fc !== r.fc_state) {
+      upd.run(fc, r.id);
+      changed++;
+    }
+  }
+  if (changed > 0) {
+    refreshBest(beatmapId, false, ruleset);
+    bumpScoresVersion();
+  }
+}
+
+/**
+ * Startup repair: maps stamped max_combo = 0 (the enrichment's "API returned
+ * nothing" sentinel) made every score on them a PERFECT FC at insert time
+ * (score.combo >= 0 is always true). Recompute those scores' fc_state with no
+ * combo reference — the statistics-based rules still apply — then refresh the
+ * affected bests/any_fc. Idempotent, no-op when nothing is wrong.
+ */
+export function repairZeroComboFc(): { scores: number; maps: number } {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT s.id, s.beatmap_id, s.ruleset, s.fc_state, s.is_perfect_combo,
+              s.legacy_perfect, s.legacy_score_id, s.max_combo, s.statistics
+       FROM scores s JOIN beatmaps b ON b.id = s.beatmap_id
+       LEFT JOIN convert_attrs ca
+         ON ca.beatmap_id = s.beatmap_id AND ca.ruleset = s.ruleset
+       -- native maps AND converts: the sentinel exists on both sides
+       WHERE (b.ruleset = s.ruleset AND b.max_combo = 0)
+          OR (b.ruleset != s.ruleset AND ca.max_combo = 0)`
+    )
+    .all() as {
+    id: number; beatmap_id: number; ruleset: number; fc_state: number;
+    is_perfect_combo: number; legacy_perfect: number | null;
+    legacy_score_id: number | null; max_combo: number; statistics: string;
+  }[];
+  if (rows.length === 0) return { scores: 0, maps: 0 };
+  const upd = db.prepare("UPDATE scores SET fc_state = ? WHERE id = ?");
+  const touched = new Set<string>();
+  let changed = 0;
+  transaction(() => {
+    for (const r of rows) {
+      let stats: Record<string, number> = {};
+      try {
+        stats = JSON.parse(r.statistics) as Record<string, number>;
+      } catch {
+        /* no statistics: the state below falls back to the flags */
+      }
+      const fc = computeFcState(
+        {
+          is_perfect_combo: r.is_perfect_combo === 1,
+          legacy_perfect: r.legacy_perfect == null ? null : r.legacy_perfect === 1,
+          legacy_score_id: r.legacy_score_id,
+          max_combo: r.max_combo,
+          statistics: stats,
+        },
+        null, // no reliable combo reference for these maps
+        r.ruleset
+      );
+      if (fc !== r.fc_state) {
+        upd.run(fc, r.id);
+        changed++;
+        touched.add(`${r.beatmap_id}|${r.ruleset}`);
+      }
+    }
+    for (const key of touched) {
+      const [bid, rs] = key.split("|").map(Number);
+      refreshBest(bid, false, rs);
+    }
+  });
+  if (changed > 0) bumpScoresVersion();
+  return { scores: changed, maps: touched.size };
 }
 
 /** Mark a map as fetched with no score (never played). */

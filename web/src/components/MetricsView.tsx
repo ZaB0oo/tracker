@@ -44,7 +44,9 @@ function bucketLabel(dim: MetricBreakdown, bucket: number | string): string {
     case "length":
       return n >= 10 ? "10 min+" : `${n}–${n + 1} min`;
     case "combo":
-      return n >= 8 ? "2000+" : `${n * 250}–${(n + 1) * 250}`;
+      // cap aligned with the server buckets (metricEval BUCKETS.combo) and
+      // with the dashboard: 10 = 2500+
+      return n >= 10 ? "2500+" : `${n * 250}–${(n + 1) * 250}`;
     default:
       return n >= 10 ? "10" : `${n}–${n + 1}`;
   }

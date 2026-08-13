@@ -161,6 +161,14 @@ export type PoolMode = "all" | "specific" | "converts";
  * - "converts": the converts only.
  * osu!std has no converts, so its pool is always its own maps.
  */
+/**
+ * Status list for the dashboard scope (All / Ranked / Loved) — the single
+ * definition of what each scope counts. Use as `b.status IN ${statusIn(scope)}`.
+ */
+export function statusIn(scope: string | undefined): string {
+  return scope === "ranked" ? "(1, 2)" : scope === "loved" ? "(4)" : "(1, 2, 4)";
+}
+
 export function poolWhere(ruleset: number, pool: string | undefined): string {
   if (ruleset === 0) return "b.ruleset = 0";
   if (pool === "specific") return `b.ruleset = ${ruleset}`;
