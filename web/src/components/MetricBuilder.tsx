@@ -12,6 +12,7 @@ import {
 } from "../api";
 import { displayGrade, fmtNum } from "../format";
 import { RULESET_HIT_FIELDS, RULESET_MOD_GROUPS, RULESET_NAMES, rulesetStatFields } from "../rulesets";
+import { useEscape } from "../useEscape";
 // count fields: [label, path in score.counts]
 const COUNT_FIELDS: { key: keyof MetricParams["score"]["counts"]; label: string }[] = [
   { key: "n100", label: "100s" },
@@ -180,6 +181,7 @@ export function MetricBuilder({
   /** ruleset the metric is created in (edit keeps the metric's own) */
   ruleset?: number;
 }) {
+  useEscape(onClose); // Esc closes the top-most modal
   const [name, setName] = useState(edit?.name ?? "");
   // deep-merge with defaults so older metrics (missing new fields) still work
   const [p, setP] = useState<MetricParams>(

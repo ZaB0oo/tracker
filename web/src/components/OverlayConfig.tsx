@@ -4,6 +4,7 @@ import { fetchMetrics } from "../api";
 import type { PoolMode } from "../types";
 import { KeysChips } from "./KeysChips";
 import { PoolSeg } from "./PoolSeg";
+import { useEscape } from "../useEscape";
 
 // Per-section items: hidden entries are encoded as "section.item" in ?hide=
 // (a bare "section" hides the whole row).
@@ -63,6 +64,7 @@ export function OverlayConfig({
   pool?: PoolMode;
   keys?: string[];
 }) {
+  useEscape(onClose); // Esc closes the top-most modal
   const [pool, setPool] = useState<PoolMode>(initialPool);
   const [keys, setKeys] = useState<string[]>(initialKeys);
   const [hidden, setHidden] = useState<Set<string>>(new Set());

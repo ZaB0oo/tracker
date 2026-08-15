@@ -6,6 +6,7 @@ import { GradeBadge } from "./GradeBadge";
 import { MedalIcon } from "./Icons";
 import { displayGrade, fmtDate, fmtDateTime, fmtNum } from "../format";
 import { FC_LABELS, STATUS_LABELS } from "../types";
+import { useEscape } from "../useEscape";
 
 const mmss = (s: number | null) =>
   s == null ? "—" : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -29,6 +30,7 @@ export function MapModal({
   onClose: () => void;
   ruleset?: number;
 }) {
+  useEscape(onClose); // Esc closes the top-most modal
   const country = useCountryCode();
   const stats = rulesetStatFields(ruleset);
   const { data } = useQuery({

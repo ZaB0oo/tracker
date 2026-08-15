@@ -95,15 +95,33 @@ export function StreamOverlay() {
       .filter(Boolean)
   );
 
-  /** total + green session gain, one counter per stat */
+  /**
+   * Session delta of a counter. Negative values are real and were hidden
+   * before: a grade tier LOSES one when a S becomes a SS, a countdown metric
+   * goes DOWN as you fix maps, and a #1 can be sniped mid-stream. `goodDown`
+   * flips the coloring for counters where going down is the progress.
+   */
+  const gainTag = (gain: number, fmt = fmtNum, goodDown = false) => {
+    if (gain === 0) return null;
+    const good = goodDown ? gain < 0 : gain > 0;
+    return (
+      <span className={good ? "ov-gain" : "ov-loss"}>
+        {" "}
+        {gain > 0 ? "+" : "-"}
+        {fmt(Math.abs(gain))}
+      </span>
+    );
+  };
+  /** total + signed session delta, one counter per stat */
   const stat = (label: string, total: string, gain: number) => (
     <span>
       {label} <b>{total}</b>
-      {gain > 0 && <span className="ov-gain"> +{fmtNum(gain)}</span>}
+      {gainTag(gain)}
     </span>
   );
   const TIERS = [
-    ["#1", "top1"],
+    // "Top 1", not "#1": on stream the bare #1 read like the country #1
+    ["Top 1", "top1"],
     ["Top 8", "top8"],
     ["Top 15", "top15"],
     ["Top 25", "top25"],
@@ -126,16 +144,14 @@ export function StreamOverlay() {
             <span>
               Clears <b>{fmtNum(data.clears)}</b>
               <span className="ov-dim"> / {fmtNum(data.totalMaps)} ({completion.toFixed(2)}%)</span>
-              {delta(data.clears, b.clears) > 0 && (
-                <span className="ov-gain"> +{fmtNum(delta(data.clears, b.clears))}</span>
-              )}
+              {gainTag(delta(data.clears, b.clears))}
             </span>
           )}
           {!hide.has("fc") && stat("FC", fmtNum(data.fc), delta(data.fc, b.fc))}
           {!hide.has("ranked") && (
             <span>
               Score <b>{fmtNum(data.rankedClassic)}</b>
-              {rankedGain > 0 && <span className="ov-gain"> +{fmtNum(rankedGain)}</span>}
+              {gainTag(rankedGain)}
             </span>
           )}
         </div>
@@ -148,7 +164,7 @@ export function StreamOverlay() {
                   <span key={k} className="ov-grade-cell">
                     <GradeBadge grade={k} width={28} />
                     <b>{fmtNum(data.grades[k] ?? 0)}</b>
-                    {gain > 0 && <span className="ov-gain">+{fmtNum(gain)}</span>}
+                    {gainTag(gain)}
                   </span>
                 )
               );
@@ -173,7 +189,7 @@ export function StreamOverlay() {
                     <span key={key} className="ov-tier-cell">
                       <span className="ov-tier">{label}</span>{" "}
                       <b>{fmtNum(data.globalTops[key])}</b>
-                      {gain > 0 && <span className="ov-gain"> +{fmtNum(gain)}</span>}
+                      {gainTag(gain)}
                     </span>
                   );
                 })}
@@ -196,7 +212,7 @@ export function StreamOverlay() {
                       {" "}/ {f(m.total)} ({((m.count / m.total) * 100).toFixed(1)}%)
                     </span>
                   )}
-                  {gain > 0 && <span className="ov-gain"> +{f(gain)}</span>}
+                  {gainTag(gain, f, m.descending === true)}
                 </span>
               );
             })}

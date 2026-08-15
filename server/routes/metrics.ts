@@ -145,6 +145,8 @@ metricsRouter.get("/overlay-metrics", (req, res) => {
         name: r.name,
         kind: params.kind,
         ruleset: params.ruleset ?? 0,
+        // countdown: the overlay colors a DECREASE as progress
+        descending: params.kind === "count" && params.descending === true,
         count,
         total: total !== whole ? total : 0,
       }];

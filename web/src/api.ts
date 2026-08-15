@@ -52,6 +52,8 @@ export interface OverlayMetric {
   id: number;
   name: string;
   kind: "count" | "ranked_score" | "pp";
+  /** countdown metric: a DECREASE is the progress (colored accordingly) */
+  descending?: boolean;
   count: number;
   total: number; // maps matching the metric's map filters (0 for ranked_score/pp)
 }

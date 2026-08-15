@@ -8,6 +8,7 @@ import { useDisplayPrefs } from "../prefs";
 import { gradeDataUrl } from "./GradeBadge";
 import { fmtNum } from "../format";
 import { GRADE_ORDER } from "../types";
+import { useEscape } from "../useEscape";
 
 
 /**
@@ -54,6 +55,7 @@ export function ShareCard({
   pool?: PoolMode;
   keys?: string[];
 }) {
+  useEscape(onClose); // Esc closes the top-most modal
   const svgRef = useRef<SVGSVGElement | null>(null);
   // the profile stats (pp, ranks, accuracy, play time) are PER MODE: /me alone
   // answers for the account's default mode, which would print osu! pp on a
@@ -90,7 +92,25 @@ export function ShareCard({
   const username = auth?.profile?.username ?? "osu! player";
   const ps = auth?.profile?.stats;
 
-  if (!stats) return null;
+  // The card needs the stats, the osu! profile and the (proxied) banner and
+  // avatar: several seconds on the first open. Rendering null meant the menu
+  // closed and NOTHING appeared — it looked like the button did nothing.
+  if (!stats)
+    return (
+      <>
+        <div className="menu-overlay modal-overlay" onClick={onClose} />
+        <div className="adv-modal share-modal">
+          <div className="adv-head">
+            <h2>Share card</h2>
+            <button className="mm-close" onClick={onClose}>✕</button>
+          </div>
+          <div className="share-loading">
+            <div className="skeleton share-skeleton" />
+            <span className="loading-chip">Building your card…</span>
+          </div>
+        </div>
+      </>
+    );
   const t = stats.totals;
   const played = t.played ?? 0;
   const grades = new Map<string, number>(stats.grades.map((gr) => [gr.grade, gr.c]));

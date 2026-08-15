@@ -417,11 +417,18 @@ export function MetricsView({
   const [gran, setGran] = useState<"month" | "day">("month");
   const [builderOpen, setBuilderOpen] = useState(false);
   const [editing, setEditing] = useState<Metric | null>(null);
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, isFetching, error } = useQuery({
     queryKey: ["metrics", gran],
     queryFn: () => fetchMetrics(gran),
     refetchInterval: 60_000,
   });
+  // A metric is evaluated server-side over the whole score history: after
+  // saving one, the builder closes and the grid stays unchanged for a few
+  // seconds. Without a placeholder it looks like the save did nothing.
+  const [pendingCard, setPendingCard] = useState(false);
+  useEffect(() => {
+    if (!isFetching) setPendingCard(false);
+  }, [isFetching]);
   const del = useMutation({
     mutationFn: deleteMetric,
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["metrics"] }),
@@ -495,7 +502,20 @@ export function MetricsView({
     setCtx({ x: e.clientX, y: e.clientY, row });
   };
 
-  if (isLoading) return <div className="panel">Loading metrics…</div>;
+  if (isLoading)
+    return (
+      <div className="dashboard">
+        <div className="metrics-grid">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="panel metric-card">
+              <div className="skeleton skeleton-line" style={{ width: "45%" }} />
+              <div className="skeleton skeleton-line" style={{ height: 30, width: "70%" }} />
+              <div className="skeleton skeleton-line" style={{ height: 60 }} />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
   if (error || !data) return <div className="panel">Failed to load.</div>;
 
   return (
@@ -513,6 +533,7 @@ export function MetricsView({
           </button>
         </div>
         <small>evolution shown per metric · drag a chart to zoom</small>
+        {isFetching && <span className="loading-chip">Computing…</span>}
       </div>
 
       {data.metrics.length === 0 && (
@@ -546,6 +567,14 @@ export function MetricsView({
             onCtx={onCtx}
           />
         ))}
+        {pendingCard && (
+          <div className="panel metric-card">
+            <div className="skeleton skeleton-line" style={{ width: "45%" }} />
+            <div className="skeleton skeleton-line" style={{ height: 30, width: "70%" }} />
+            <div className="skeleton skeleton-line" style={{ height: 60 }} />
+            <small className="dim">Evaluating the new metric…</small>
+          </div>
+        )}
       </div>
 
       {ctx && (
@@ -619,6 +648,9 @@ export function MetricsView({
             setEditing(null);
           }}
           onSaved={() => {
+            // placeholder only for a NEW metric: an edit updates a card that
+            // is already on screen, a phantom extra card would be confusing
+            setPendingCard(editing == null);
             setBuilderOpen(false);
             setEditing(null);
             void qc.invalidateQueries({ queryKey: ["metrics"] });

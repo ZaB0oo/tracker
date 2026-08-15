@@ -52,11 +52,15 @@ function SkillCurvePanel({
   pool = "all",
   keys = [],
   scope = "all",
+  onViewSr,
 }: {
   ruleset?: number;
   pool?: PoolMode;
   keys?: string[];
   scope?: DashScope;
+  /** double-click a point: open the Maps tab on that 0.1★ slice (max null =
+   * the open-ended 10★+ bucket) */
+  onViewSr?: (min: number, max: number | null) => void;
 }) {
   const prefs = useDisplayPrefs();
   const showWither = prefs.wither && ruleset === 0;
@@ -192,8 +196,20 @@ function SkillCurvePanel({
               x={x(b.sr)} y={MT}
               width={bandW} height={plotBot - MT}
               fill="transparent"
+              style={onViewSr ? { cursor: "pointer" } : undefined}
               onMouseEnter={() => setHover(b)}
-            />
+              onDoubleClick={() =>
+                // slice [sr, sr+0.1). The table filter is inclusive, so the
+                // upper bound sits just under the next slice — and the LAST
+                // point is the "10★+" bucket: no upper bound at all there.
+                onViewSr?.(
+                  b.sr,
+                  b.sr >= 10 ? null : Math.round((b.sr + 0.09999) * 100000) / 100000
+                )
+              }
+            >
+              {onViewSr && <title>Double-click: show these maps in the Maps tab</title>}
+            </rect>
           ))}
         </svg>
         {hover && (
@@ -458,6 +474,7 @@ export function Dashboard({
   keys = [],
   onKeysChange,
   onViewPack,
+  onViewSr,
 }: {
   ruleset?: number;
   /** map pool of the viewed ruleset — same choice as the Maps view */
@@ -468,6 +485,9 @@ export function Dashboard({
   onKeysChange?: (keys: string[]) => void;
   /** opens the Maps tab filtered on a pack (search token pack=TAG) */
   onViewPack?: (tag: string) => void;
+  /** opens the Maps tab filtered on a star-rating range (max null = no cap),
+   * carrying the dashboard's status scope so the list matches the curve */
+  onViewSr?: (min: number, max: number | null, scope: DashScope) => void;
 }) {
   // witherscore is an osu!std-only proposal; everything else (time machine,
   // skill curve, missing) is per-ruleset
@@ -884,7 +904,15 @@ export function Dashboard({
         onViewPack={onViewPack}
       />
 
-      <SkillCurvePanel ruleset={ruleset} pool={pool} keys={keys} scope={scope} />
+      <SkillCurvePanel
+        ruleset={ruleset}
+        pool={pool}
+        keys={keys}
+        scope={scope}
+        onViewSr={
+          onViewSr && ((min, max) => onViewSr(min, max, scope))
+        }
+      />
     </div>
   );
 }

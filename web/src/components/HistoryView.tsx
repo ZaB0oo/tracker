@@ -9,6 +9,17 @@ import { GradeBadge } from "./GradeBadge";
 import { MapModal } from "./MapModal";
 import { FC_LABELS } from "../types";
 
+/** Shared placeholder: the three history tabs page over big tables. */
+function HistorySkeleton() {
+  return (
+    <div className="hist-skeleton">
+      {[...Array(10)].map((_, i) => (
+        <div key={i} className="skeleton skeleton-row" />
+      ))}
+    </div>
+  );
+}
+
 const PAGE = 100;
 
 /** Map identity carried by every history row (context menu / details). */
@@ -40,7 +51,7 @@ function ClearsList({ onCtx, ruleset }: { onCtx: OnMapContext; ruleset: number }
   });
   const rows = query.data?.pages.flatMap((p) => p.rows) ?? [];
 
-  if (query.isLoading) return <p className="goal-note">Loading...</p>;
+  if (query.isLoading) return <HistorySkeleton />;
   if (rows.length === 0)
     return <p className="goal-note">No score in the database yet.</p>;
 
@@ -117,7 +128,7 @@ function CountryList({
   });
   const rows = query.data?.pages.flatMap((p) => p.rows) ?? [];
 
-  if (query.isLoading) return <p className="goal-note">Loading...</p>;
+  if (query.isLoading) return <HistorySkeleton />;
   if (rows.length === 0)
     return (
       <p className="goal-note">
@@ -214,7 +225,7 @@ function GlobalList({
   });
   const rows = query.data?.pages.flatMap((p) => p.rows) ?? [];
 
-  if (query.isLoading) return <p className="goal-note">Loading...</p>;
+  if (query.isLoading) return <HistorySkeleton />;
   if (rows.length === 0)
     return (
       <p className="goal-note">
@@ -252,9 +263,8 @@ function GlobalList({
             <span className="fr-event-date">{fmtDate(e.at)}</span>
             <span className={`fr-event-badge ${gained ? "gained" : "lost"}`}>
               {gained
-                ? tier === 1
-                  ? "#1"
-                  : `TOP ${tier}`
+                ? // "TOP 1", not "#1": this is the GLOBAL leaderboard history
+                  `TOP ${tier}`
                 : tier != null
                   ? `OUT TOP ${tier}`
                   : "LOST"}

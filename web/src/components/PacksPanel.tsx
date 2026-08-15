@@ -15,6 +15,7 @@ import { fmtDate, fmtNum } from "../format";
 import { GradeBadge } from "./GradeBadge";
 import { MapModal } from "./MapModal";
 import { FC_LABELS } from "../types";
+import { useEscape } from "../useEscape";
 
 const TYPE_LABELS: Record<string, string> = {
   standard: "Standard",
@@ -60,6 +61,7 @@ function PackModal({
   onViewPack?: (tag: string) => void;
   onClose: () => void;
 }) {
+  useEscape(onClose); // Esc closes the top-most modal
   const { data } = useQuery({
     queryKey: ["pack", tag, ruleset, at ?? null, pool, keys, scope],
     queryFn: () => fetchPackDetail(tag, ruleset, at, pool, keys, scope),

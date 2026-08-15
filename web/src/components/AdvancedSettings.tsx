@@ -12,6 +12,7 @@ import {
 import { RULESET_NAMES } from "../rulesets";
 import { firstPlaceLabel, useCountryCode } from "../country";
 import { appConfirm } from "../dialogs";
+import { useEscape } from "../useEscape";
 
 // Electron bridge (desktop/preload.cjs): native file picker + dialogs.
 // Absent in a plain browser — built-ins are used instead.
@@ -59,6 +60,7 @@ export function AdvancedSettings({
   /** viewed ruleset: the scopable maintenance actions apply to it */
   ruleset?: number;
 }) {
+  useEscape(onClose); // Esc closes the top-most modal
   const modeName = RULESET_NAMES[ruleset] ?? "osu!";
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ["settings"], queryFn: fetchSettings });

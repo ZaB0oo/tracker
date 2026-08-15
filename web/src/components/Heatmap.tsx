@@ -19,15 +19,24 @@ const CELL = 12;
 const GAP = 3;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-/** Color level for a day's clear count (GitHub-style buckets). */
-function level(c: number): number {
-  if (c === 0) return 0;
-  if (c < 5) return 1;
-  if (c < 15) return 2;
-  if (c < 40) return 3;
-  return 4;
+/**
+ * Continuous day color: empty → full pink over 0..100 clears (a 100-clear day
+ * and a 300-clear day are both "full", the calendar has no reason to separate
+ * them). Buckets used to lump 40+ into one shade, hiding the big sessions.
+ */
+const CELL_EMPTY: [number, number, number] = [42, 35, 56]; // #2a2338
+const CELL_FULL: [number, number, number] = [255, 102, 170]; // #ff66aa
+const CELL_MAX = 100;
+
+/** 0 stays the empty color; any activity starts visibly above it. */
+function cellColor(c: number): string {
+  if (c <= 0) return `rgb(${CELL_EMPTY.join(",")})`;
+  const t = 0.14 + 0.86 * Math.min(c / CELL_MAX, 1);
+  const mix = CELL_EMPTY.map((from, i) =>
+    Math.round(from + (CELL_FULL[i] - from) * t)
+  );
+  return `rgb(${mix.join(",")})`;
 }
-const COLORS = ["#2a2338", "#5a3752", "#95436f", "#d05189", "#ff66aa"];
 
 /** "HDDTCL" from the score's mods JSON ("" when nomod / unparseable). */
 function modsLabel(mods: string): string {
@@ -226,7 +235,7 @@ export function HeatmapPanel({
               width={CELL}
               height={CELL}
               rx={2.5}
-              fill={COLORS[level(c)]}
+              fill={cellColor(c)}
               opacity={dimmed ? 0.18 : 1}
               stroke={iso === selDay ? "#ff66aa" : "none"}
               strokeWidth={iso === selDay ? 1.5 : 0}
@@ -238,6 +247,20 @@ export function HeatmapPanel({
           );
         })}
         </svg>
+      </div>
+      <div className="hm-legend">
+        <span className="dim">New clears / day</span>
+        <span className="hm-legend-label">0</span>
+        {/* the gradient bar is built from the SAME function as the cells */}
+        <span
+          className="hm-legend-bar"
+          style={{
+            background: `linear-gradient(90deg, ${[0, 0.25, 0.5, 0.75, 1]
+              .map((f) => cellColor(f * CELL_MAX))
+              .join(", ")})`,
+          }}
+        />
+        <span className="hm-legend-label">{CELL_MAX}+</span>
       </div>
       </div>
 

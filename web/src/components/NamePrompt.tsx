@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useEscape } from "../useEscape";
 
 /**
  * In-app replacement for window.prompt (Electron does not implement it):
@@ -17,6 +18,7 @@ export function NamePrompt({
   onSubmit: (name: string) => void;
   onClose: () => void;
 }) {
+  useEscape(onClose); // Esc closes the top-most modal
   const [value, setValue] = useState(initial);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => {
