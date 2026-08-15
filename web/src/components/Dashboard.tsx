@@ -709,6 +709,7 @@ export function Dashboard({
   // replays the FC states and leaderboard positions.
   const useSnapNow = past != null && snap != null;
   const missingNow = useSnapNow ? snap.missingSums : data.scoreSums;
+  const scoreNow = useSnapNow ? snap.scoreSums : data.scoreSums;
   const fcNow = useSnapNow ? snap.fc : data.fc;
   const topsNow = useSnapNow ? snap.globalTops : data.globalTops;
   // hero gauge rows: live per-status aggregates; in the past only the
@@ -834,18 +835,16 @@ export function Dashboard({
         <div className="hero-stat">
           <h3>Ranked score</h3>
           <div className="big">
-            {fmtNum(eff.rankedClassic)}{" "}
+            {fmtNum(useSnapNow ? scoreNow.classic : eff.rankedClassic)}{" "}
             <span className="big-unit">{ruleset === 3 ? "Score" : "Classic Score"}</span>
           </div>
           {prefs.wither && isStd && (
-            <div className={`big${past ? " tm-dim" : ""}`}>
-              {fmtNum(data.scoreSums.wither)} <span className="big-unit">Wither Score</span>
+            <div className="big">
+              {fmtNum(scoreNow.wither)} <span className="big-unit">Wither Score</span>
             </div>
           )}
           {ruleset !== 3 && (
-            <small className={past ? "tm-dim" : undefined}>
-              Standardised: {fmtNum(data.scoreSums.lazer)}
-            </small>
+            <small>Standardised: {fmtNum(scoreNow.lazer)}</small>
           )}
         </div>
         <div className="hero-stat">

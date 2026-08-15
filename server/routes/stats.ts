@@ -960,6 +960,11 @@ statsRouter.get("/snapshot", (req, res) => {
   let missing = 0;
   let missingClassic = 0;
   let missingWither = 0;
+  // ranked score at that date, in the three units the hero shows (the card
+  // only had its classic value historised, from the timeline)
+  let rankedStd = 0;
+  let rankedClassic = 0;
+  let rankedWither = 0;
   const tops = { top1: 0, top8: 0, top15: 0, top25: 0, top50: 0, top100: 0, checked: 0 };
   const fcCounts = [0, 0, 0];
 
@@ -985,7 +990,12 @@ statsRouter.get("/snapshot", (req, res) => {
         curveMissW[m.q] += mw;
       }
     }
-    if (inCat && cleared) fcCounts[fcStateAt[i]]++;
+    if (inCat && cleared) {
+      fcCounts[fcStateAt[i]]++;
+      rankedStd += bestStd[i];
+      rankedClassic += bestClassic[i];
+      if (R === 0 && m.n > 0) rankedWither += witherScore(bestStd[i], m.n);
+    }
     if (rank > 0) {
       tops.checked++;
       if (rank === 1) tops.top1++;
@@ -1029,6 +1039,11 @@ statsRouter.get("/snapshot", (req, res) => {
     byCs: out(dims.byCs), byHp: out(dims.byHp),
     fc: fcCounts.map((c, fc_state) => ({ fc_state, c })).filter((f) => f.c > 0),
     globalTops: tops,
+    scoreSums: {
+      lazer: Math.round(rankedStd),
+      classic: Math.round(rankedClassic),
+      wither: Math.round(rankedWither),
+    },
     missingSums: {
       missing: Math.round(missing),
       missingClassic: Math.round(missingClassic),

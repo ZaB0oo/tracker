@@ -259,6 +259,8 @@ export interface Snapshot {
     top1: number; top8: number; top15: number;
     top25: number; top50: number; top100: number; checked: number;
   };
+  /** ranked score at that date, same three units as the live hero */
+  scoreSums: { lazer: number; classic: number; wither: number };
   /** realistic missing at that date, curve re-fitted on the bests of the day */
   missingSums: { missing: number; missingClassic: number; missingWither: number };
   /** that day's skill curve, same shape as /skill-curve's buckets */
