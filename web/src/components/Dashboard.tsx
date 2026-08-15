@@ -47,17 +47,23 @@ function tipPos(fx: number, fy: number): React.CSSProperties {
  * Skill curve (basis of "missing"): x-axis star rating, y-axis predicted
  * standardised score, one point per 0.1★ band, details on hover.
  */
-function SkillCurvePanel({
+const SkillCurvePanel = memo(function SkillCurvePanel({
   ruleset = 0,
   pool = "all",
   keys = [],
   scope = "all",
+  pastBuckets = null,
+  pastDay = null,
   onViewSr,
 }: {
   ruleset?: number;
   pool?: PoolMode;
   keys?: string[];
   scope?: DashScope;
+  /** time machine: the curve RE-FITTED on the bests of that day (the live
+   * curve would compare today's level against past scores) */
+  pastBuckets?: SkillCurveBucket[] | null;
+  pastDay?: string | null;
   /** double-click a point: open the Maps tab on that 0.1★ slice (max null =
    * the open-ended 10★+ bucket) */
   onViewSr?: (min: number, max: number | null) => void;
@@ -68,10 +74,11 @@ function SkillCurvePanel({
     queryKey: ["skill-curve", ruleset, pool, keys, scope],
     queryFn: () => fetchSkillCurve(ruleset, pool, keys, scope),
     refetchInterval: 60_000,
+    enabled: pastBuckets == null, // the past comes from the snapshot
   });
   const [hover, setHover] = useState<SkillCurveBucket | null>(null);
-  if (!data?.buckets?.length) return null;
-  const buckets = data.buckets;
+  const buckets = pastBuckets ?? data?.buckets;
+  if (!buckets?.length) return null;
   // cumulative missing = sum of missing across all bands <= this one
   const cumByQ = new Map<number, { classic: number; wither: number }>();
   let accC = 0;
@@ -123,7 +130,10 @@ function SkillCurvePanel({
 
   return (
     <div className="panel curve-panel">
-      <h3>Predicted reachable score by star rating (estimate)</h3>
+      <h3>
+        Predicted reachable score by star rating (estimate)
+        {pastDay && <span className="dim"> — as of {pastDay}</span>}
+      </h3>
       <div className="curve-chart">
         <svg viewBox={`0 0 ${W} ${H}`} onMouseLeave={() => setHover(null)}>
           <defs>
@@ -259,7 +269,7 @@ function SkillCurvePanel({
       </small>
     </div>
   );
-}
+});
 
 /**
  * Completion gauge. The yellow portion (country) is overlaid on the played
@@ -585,9 +595,14 @@ export function Dashboard({
         ss: sv?.ss ?? 0,
         splus: sv?.splus ?? 0,
         onem: sv?.onem ?? 0,
-        // no positional history: the top gauges simply disappear in the past
-        top1: null, top8: null, top15: null,
-        top25: null, top50: null, top100: null,
+        // replayed from the global events (a position with no event is dated
+        // at the best score that earned it)
+        top1: sv?.top1 ?? 0,
+        top8: sv?.top8 ?? 0,
+        top15: sv?.top15 ?? 0,
+        top25: sv?.top25 ?? 0,
+        top50: sv?.top50 ?? 0,
+        top100: sv?.top100 ?? 0,
       };
     };
     const liveOf = (b: DistCounts): Omit<DistRow, "label"> => ({
@@ -689,6 +704,13 @@ export function Dashboard({
     countryLoved: past ? past.countryLoved : t.country_loved ?? 0,
     rankedClassic: past ? past.ranked : data.scoreSums.classic,
   };
+  // Time machine: the snapshot re-fits the skill curve on the bests of that
+  // date (comparing today's level to past scores would be meaningless) and
+  // replays the FC states and leaderboard positions.
+  const useSnapNow = past != null && snap != null;
+  const missingNow = useSnapNow ? snap.missingSums : data.scoreSums;
+  const fcNow = useSnapNow ? snap.fc : data.fc;
+  const topsNow = useSnapNow ? snap.globalTops : data.globalTops;
   // hero gauge rows: live per-status aggregates; in the past only the
   // reconstructed ones exist (handled by the dists, the hero keeps FC/#1)
   const stRanked = data.byStatus?.find((b) => b.bucket === "ranked");
@@ -786,18 +808,18 @@ export function Dashboard({
         <div className="hero-stat hero-country">
           <h3>{firstPlaceLabel(country)}</h3>
           <div className="hero-mid gold-text">{fmtNum(eff.country)}</div>
-          {data.globalTops.checked > 0 && (
+          {topsNow.checked > 0 && (
             <>
             <h3 className="hero-sub">Global tops</h3>
-            <div className={`global-tops${past ? " tm-dim" : ""}`}>
+            <div className="global-tops">
               {(
                 [
-                  ["Top 1", data.globalTops.top1],
-                  ["Top 8", data.globalTops.top8],
-                  ["Top 15", data.globalTops.top15],
-                  ["Top 25", data.globalTops.top25],
-                  ["Top 50", data.globalTops.top50],
-                  ["Top 100", data.globalTops.top100],
+                  ["Top 1", topsNow.top1],
+                  ["Top 8", topsNow.top8],
+                  ["Top 15", topsNow.top15],
+                  ["Top 25", topsNow.top25],
+                  ["Top 50", topsNow.top50],
+                  ["Top 100", topsNow.top100],
                 ] as const
               ).map(([label, v]) => (
                 <div key={label} className="grade-pill" title="Global leaderboard positions (cumulative)">
@@ -826,20 +848,20 @@ export function Dashboard({
             </small>
           )}
         </div>
-        <div className={`hero-stat${past ? " tm-dim" : ""}`}>
+        <div className="hero-stat">
           <h3>Missing score (estimate)</h3>
           <div className="big accent">
-            {fmtNum(data.scoreSums.missingClassic)}{" "}
+            {fmtNum(missingNow.missingClassic)}{" "}
             <span className="big-unit">{ruleset === 3 ? "Score" : "Classic Score"}</span>
           </div>
           {prefs.wither && isStd && (
             <div className="big accent">
-              {fmtNum(data.scoreSums.missingWither)}{" "}
+              {fmtNum(missingNow.missingWither)}{" "}
               <span className="big-unit">Wither Score</span>
             </div>
           )}
           {ruleset !== 3 && (
-            <small>Standardised: {fmtNum(data.scoreSums.missing)}</small>
+            <small>Standardised: {fmtNum(missingNow.missing)}</small>
           )}
         </div>
         <div className="hero-stat hero-grades">
@@ -852,8 +874,8 @@ export function Dashboard({
               </div>
             ))}
           </div>
-          <div className={`grade-dist${past ? " tm-dim" : ""}`}>
-            {data.fc.map((f) => (
+          <div className="grade-dist">
+            {fcNow.map((f) => (
               <div key={f.fc_state} className="grade-pill">
                 <b className={`fc fc-${f.fc_state}`}>{FC_LABELS[f.fc_state]}</b>{" "}
                 {fmtNum(f.c)}
@@ -909,6 +931,8 @@ export function Dashboard({
         pool={pool}
         keys={keys}
         scope={scope}
+        pastBuckets={useSnapNow ? snap.curve : null}
+        pastDay={useSnapNow ? snap.day : null}
         onViewSr={
           onViewSr && ((min, max) => onViewSr(min, max, scope))
         }

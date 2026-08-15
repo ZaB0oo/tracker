@@ -295,7 +295,10 @@ export function MetricBuilder({
   const isCount = p.kind === "count";
   // score conditions apply to count AND weighted-pp metrics (pp filters which
   // scores feed the weighting); only ranked_score sums everything
-  const hasScoreConds = p.kind !== "ranked_score";
+  // Every kind takes score conditions: the ranked-score sum keeps the best
+  // score AMONG THOSE THAT MATCH per map (so "ranked score with DT" or
+  // "…from my FCs only" work), the evaluation always supported it.
+  const hasScoreConds = true;
   const srMax = Math.max(...(preview?.byBucket.map((b) => b.value) ?? [1]), 1);
 
   return (
@@ -343,7 +346,9 @@ export function MetricBuilder({
             <div className="mb-title">
               {isCount
                 ? "A map counts when I have a score that is…"
-                : "Only weigh scores that are…"}
+                : p.kind === "ranked_score"
+                  ? "Only sum scores that are… (best matching score per map)"
+                  : "Only weigh scores that are…"}
             </div>
             <div className="mb-inline">
               <label>

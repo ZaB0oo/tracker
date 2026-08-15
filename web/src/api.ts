@@ -234,6 +234,13 @@ export interface SnapshotBucket {
   ss?: number;
   splus?: number;
   onem?: number;
+  /** global leaderboard tiers held at that date (replayed from the events) */
+  top1?: number;
+  top8?: number;
+  top15?: number;
+  top25?: number;
+  top50?: number;
+  top100?: number;
 }
 
 export interface Snapshot {
@@ -246,6 +253,16 @@ export interface Snapshot {
   byOd: SnapshotBucket[];
   byCs: SnapshotBucket[];
   byHp: SnapshotBucket[];
+  /** FC state of the bests at that date (same shape as Stats.fc) */
+  fc: { fc_state: number; c: number }[];
+  globalTops: {
+    top1: number; top8: number; top15: number;
+    top25: number; top50: number; top100: number; checked: number;
+  };
+  /** realistic missing at that date, curve re-fitted on the bests of the day */
+  missingSums: { missing: number; missingClassic: number; missingWither: number };
+  /** that day's skill curve, same shape as /skill-curve's buckets */
+  curve: SkillCurveBucket[];
 }
 
 export async function fetchSnapshot(

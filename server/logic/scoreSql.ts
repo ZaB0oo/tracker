@@ -54,6 +54,16 @@ function classicFromStdRuleset(ruleset: number, stdExpr: string): string {
 //   scaled = min(std/1M, (std/1M)^1.62)
 //   wither = scaled × (n_objects² × 36.49 + n_objects × 2095) + std × 0.1
 // Monotone in standardised on a given map => same best as lazer.
+/** JS twin of witherSql, for the time machine's replay (std only). */
+export function witherScore(standardised: number, nObjects: number): number {
+  const x = standardised / FULL_BASE;
+  return Math.round(
+    Math.min(x, Math.pow(x, 1.62)) *
+      (36.49 * nObjects * nObjects + 2095 * nObjects) +
+      standardised * 0.1
+  );
+}
+
 export function witherSql(stdExpr: string, nExpr: string = N_OBJ): string {
   const x = `(CAST(${stdExpr} AS REAL) / ${FULL_BASE}.0)`;
   return `CAST(ROUND(MIN(${x}, pow(${x}, 1.62)) * (36.49 * ${nExpr} * ${nExpr} + 2095.0 * ${nExpr}) + ${stdExpr} * 0.1) AS INTEGER)`;
@@ -179,7 +189,7 @@ export function ensureMissingFresh(): void {
  * level, not the theoretical max.
  */
 export const CURVE_STEPS = 100; // 0.1★ slices, capped at 10★+
-interface CurveBucket {
+export interface CurveBucket {
   q: number; // slice (star_rating * 10, capped)
   value: number; // retained prediction (after carry-over + monotonicity)
   samples: number; // number of bests in the slice
@@ -235,22 +245,37 @@ export function computeSkillCurve(
     arr.push(r.ts);
     byQ.set(r.q, arr);
   }
-  // Raw medians of the sufficiently populated slices (>= 5 bests), then
-  // DECREASING isotonic regression by PAVA, weighted by the number of bests:
-  // slices conflicting with the decrease are averaged together instead of
-  // being crushed by the previous one — a small easy slice with old scores is
-  // pulled up by its thousands of neighbors, and artificial plateaus
-  // disappear. No 1M cap (modded bests).
+  const buckets = fitSkillCurve(byQ);
+  const parts = buckets.map((b) => `WHEN ${b.q} THEN ${b.value}`);
+  const caseSql = `CASE MIN(CAST(${curveSr(ruleset)} * 10 AS INTEGER), ${CURVE_STEPS}) ${parts.join(" ")} ELSE ${buckets[buckets.length - 1].value} END`;
+  const entry = { until: Date.now() + 10 * 60_000, caseSql, buckets };
+  curveCaches.set(cacheKey, entry);
+  return entry;
+}
+function skillCurveCase(ruleset = 0): string {
+  return computeSkillCurve(ruleset).caseSql;
+}
+
+/**
+ * Turns raw bests per 0.1★ slice into the retained prediction of every slice.
+ * Shared by the live curve and the time machine (which re-fits it on the
+ * bests of a past date) — two implementations would drift apart.
+ *
+ * Raw medians of the sufficiently populated slices (>= 5 bests), then
+ * DECREASING isotonic regression by PAVA, weighted by the number of bests:
+ * slices conflicting with the decrease are averaged together instead of being
+ * crushed by the previous one — a small easy slice with old scores is pulled
+ * up by its thousands of neighbors, and artificial plateaus disappear. No 1M
+ * cap (modded bests). Slices without enough bests inherit from the last
+ * fitted one (and from the first for those below the data).
+ */
+export function fitSkillCurve(byQ: Map<number, number[]>): CurveBucket[] {
   const sampled: { q: number; value: number; weight: number }[] = [];
   for (let q = 0; q <= CURVE_STEPS; q++) {
     const arr = byQ.get(q);
     if (arr && arr.length >= 5) {
       arr.sort((a, b) => a - b);
-      sampled.push({
-        q,
-        value: arr[Math.floor(arr.length / 2)],
-        weight: arr.length,
-      });
+      sampled.push({ q, value: arr[Math.floor(arr.length / 2)], weight: arr.length });
     }
   }
   // PAVA (pool adjacent violators) for a non-increasing sequence
@@ -274,24 +299,11 @@ export function computeSkillCurve(
     for (let k = 0; k < b.count; k++) fitted.push(b.value);
   const fittedByQ = new Map(sampled.map((p, i) => [p.q, fitted[i]]));
 
-  // Slices without enough bests: inherit from the last fitted slice
-  // (and from the first one for those below the data).
   let prev = fitted[0] ?? FULL_BASE;
   const buckets: CurveBucket[] = [];
   for (let q = 0; q <= CURVE_STEPS; q++) {
     prev = fittedByQ.get(q) ?? prev;
-    buckets.push({
-      q,
-      value: Math.round(prev),
-      samples: byQ.get(q)?.length ?? 0,
-    });
+    buckets.push({ q, value: Math.round(prev), samples: byQ.get(q)?.length ?? 0 });
   }
-  const parts = buckets.map((b) => `WHEN ${b.q} THEN ${b.value}`);
-  const caseSql = `CASE MIN(CAST(${curveSr(ruleset)} * 10 AS INTEGER), ${CURVE_STEPS}) ${parts.join(" ")} ELSE ${buckets[buckets.length - 1].value} END`;
-  const entry = { until: Date.now() + 10 * 60_000, caseSql, buckets };
-  curveCaches.set(cacheKey, entry);
-  return entry;
-}
-function skillCurveCase(ruleset = 0): string {
-  return computeSkillCurve(ruleset).caseSql;
+  return buckets;
 }

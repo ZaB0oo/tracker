@@ -261,7 +261,9 @@ export function ShareCard({
             </g>
             <rect width={W} height={H} rx="18" fill="none" stroke="#362d48" strokeWidth="2" />
 
-            {/* header text block */}
+            {/* header text block. The mode icon used to sit in the top-right
+                corner, where it collided with the witherlevel hexagon: it now
+                badges the username, and the corner is the levels' alone. */}
             <rect x="138" y="30" width="6" height="38" rx="3" fill="#ff66aa" />
             <text x="158" y="60" fontSize="32" fontWeight="700" fill="#ffffff">
               {username}
@@ -277,10 +279,12 @@ export function ShareCard({
                 </tspan>
               )}
             </text>
-            {/* mode icon instead of its name: same artwork as the tabs */}
+            {/* mode icon instead of its name: same artwork as the tabs. Top
+                right corner, above the levels — the country badge and both
+                hexagons are shifted down/left to clear it. */}
             {modeIconUrl && (
               <image
-                x={W - 66} y="30" width="36" height="36"
+                x={W - 44} y="12" width="28" height="28"
                 href={modeIconUrl} preserveAspectRatio="xMidYMid meet"
               />
             )}
@@ -318,7 +322,7 @@ export function ShareCard({
             )}
             {/* country + level, top right */}
             {country && (
-              <g transform={`translate(${W - 238}, 30)`}>
+              <g transform={`translate(${W - 244}, 26)`}>
                 <rect width="52" height="34" rx="8" fill="#17131f" opacity="0.75" />
                 <text x="26" y="23" fontSize="16" fontWeight="700" fill="#ffffff" textAnchor="middle">
                   {country}
@@ -326,7 +330,7 @@ export function ShareCard({
               </g>
             )}
             {ps && (
-              <g transform={`translate(${W - 138}, 64)`}>
+              <g transform={`translate(${W - 146}, 68)`}>
                 {/* rounded corners: fat round-joined dark stroke as the base,
                     then the gradient border drawn with round joins on top */}
                 <polygon
@@ -350,9 +354,11 @@ export function ShareCard({
                 </text>
               </g>
             )}
-            {/* wither level (level rework proposal), right of the osu! level */}
+            {/* wither level (level rework proposal), right of the osu! level.
+                The corner is free now that the mode icon moved, so it sits at
+                the same height with room for its caption. */}
             {prefs.wither && ps && (
-              <g transform={`translate(${W - 56}, 64)`}>
+              <g transform={`translate(${W - 64}, 72)`}>
                 <polygon
                   points="0,-24 21,-12 21,12 0,24 -21,12 -21,-12"
                   fill="#17131f"
