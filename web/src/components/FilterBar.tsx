@@ -150,14 +150,17 @@ export function FilterBar({
     key: string,
     label: string,
     minK: keyof Filters,
-    maxK: keyof Filters
+    maxK: keyof Filters,
+    /** unit printed after each bound ("x" for the playback rate) */
+    unit = ""
   ) => {
     const min = local[minK] as string;
     const max = local[maxK] as string;
     if (min === "" && max === "") return;
+    const fmt = (v: string) => (v === "" ? "…" : `${v}${unit}`);
     badges.push({
       key,
-      label: `${label} ${min || "…"}–${max || "…"}`,
+      label: `${label} ${fmt(min)}–${fmt(max)}`,
       clear: () => setLocal((f) => ({ ...f, [minK]: "", [maxK]: "" })),
     });
   };
@@ -168,6 +171,7 @@ export function FilterBar({
   rangeBadge("cs", rulesetStatFields(local.ruleset ?? 0).csLabel, "csMin", "csMax");
   rangeBadge("len", "Length", "lenMin", "lenMax");
   rangeBadge("globalTop", "Global top", "globalTopMin", "globalTopMax");
+  rangeBadge("rate", "Rate", "rateMin", "rateMax", "x");
   rangeBadge("ranked", "Ranked", "rankedFrom", "rankedTo");
   rangeBadge("playedDate", "Played", "playedFrom", "playedTo");
 
@@ -376,6 +380,16 @@ export function FilterBar({
             onMax={(v) => set("globalTopMax", v)}
             step="1"
             lo={1}
+          />
+          {/* playback rate of the best (lazer rate change, 0.5x-2.0x) */}
+          <Range
+            label="Rate"
+            min={local.rateMin}
+            max={local.rateMax}
+            onMin={(v) => set("rateMin", v)}
+            onMax={(v) => set("rateMax", v)}
+            step="0.05"
+            lo={0.5}
           />
         </div>
 

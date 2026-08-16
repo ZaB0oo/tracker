@@ -97,7 +97,8 @@ export function TimeMachineBar({
         // an abandoned half-typed date must not stay on screen
         onBlur={() => setDraft(null)}
       />
-      {/* always rendered so the layout never shifts while sliding */}
+      {/* always rendered, and only ever hidden — display:none would give its
+          width back to the slider and shift the thumb on the last tick */}
       <button
         className="tm-now"
         style={{ visibility: isPast ? "visible" : "hidden" }}

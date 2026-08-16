@@ -241,6 +241,59 @@ function migrate(d: DatabaseSync): void {
   const scCols = d.prepare("PRAGMA table_info(scores)").all() as { name: string }[];
   if (scCols.some((c) => c.name === "legacy_total_score"))
     d.exec("ALTER TABLE scores DROP COLUMN legacy_total_score");
+  // Playback rate materialized from the mods JSON (see schema.sql). One pass
+  // over the existing rows; ROUND(…, 2) kills the float noise lazer stores
+  // (0.7000000000000001).
+  if (!scCols.some((c) => c.name === "rate"))
+    d.exec("ALTER TABLE scores ADD COLUMN rate REAL NOT NULL DEFAULT 1.0");
+  // Versioned, because the formula gained the ramp mods after the column
+  // shipped: bumping the key recomputes every row. SQL twin of computeRate()
+  // in logic/score.ts — the two must stay in sync.
+  const RATE_KEY = "rate_backfill";
+  const rateDone = (
+    d.prepare("SELECT value FROM sync_state WHERE key = ?").get(RATE_KEY) as
+      | { value: string }
+      | undefined
+  )?.value;
+  if (rateDone !== "v3") {
+    // ROUND(x * 100) / 100 and NOT ROUND(x, 2): the mean of two rates lands on
+    // a half-cent (0.61 + 0.60 -> 0.605) and the two roundings disagree there,
+    // which would make a re-imported score change bucket.
+    d.exec(`
+      UPDATE scores SET rate = ROUND(100.0 * COALESCE(
+        (SELECT json_extract(je.value, '$.settings.speed_change')
+         FROM json_each(scores.mods) je
+         WHERE json_extract(je.value, '$.settings.speed_change') IS NOT NULL
+         LIMIT 1),
+        -- Wind Up / Wind Down / Adaptive Speed: the rate MOVES over the map,
+        -- so we store the mean of where it starts and where it ends. Adaptive
+        -- Speed has no end (it follows your play): its start is the answer.
+        (SELECT (
+           COALESCE(json_extract(je.value, '$.settings.initial_rate'), 1.0)
+           + COALESCE(
+               json_extract(je.value, '$.settings.final_rate'),
+               CASE json_extract(je.value, '$.acronym')
+                 WHEN 'WU' THEN 1.5
+                 WHEN 'WD' THEN 0.75
+                 ELSE COALESCE(json_extract(je.value, '$.settings.initial_rate'), 1.0)
+               END)
+         ) / 2.0
+         FROM json_each(scores.mods) je
+         WHERE json_extract(je.value, '$.acronym') IN ('WU', 'WD', 'AS')
+         LIMIT 1),
+        (SELECT CASE
+           WHEN json_extract(je.value, '$.acronym') IN ('DT', 'NC') THEN 1.5
+           WHEN json_extract(je.value, '$.acronym') IN ('HT', 'DC') THEN 0.75
+         END
+         FROM json_each(scores.mods) je
+         WHERE json_extract(je.value, '$.acronym') IN ('DT', 'NC', 'HT', 'DC')
+         LIMIT 1),
+        1.0)) / 100.0`);
+    d.prepare(
+      "INSERT INTO sync_state (key, value) VALUES (?, 'v3') ON CONFLICT(key) DO UPDATE SET value = 'v3'"
+    ).run(RATE_KEY);
+    console.log("[db] migration: playback rate computed for every stored score");
+  }
   // "ever checked" flag: distinguishes a re-queued map (global_checked_at
   // reset to NULL) from a never-checked one, so tier transitions found on
   // re-checks are logged while the initial sweep stays silent.

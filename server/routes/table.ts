@@ -30,6 +30,7 @@ const SORT_COLUMNS: Record<string, string> = {
   accuracy: "s.accuracy",
   pp: "s.pp",
   mod_multiplier: "mod_multiplier",
+  rate: "s.rate",
   artist: "st.artist COLLATE NOCASE",
   title: "st.title COLLATE NOCASE",
   version: "b.version COLLATE NOCASE",
@@ -119,6 +120,9 @@ function buildFilters(
   // (populated by the global tops sweep; any bound excludes unranked maps).
   num("globalTopMin", "u.global_rank", ">=");
   num("globalTopMax", "u.global_rank", "<=");
+  // playback rate of the best (0.5x-2.0x): any bound implies a played map
+  num("rateMin", "s.rate", ">=");
+  num("rateMax", "s.rate", "<=");
   // Maps of a metric: maps matching its MAP conditions whose BEST score does
   // not match its SCORE conditions — the missing maps (leaderboard semantics,
   // same rule as the metric evaluation; the inner alias `s` shadows the outer
@@ -175,6 +179,14 @@ function buildFilters(
           const v = c.key === "length" ? parseLengthSeconds(c.value) : Number(c.value);
           if (Number.isFinite(v)) {
             where.push(`${expr} ${c.op} @${pn}`);
+            params[pn] = v;
+          }
+          break;
+        }
+        case "rate": {
+          const v = Number(c.value);
+          if (Number.isFinite(v)) {
+            where.push(`s.rate ${c.op} @${pn}`);
             params[pn] = v;
           }
           break;
@@ -243,6 +255,8 @@ function buildFilters(
   num("csMin", CS, ">="); num("csMax", CS, "<=");
   num("hpMin", "b.hp", ">="); num("hpMax", "b.hp", "<=");
   num("lenMin", "b.total_length", ">="); num("lenMax", "b.total_length", "<=");
+  // max combo: convert-aware like the column and the dashboard buckets
+  num("comboMin", COMBO, ">="); num("comboMax", COMBO, "<=");
   num("bpmMin", "b.bpm", ">="); num("bpmMax", "b.bpm", "<=");
   num("yearMin", "CAST(strftime('%Y', st.ranked_date) AS INTEGER)", ">=");
   num("yearMax", "CAST(strftime('%Y', st.ranked_date) AS INTEGER)", "<=");
@@ -330,6 +344,7 @@ tableRouter.get("/table", (req, res) => {
         ROUND(CAST(s.total_score AS REAL)
           / NULLIF(json_extract(s.raw, '$.total_score_without_mods'), 0), 2)
           AS mod_multiplier,
+        s.rate AS rate,
         s.total_score, s.classic_total_score,
         ${scoreExpr} AS score_value,
         ${missingSql} AS missing_value,

@@ -22,6 +22,54 @@ export const FC_PERFECT = 0;
 export const FC_NO_MISS = 1;
 export const FC_NONE = 2;
 
+/**
+ * Playback rate of a score (lazer 0.5x-2.0x). The rate mods carry an explicit
+ * `speed_change` setting when it was customised; a plain DT/NC is 1.5 and a
+ * plain HT/DC is 0.75. Rounded to 2 decimals: lazer stores values like
+ * 0.7000000000000001, which would split a bucket in two.
+ *
+ * Wind Up / Wind Down / Adaptive Speed have no speed_change: the rate MOVES
+ * over the map, from `initial_rate` to `final_rate`. There is no true single
+ * value, so we store the mean of the two — what was played on average, rather
+ * than the peak (a 1.0x -> 1.5x wind up is not a 1.5x clear). Adaptive Speed
+ * only announces where it starts, so that is what it gets.
+ * Defaults come from ppy/osu (ModWindUp/ModWindDown/ModAdaptiveSpeed).
+ */
+const RAMP_DEFAULTS: Record<string, { init: number; final: number | null }> = {
+  WU: { init: 1, final: 1.5 },
+  WD: { init: 1, final: 0.75 },
+  // Adaptive Speed follows how you play: only its starting point is known
+  AS: { init: 1, final: null },
+};
+
+export function computeRate(
+  mods: {
+    acronym?: string;
+    settings?: { speed_change?: number; initial_rate?: number; final_rate?: number };
+  }[]
+): number {
+  const round = (v: number) => Math.round(v * 100) / 100;
+  const num = (v: unknown): number | null =>
+    typeof v === "number" && Number.isFinite(v) ? v : null;
+  for (const m of mods ?? []) {
+    const v = num(m?.settings?.speed_change);
+    if (v != null) return round(v);
+  }
+  for (const m of mods ?? []) {
+    const d = m?.acronym ? RAMP_DEFAULTS[m.acronym] : undefined;
+    if (d) {
+      const init = num(m?.settings?.initial_rate) ?? d.init;
+      const final = num(m?.settings?.final_rate) ?? d.final ?? init;
+      return round((init + final) / 2);
+    }
+  }
+  for (const m of mods ?? []) {
+    if (m?.acronym === "DT" || m?.acronym === "NC") return 1.5;
+    if (m?.acronym === "HT" || m?.acronym === "DC") return 0.75;
+  }
+  return 1;
+}
+
 export function computeFcState(
   score: Pick<
     SoloScore,

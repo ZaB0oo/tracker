@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchVersion } from "./api";
+import { fetchVersion, type DashScope } from "./api";
 import { DEFAULT_FILTERS, type Filters } from "./types";
 import { modeIcon } from "./rulesets";
 import { FilterBar } from "./components/FilterBar";
@@ -42,6 +42,10 @@ export default function App() {
       pool: filters.pool,
       ruleset: r,
     });
+
+  // the dashboard's Ranked/Loved scope, as a Maps status filter
+  const scopeStatuses = (scope: DashScope) =>
+    scope === "ranked" ? ["1", "2"] : scope === "loved" ? ["4"] : [];
 
   const drillDown = (f: Filters, s: SortSpec) => {
     setFilters(f);
@@ -154,7 +158,7 @@ export default function App() {
           onPoolChange={(pool) => setFilters({ ...filters, pool })}
           keys={filters.keys}
           onKeysChange={(keys) => setFilters({ ...filters, keys })}
-          onViewPack={(tag) => {
+          onViewPack={(tag, scope) => {
             // Maps tab filtered on the pack via the search token (editable)
             setFilters({
               ...DEFAULT_FILTERS,
@@ -162,6 +166,7 @@ export default function App() {
               pool: filters.pool,
               keys: filters.keys,
               ruleset,
+              statuses: scopeStatuses(scope),
               q: `pack=${tag}`,
             });
             setView("table");
@@ -178,8 +183,37 @@ export default function App() {
               ruleset,
               srMin: String(min),
               srMax: max == null ? "" : String(max),
-              statuses:
-                scope === "ranked" ? ["1", "2"] : scope === "loved" ? ["4"] : [],
+              statuses: scopeStatuses(scope),
+            });
+            setView("table");
+          }}
+          onViewRate={(min, max, scope) => {
+            // Maps tab on that playback-rate bucket
+            setFilters({
+              ...DEFAULT_FILTERS,
+              mode: filters.mode,
+              pool: filters.pool,
+              keys: filters.keys,
+              ruleset,
+              statuses: scopeStatuses(scope),
+              // fixed decimals: String(1) is "1", which read as "Rate 1x"
+              // next to a "1.09x" upper bound
+              rateMin: min.toFixed(1),
+              rateMax: Number.isInteger(max) ? max.toFixed(1) : max.toFixed(2),
+            });
+            setView("table");
+          }}
+          onViewBucket={(f, scope) => {
+            // any completion bar: its bucket as Maps filters. The hero bars
+            // carry their own status and win over the dashboard scope.
+            setFilters({
+              ...DEFAULT_FILTERS,
+              mode: filters.mode,
+              pool: filters.pool,
+              keys: filters.keys,
+              ruleset,
+              statuses: scopeStatuses(scope),
+              ...f,
             });
             setView("table");
           }}

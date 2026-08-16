@@ -58,6 +58,12 @@ CREATE TABLE IF NOT EXISTS scores (
   legacy_perfect INTEGER,
   fc_state INTEGER NOT NULL,          -- 0 perfect combo, 1 FC no-miss, 2 non-FC
   mods TEXT NOT NULL DEFAULT '[]',    -- JSON [{acronym, settings?}]
+  -- playback rate of the score (lazer 0.5x-2.0x): the mod's speed_change
+  -- setting, else the mean of initial_rate/final_rate for the ramp mods
+  -- (WU/WD/AS), else 1.5 for DT/NC and 0.75 for HT/DC, else 1.0. Materialized:
+  -- it is sorted, filtered and grouped on, and digging it out of the mods
+  -- JSON per row made every one of those a full scan.
+  rate REAL NOT NULL DEFAULT 1.0,
   statistics TEXT NOT NULL DEFAULT '{}',
   maximum_statistics TEXT,
   passed INTEGER NOT NULL DEFAULT 1,

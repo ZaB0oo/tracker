@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { rulesetStatFields } from "../rulesets";
 import { fetchSkillCurve, fetchSnapshot, fetchStats, fetchTimeline, type DashScope, type Snapshot, type SnapshotBucket } from "../api";
@@ -16,11 +16,13 @@ import { VisibilityMenu } from "./VisibilityMenu";
 import { displayGrade, fmtNum } from "../format";
 import {
   FC_LABELS,
+  type Stats,
   GRADE_ORDER,
   type PoolMode,
   type Bucket,
   type SkillCurveBucket,
   type DistCounts,
+  type Filters,
 } from "../types";
 
 const fmtK = (n: number) =>
@@ -42,6 +44,156 @@ function tipPos(fx: number, fy: number): React.CSSProperties {
     transform: `translate(${anchorX}, ${anchorY})`,
   };
 }
+
+/** One column of the rate histogram: a VERTICAL completion bar. */
+function RateColumn({
+  b,
+  heightPct,
+  label,
+  gaugeHidden,
+  countryLabel,
+  onView,
+}: {
+  b: Stats["byRate"][number];
+  heightPct: number;
+  label: string;
+  gaugeHidden: (id: string) => boolean;
+  countryLabel: string;
+  onView?: () => void;
+}) {
+  const [hover, setHover] = useState(false);
+  const { wrapRef, tipRef, tipStyle, clearTip } = useTipPlacement(hover);
+  // same rule as the completion bars: biggest layer first, the smaller ones
+  // drawn on top of it, so every enabled gauge stays visible
+  const layers = GAUGES.filter(
+    (g) => !gaugeHidden(g.vis) && ((b as Record<string, number>)[g.id] ?? 0) > 0
+  )
+    .map((g) => ({ ...g, v: (b as Record<string, number>)[g.id] ?? 0 }))
+    .sort((x, y) => y.v - x.v);
+  const share = (v: number) => (b.played > 0 ? (v / b.played) * 100 : 0);
+  return (
+    <div
+      ref={wrapRef}
+      className={`rate-col${hover ? " on" : ""}`}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => {
+        setHover(false);
+        clearTip();
+      }}
+      onDoubleClick={onView}
+      title="Double-click: show these maps"
+    >
+      <span className="rate-col-value">{b.played ? fmtNum(b.played) : ""}</span>
+      <div className="rate-col-bar-wrap">
+        <div className="rate-col-bar" style={{ height: `${heightPct}%` }}>
+          {layers.map((l) => (
+            <div
+              key={l.id}
+              className="rate-col-layer"
+              style={{ height: `${share(l.v)}%`, background: l.color }}
+            />
+          ))}
+        </div>
+      </div>
+      <span className="rate-col-label">{label}x</span>
+      {hover && b.played > 0 && (
+        <div ref={tipRef} className="bar-tip" style={tipStyle}>
+          <div className="bar-tip-row">
+            <b className="bar-tip-title">{label}x</b>
+            <b>{fmtNum(b.played)}</b>&nbsp;maps
+          </div>
+          {/* FIXED order (declaration order), independent from layer sizes */}
+          {GAUGES.filter(
+            (g) => !gaugeHidden(g.vis) && ((b as Record<string, number>)[g.id] ?? 0) > 0
+          ).map((g) => {
+            const v = (b as Record<string, number>)[g.id] ?? 0;
+            return (
+              <div key={g.id} className="bar-tip-row">
+                <span className="gauge-dot" style={{ background: g.color }} />{" "}
+                {g.id === "country" ? countryLabel : g.label} <b>{fmtNum(v)}</b>
+                <span className="tip-dim"> ({share(v).toFixed(1)}%)</span>
+                {g.id === "fc" && b.pfc > 0 && (
+                  <span className="tip-dim"> · PFC {fmtNum(b.pfc)}</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Playback-rate histogram: how many maps have their BEST score at each rate
+ * (0.1 buckets over lazer's 0.5x-2.0x range, 2.0x on its own). A rate belongs
+ * to the SCORE, not to the map, so there is no "available maps" denominator
+ * here — the bar height is the map count and the gauge layers are shares OF
+ * that count.
+ */
+const RateHistogram = memo(function RateHistogram({
+  rows,
+  gaugeHidden,
+  countryLabel = "#1",
+  onViewRate,
+}: {
+  rows: Stats["byRate"];
+  gaugeHidden: (id: string) => boolean;
+  countryLabel?: string;
+  onViewRate?: (min: number, max: number) => void;
+}) {
+  if (!rows.length) return null;
+  // fixed 0.5x-2.0x axis: the empty buckets are information too (a gap at
+  // 1.3x says something), and the axis stops moving between refreshes
+  const LO = 5;
+  const HI = 20;
+  const byBucket = new Map(rows.map((r) => [r.bucket, r]));
+  const empty = {
+    played: 0, fc: 0, pfc: 0, ss: 0, splus: 0, country: 0,
+    top1: 0, top8: 0, top15: 0, top25: 0, top50: 0, top100: 0, onem: 0,
+  };
+  const buckets: Stats["byRate"] = [];
+  for (let b = LO; b <= HI; b++)
+    buckets.push(byBucket.get(b) ?? { bucket: b, ...empty });
+  const max = Math.max(...buckets.map((b) => b.played), 1);
+  // LOG height: the counts span single digits to 30k+, and a linear scale
+  // flattened every small bucket into an invisible line
+  const height = (v: number) =>
+    v <= 0 ? 0 : (Math.log10(v + 1) / Math.log10(max + 1)) * 100;
+
+  return (
+    <div className="panel rate-panel">
+      <h3>
+        Maps by rate
+        <span className="dim">
+          {" "} · log scale
+        </span>
+      </h3>
+      <div className="rate-chart">
+        {buckets.map((b) => (
+          <RateColumn
+            key={b.bucket}
+            b={b}
+            heightPct={height(b.played)}
+            label={(b.bucket / 10).toFixed(1)}
+            gaugeHidden={gaugeHidden}
+            countryLabel={countryLabel}
+            onView={() =>
+              // [rate, rate+0.1), and the 2.0x bar is that exact rate. Rates
+              // are stored rounded to 2 decimals, so the inclusive upper
+              // bound of a bucket is simply x.x9 — computed on INTEGERS, or
+              // the float noise leaked into the filter (1.0990000000000002).
+              onViewRate?.(
+                b.bucket / 10,
+                b.bucket >= 20 ? 2 : (b.bucket * 10 + 9) / 100
+              )
+            }
+          />
+        ))}
+      </div>
+    </div>
+  );
+});
 
 /**
  * Skill curve (basis of "missing"): x-axis star rating, y-axis predicted
@@ -275,6 +427,34 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
  * Completion gauge. The yellow portion (country) is overlaid on the played
  * portion: it shows the share of country #1s out of the gauge total.
  */
+/**
+ * Places a hover tooltip by MEASURING it: rendered fixed, put above the
+ * anchor when its actual height fits the viewport, else below, clamped
+ * horizontally — it can never overflow the window. Shared by the completion
+ * bars and the rate histogram.
+ */
+function useTipPlacement(hover: boolean) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const tipRef = useRef<HTMLDivElement>(null);
+  const [tipStyle, setTipStyle] = useState<React.CSSProperties>();
+  useLayoutEffect(() => {
+    if (!hover || !tipRef.current || !wrapRef.current) return;
+    const anchor = wrapRef.current.getBoundingClientRect();
+    const tip = tipRef.current.getBoundingClientRect();
+    const above = anchor.top - tip.height - 7;
+    const top = above >= 8 ? above : anchor.bottom + 7;
+    const left = Math.max(
+      8,
+      Math.min(
+        anchor.left + anchor.width / 2 - tip.width / 2,
+        window.innerWidth - tip.width - 8
+      )
+    );
+    setTipStyle({ position: "fixed", top, left, bottom: "auto", transform: "none" });
+  }, [hover]);
+  return { wrapRef, tipRef, tipStyle, clearTip: () => setTipStyle(undefined) };
+}
+
 /** Selectable completion gauges (one bar layer each). The legend groups them:
  * grades, global-top tiers (cumulative shades), country #1. */
 export const GAUGES = [
@@ -326,24 +506,7 @@ function Bar({
   // width (gauge counts used to overflow and vanish on narrow bars). The
   // full detail lives in a hover tooltip, one line per visible gauge.
   const [hover, setHover] = useState(false);
-  // Real measurement instead of a guess: the tooltip is rendered fixed, then
-  // placed above the bar if its ACTUAL height fits the viewport, else below,
-  // clamped horizontally — it can never overflow anything again.
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const tipRef = useRef<HTMLDivElement>(null);
-  const [tipStyle, setTipStyle] = useState<React.CSSProperties>();
-  useLayoutEffect(() => {
-    if (!hover || !tipRef.current || !wrapRef.current) return;
-    const bar = wrapRef.current.getBoundingClientRect();
-    const tip = tipRef.current.getBoundingClientRect();
-    const above = bar.top - tip.height - 7;
-    const top = above >= 8 ? above : bar.bottom + 7;
-    const left = Math.max(
-      8,
-      Math.min(bar.left + bar.width / 2 - tip.width / 2, window.innerWidth - tip.width - 8)
-    );
-    setTipStyle({ position: "fixed", top, left, bottom: "auto", transform: "none" });
-  }, [hover]);
+  const { wrapRef, tipRef, tipStyle, clearTip } = useTipPlacement(hover);
   return (
     <div
       ref={wrapRef}
@@ -351,7 +514,7 @@ function Bar({
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => {
         setHover(false);
-        setTipStyle(undefined);
+        clearTip();
       }}
     >
       <div className="bar">
@@ -433,6 +596,8 @@ function GaugeLegend({
 
 interface DistRow {
   label: string;
+  /** double-click: the Maps filters that select exactly this bucket */
+  view?: Partial<Filters>;
   total: number;
   played: number | null;
   country?: number | null;
@@ -454,17 +619,25 @@ const DistPanel = memo(function DistPanel({
   rows,
   gaugeHidden,
   countryLabel,
+  onView,
 }: {
   title: string;
   rows: DistRow[];
   gaugeHidden: (id: string) => boolean;
   countryLabel?: string;
+  /** double-click a bar: list that bucket in the Maps tab */
+  onView?: (f: Partial<Filters>) => void;
 }) {
   return (
     <div className="panel">
       <h3>Completion by {title}</h3>
       {rows.map((r) => (
-        <div key={r.label} className="dist-row">
+        <div
+          key={r.label}
+          className={`dist-row${r.view && onView ? " dist-row-view" : ""}`}
+          onDoubleClick={r.view && onView ? () => onView(r.view!) : undefined}
+          title={r.view && onView ? "Double-click: show these maps" : undefined}
+        >
           <span className="dist-label">{r.label}</span>
           <Bar row={r} total={r.total} gaugeHidden={gaugeHidden} label={`${title} ${r.label}`} countryLabel={countryLabel} />
         </div>
@@ -485,6 +658,8 @@ export function Dashboard({
   onKeysChange,
   onViewPack,
   onViewSr,
+  onViewRate,
+  onViewBucket,
 }: {
   ruleset?: number;
   /** map pool of the viewed ruleset — same choice as the Maps view */
@@ -494,10 +669,14 @@ export function Dashboard({
   keys?: string[];
   onKeysChange?: (keys: string[]) => void;
   /** opens the Maps tab filtered on a pack (search token pack=TAG) */
-  onViewPack?: (tag: string) => void;
+  onViewPack?: (tag: string, scope: DashScope) => void;
   /** opens the Maps tab filtered on a star-rating range (max null = no cap),
    * carrying the dashboard's status scope so the list matches the curve */
   onViewSr?: (min: number, max: number | null, scope: DashScope) => void;
+  /** opens the Maps tab filtered on a playback-rate range */
+  onViewRate?: (min: number, max: number, scope: DashScope) => void;
+  /** opens the Maps tab on a completion-bar bucket (star rating, year, …) */
+  onViewBucket?: (f: Partial<Filters>, scope: DashScope) => void;
 }) {
   // witherscore is an osu!std-only proposal; everything else (time machine,
   // skill curve, missing) is per-ruleset
@@ -569,6 +748,29 @@ export function Dashboard({
     else run(tmDay);
   }, [tmDay]);
 
+  // Rate histogram rows: the snapshot replays the rate of the best held at
+  // that date, so the panel follows the time machine like the others.
+  const rateRows = useMemo<Stats["byRate"]>(() => {
+    const live = data?.byRate ?? [];
+    if (tmDay == null || snap == null) return live;
+    return (snap.byRate ?? []).map((r) => ({
+      bucket: Number(r.bucket),
+      played: r.played,
+      fc: r.fc,
+      pfc: r.pfc ?? 0,
+      ss: r.ss ?? 0,
+      splus: r.splus ?? 0,
+      country: r.country,
+      onem: r.onem ?? 0,
+      top1: r.top1 ?? 0,
+      top8: r.top8 ?? 0,
+      top15: r.top15 ?? 0,
+      top25: r.top25 ?? 0,
+      top50: r.top50 ?? 0,
+      top100: r.top100 ?? 0,
+    }));
+  }, [data, snap, tmDay != null]);
+
   // Per-stat panels: memoized so they do NOT re-render on every slider tick —
   // their rows only change when the (debounced) snapshot or live stats change.
   const dists = useMemo<{ title: string; rows: DistRow[] }[]>(() => {
@@ -614,17 +816,33 @@ export function Dashboard({
     const bucketRows = (
       buckets: Bucket[],
       label: (b: number) => string,
-      dict: Map<string, SnapshotBucket> | null
+      dict: Map<string, SnapshotBucket> | null,
+      /** Maps filters selecting the bucket (double-click drill-down) */
+      view?: (b: number) => Partial<Filters>
     ): DistRow[] =>
       buckets.map((b) => ({
         label: label(b.bucket),
+        view: view?.(b.bucket),
         ...over(dict, b.bucket, liveOf(b)),
       }));
+    // Every panel bucket maps back to a filter range. The server buckets by
+    // truncation (CAST AS INTEGER), so a bucket is [b, b+1) — but the table
+    // filters are inclusive, hence an upper bound a hair short of the next
+    // bucket (same epsilon as the skill-curve drill-down). The capped last
+    // bucket ("10★+", "2500+") simply drops its upper bound.
+    const capped = (b: number, cap: number, lo: number, hi: number) =>
+      b >= cap ? { min: String(lo), max: "" } : { min: String(lo), max: String(hi) };
+    /** [b, b+1) expressed as an inclusive upper bound */
+    const upTo = (b: number) => Math.round((b + 0.99999) * 100000) / 100000;
     return [
       {
         title: "star rating",
         rows: data.bySr.map((b) => ({
           label: b.sr >= 10 ? "10★+" : `${b.sr}★–${b.sr + 1}★`,
+          view: {
+            srMin: String(b.sr),
+            srMax: b.sr >= 10 ? "" : String(upTo(b.sr)),
+          },
           ...over(snapOf("bySr"), b.sr, liveOf(b)),
         })),
       },
@@ -632,25 +850,55 @@ export function Dashboard({
         title: "rank year",
         rows: data.byYear.map((b) => ({
           label: b.year,
+          // the Maps tab filters on the ranked DATE; a full calendar year is
+          // exactly what the panel buckets on
+          view: { rankedFrom: `${b.year}-01-01`, rankedTo: `${b.year}-12-31` },
           ...over(snapOf("byYear"), b.year, liveOf(b)),
         })),
       },
       {
         title: "length",
-        rows: bucketRows(data.byLen, (b) => (b >= 10 ? "10 min+" : `${b}–${b + 1} min`), snapOf("byLen")),
+        rows: bucketRows(
+          data.byLen,
+          (b) => (b >= 10 ? "10 min+" : `${b}–${b + 1} min`),
+          snapOf("byLen"),
+          // stored in seconds
+          (b) => {
+            const r = capped(b, 10, b * 60, (b + 1) * 60 - 1);
+            return { lenMin: r.min, lenMax: r.max };
+          }
+        ),
       },
       {
         title: "max combo",
         rows: bucketRows(
           data.byCombo,
           (b) => (b >= 10 ? "2500+" : `${b * 250}–${(b + 1) * 250}`),
-          snapOf("byCombo")
+          snapOf("byCombo"),
+          (b) => {
+            const r = capped(b, 10, b * 250, (b + 1) * 250 - 1);
+            return { comboMin: r.min, comboMax: r.max };
+          }
         ),
       },
       ...(rulesetStatFields(ruleset).ar
-        ? [{ title: "AR", rows: bucketRows(data.byAr, statLabel, snapOf("byAr")) }]
+        ? [
+            {
+              title: "AR",
+              rows: bucketRows(data.byAr, statLabel, snapOf("byAr"), (b) => {
+                const r = capped(b, 10, b, upTo(b));
+                return { arMin: r.min, arMax: r.max };
+              }),
+            },
+          ]
         : []),
-      { title: "OD", rows: bucketRows(data.byOd, statLabel, snapOf("byOd")) },
+      {
+        title: "OD",
+        rows: bucketRows(data.byOd, statLabel, snapOf("byOd"), (b) => {
+          const r = capped(b, 10, b, upTo(b));
+          return { odMin: r.min, odMax: r.max };
+        }),
+      },
       ...(rulesetStatFields(ruleset).cs
         ? [
             {
@@ -658,14 +906,54 @@ export function Dashboard({
               rows: bucketRows(
                 data.byCs,
                 ruleset === 3 ? keysLabel : statLabel,
-                snapOf("byCs")
+                snapOf("byCs"),
+                (b) => {
+                  // mania: this dimension IS the key count, an exact integer,
+                  // and its last bucket is 18K+ (dual-stage maps)
+                  const r =
+                    ruleset === 3
+                      ? capped(b, 18, b, b)
+                      : capped(b, 10, b, upTo(b));
+                  return { csMin: r.min, csMax: r.max };
+                }
               ),
             },
           ]
         : []),
-      { title: "HP", rows: bucketRows(data.byHp, statLabel, snapOf("byHp")) },
+      {
+        title: "HP",
+        rows: bucketRows(data.byHp, statLabel, snapOf("byHp"), (b) => {
+          const r = capped(b, 10, b, upTo(b));
+          return { hpMin: r.min, hpMax: r.max };
+        }),
+      },
     ];
   }, [data, snap, tmDay != null, ruleset]);
+
+  // Drill-down from any completion bar. The dashboard's Ranked/Loved scope is
+  // carried over (like the skill curve does) so the list holds exactly the
+  // maps the bar counted; the hero bars pick their own status and win.
+  // Stable identity: the DistPanel memos depend on it.
+  // Every drill-down carries the dashboard's Ranked/Loved scope, so the Maps
+  // list holds exactly what the panel counted. Wrapped in useCallback: the
+  // panels below are memoized and a fresh arrow would re-render them all on
+  // every slider tick.
+  const viewSr = useCallback(
+    (min: number, max: number | null) => onViewSr?.(min, max, scope),
+    [onViewSr, scope]
+  );
+  const viewRate = useCallback(
+    (min: number, max: number) => onViewRate?.(min, max, scope),
+    [onViewRate, scope]
+  );
+  const viewPack = useCallback(
+    (tag: string) => onViewPack?.(tag, scope),
+    [onViewPack, scope]
+  );
+  const viewBucket = useCallback(
+    (f: Partial<Filters>) => onViewBucket?.(f, scope),
+    [onViewBucket, scope]
+  );
 
   if (isLoading)
     return (
@@ -742,6 +1030,15 @@ export function Dashboard({
     top1: sumSt("top1"), top8: sumSt("top8"), top15: sumSt("top15"),
     top25: sumSt("top25"), top50: sumSt("top50"), top100: sumSt("top100"),
   });
+  const drillTitle = onViewBucket ? "Double-click: show these maps" : undefined;
+  const hero = (which: DashScope) =>
+    onViewBucket
+      ? () =>
+          viewBucket({
+            statuses:
+              which === "ranked" ? ["1", "2"] : which === "loved" ? ["4"] : [],
+          })
+      : undefined;
   const heroRanked = heroRow(eff.rankedPlayed, eff.countryRanked, eff.fcRanked, stRanked);
   const heroLoved = heroRow(eff.lovedPlayed, eff.countryLoved, eff.fcLoved, stLoved);
 
@@ -788,19 +1085,19 @@ export function Dashboard({
         <div className="hero-bars">
           <h3>Completion</h3>
           {scope === "all" && (
-            <div className="dist-row">
+            <div className={`dist-row${onViewBucket ? " dist-row-view" : ""}`} onDoubleClick={hero("all")} title={drillTitle}>
               <span className="dist-label">Global</span>
               <Bar row={heroGlobal} total={eff.total} gaugeHidden={gaugeHidden.isHidden} countryLabel={firstPlaceLabel(country)} label="Global" />
             </div>
           )}
           {scope !== "loved" && (
-            <div className="dist-row">
+            <div className={`dist-row${onViewBucket ? " dist-row-view" : ""}`} onDoubleClick={hero("ranked")} title={drillTitle}>
               <span className="dist-label">Ranked</span>
               <Bar row={heroRanked} total={eff.totalRanked} gaugeHidden={gaugeHidden.isHidden} countryLabel={firstPlaceLabel(country)} label="Ranked" />
             </div>
           )}
           {scope !== "ranked" && (
-            <div className="dist-row">
+            <div className={`dist-row${onViewBucket ? " dist-row-view" : ""}`} onDoubleClick={hero("loved")} title={drillTitle}>
               <span className="dist-label">Loved</span>
               <Bar row={heroLoved} total={eff.totalLoved} gaugeHidden={gaugeHidden.isHidden} countryLabel={firstPlaceLabel(country)} label="Loved" />
             </div>
@@ -912,9 +1209,23 @@ export function Dashboard({
         {dists
           .filter((d) => !distHidden.isHidden(d.title))
           .map((d) => (
-            <DistPanel key={d.title} title={d.title} rows={d.rows} gaugeHidden={gaugeHidden.isHidden} countryLabel={firstPlaceLabel(country)} />
+            <DistPanel
+              key={d.title}
+              title={d.title}
+              rows={d.rows}
+              gaugeHidden={gaugeHidden.isHidden}
+              countryLabel={firstPlaceLabel(country)}
+              onView={onViewBucket && viewBucket}
+            />
           ))}
       </div>
+
+      <RateHistogram
+        rows={rateRows}
+        gaugeHidden={gaugeHidden.isHidden}
+        countryLabel={firstPlaceLabel(country)}
+        onViewRate={onViewRate && viewRate}
+      />
 
       <PacksPanel
         ruleset={ruleset}
@@ -922,7 +1233,7 @@ export function Dashboard({
         pool={pool}
         keys={keys}
         scope={scope}
-        onViewPack={onViewPack}
+        onViewPack={onViewPack && viewPack}
       />
 
       <SkillCurvePanel
@@ -932,9 +1243,7 @@ export function Dashboard({
         scope={scope}
         pastBuckets={useSnapNow ? snap.curve : null}
         pastDay={useSnapNow ? snap.day : null}
-        onViewSr={
-          onViewSr && ((min, max) => onViewSr(min, max, scope))
-        }
+        onViewSr={onViewSr && viewSr}
       />
     </div>
   );

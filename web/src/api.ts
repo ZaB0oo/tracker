@@ -113,8 +113,8 @@ function buildTableQuery(
   if (filters.platform) p.set("platform", filters.platform);
   for (const k of [
     "srMin", "srMax", "arMin", "arMax", "odMin", "odMax", "hpMin", "hpMax",
-    "csMin", "csMax", "lenMin", "lenMax",
-    "globalTopMin", "globalTopMax",
+    "csMin", "csMax", "lenMin", "lenMax", "comboMin", "comboMax",
+    "globalTopMin", "globalTopMax", "rateMin", "rateMax",
     "rankedFrom", "rankedTo", "playedFrom", "playedTo",
   ] as const) {
     if (filters[k] !== "") p.set(k, filters[k]);
@@ -253,6 +253,8 @@ export interface Snapshot {
   byOd: SnapshotBucket[];
   byCs: SnapshotBucket[];
   byHp: SnapshotBucket[];
+  /** rate of the BEST at that date (bucket = rate * 10, 5..20) */
+  byRate: SnapshotBucket[];
   /** FC state of the bests at that date (same shape as Stats.fc) */
   fc: { fc_state: number; c: number }[];
   globalTops: {
@@ -625,6 +627,8 @@ export interface MetricScoreConds {
   maxScore?: number | null;
   minClassic: number | null;
   acc?: Range;
+  /** playback rate of the score (lazer 0.5x-2.0x; 1 = nomod speed) */
+  rate?: Range;
   /** score pp range (loved/unranked scores have none and never match a bound) */
   pp?: Range;
   allowedMods: string[] | null;
@@ -786,6 +790,7 @@ export const DEFAULT_METRIC_PARAMS: MetricParams = {
     maxScore: null,
     minClassic: null,
     acc: { min: null, max: null },
+    rate: { min: null, max: null },
     pp: { min: null, max: null },
     allowedMods: null,
     requiredMods: null,

@@ -401,6 +401,11 @@ export function MetricBuilder({
               onChange={(r) => setScore({ acc: r })}
             />
             <SliderRow
+              label="Rate (speed)" lo={0.5} hi={2} step={0.05}
+              value={p.score.rate ?? { min: null, max: null }}
+              onChange={(r) => setScore({ rate: r })}
+            />
+            <SliderRow
               label="pp" lo={0} hi={ppHi} step={1}
               value={p.score.pp ?? { min: null, max: null }}
               onChange={(r) => setScore({ pp: r })}

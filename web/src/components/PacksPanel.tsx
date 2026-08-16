@@ -58,7 +58,7 @@ function PackModal({
   pool: PoolMode;
   keys: string[];
   scope: DashScope;
-  onViewPack?: (tag: string) => void;
+  onViewPack?: (tag: string) => void; // scope injected by the dashboard
   onClose: () => void;
 }) {
   useEscape(onClose); // Esc closes the top-most modal

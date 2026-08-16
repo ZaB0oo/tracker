@@ -1014,6 +1014,13 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 /* typed date jump (the slider is for browsing, this is for going somewhere) */
 .tm-date-input {
   flex-shrink: 0;
+  /* FIXED box. The field goes bold on a past date, and an auto-width input
+     grew by a few pixels doing so — the flex slider next to it gave up that
+     width and the thumb jumped, which flickered at the right end where the
+     past/now boundary is crossed. */
+  width: 132px;
+  box-sizing: border-box;
+  text-align: center;
   background: var(--bg3);
   color: var(--fg);
   border: 1px solid var(--border);
@@ -1335,3 +1342,57 @@ body.overlay-body { background: transparent; }
 .pack-map-diff { color: var(--fg-dim); }
 .pack-map-loved { color: var(--accent); }
 .pack-td-acc, .pack-td-sr { text-align: right; color: var(--fg-dim); font-variant-numeric: tabular-nums; }
+
+/* playback rate of a score (DT 1.8x…) — the value IS the information, so it
+   is highlighted rather than shown as plain text */
+.rate-cell { color: var(--accent2); }
+
+/* Playback-rate histogram (dashboard): vertical completion bars */
+.rate-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 5px;
+  height: 340px;
+  margin: 6px 0 2px;
+}
+.rate-col {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  height: 100%;
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 2px 0;
+  position: relative;
+}
+.rate-col:hover, .rate-col.on { background: rgba(255, 255, 255, 0.05); }
+.rate-col-value {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.rate-col-bar-wrap { flex: 1 1 auto; width: 100%; display: flex; align-items: flex-end; }
+/* base fill = every played map of the bucket; the gauge layers stack from the
+   bottom, biggest first, exactly like the horizontal completion bars */
+.rate-col-bar {
+  width: 100%;
+  min-height: 3px;
+  border-radius: 5px 5px 0 0;
+  background: var(--accent);
+  position: relative;
+  overflow: hidden;
+}
+.rate-col-layer { position: absolute; left: 0; bottom: 0; width: 100%; }
+/* the rate is the axis of the whole chart: as readable as the counts */
+.rate-col-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* a completion bar that can be drilled into (double-click -> Maps) */
+.dist-row-view { cursor: pointer; user-select: none; }

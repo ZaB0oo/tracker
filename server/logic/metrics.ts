@@ -20,6 +20,8 @@ export interface MetricScoreConds {
   maxScore?: number | null; // upper bound on standardized score
   minClassic: number | null;
   acc?: Range; // accuracy in percent (0-100)
+  /** playback rate of the score (lazer 0.5x-2.0x; 1 = nomod speed) */
+  rate?: Range;
   pp?: Range; // score pp (loved/unranked scores have none and never match a bound)
   allowedMods: string[] | null; // no mod outside this set (null = no limit)
   requiredMods: string[] | null; // must include all of these
@@ -130,6 +132,7 @@ export function scoreWhere(c: MetricScoreConds, invert = false): string {
   if (num(c.minClassic) != null)
     w.push(`COALESCE(s.classic_total_score, s.total_score) >= ${num(c.minClassic)}`);
   range("(s.accuracy * 100)", c.acc, w);
+  range("s.rate", c.rate, w);
   range("s.pp", c.pp, w);
   if (Array.isArray(c.allowedMods)) {
     const list = c.allowedMods.filter((m) => MOD_RE.test(m));
@@ -238,6 +241,7 @@ export const DEFAULT_SCORE_CONDS: MetricScoreConds = {
   maxScore: null,
   minClassic: null,
   acc: { min: null, max: null },
+  rate: { min: null, max: null },
   pp: { min: null, max: null },
   allowedMods: null,
   requiredMods: null,

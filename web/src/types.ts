@@ -24,6 +24,8 @@ export interface TableRow {
   pp: number | null;
   mods: string | null;
   mod_multiplier: number | null;
+  /** playback rate of the best score (0.5x-2.0x, 1 = nomod speed) */
+  rate: number | null;
   fc_state: number | null;
   total_score: number | null;
   classic_total_score: number | null;
@@ -131,6 +133,13 @@ export interface Stats {
     top25: number; top50: number; top100: number;
     checked: number;
   };
+  /** playback-rate histogram of the bests (bucket = rate*10, 5..19) */
+  byRate: {
+    bucket: number; played: number; fc: number; pfc: number; ss: number;
+    splus: number; country: number; onem: number;
+    top1: number; top8: number; top15: number;
+    top25: number; top50: number; top100: number;
+  }[];
   bySr: ({ sr: number } & DistCounts)[];
   byYear: ({ year: string } & DistCounts)[];
   byAr: Bucket[];
@@ -233,6 +242,8 @@ export interface Filters {
   countryFirst: boolean;
   /** my global leaderboard position range (empty = unbounded) */
   globalTopMin: string; globalTopMax: string;
+  /** playback rate of the best (lazer 0.5x-2.0x) */
+  rateMin: string; rateMax: string;
   /** matching=true (countdown metrics): list the maps the conditions SELECT
    * (the maps to fix) instead of the missing ones */
   metricMissing: { id: number; name: string; matching?: boolean } | null;
@@ -243,6 +254,7 @@ export interface Filters {
   hpMin: string; hpMax: string;
   csMin: string; csMax: string;
   lenMin: string; lenMax: string;
+  comboMin: string; comboMax: string;
   /** full dates YYYY-MM-DD (empty = unbounded) */
   rankedFrom: string; rankedTo: string;
   playedFrom: string; playedTo: string;
@@ -262,6 +274,7 @@ export const DEFAULT_FILTERS: Filters = {
   mods: "",
   countryFirst: false,
   globalTopMin: "", globalTopMax: "",
+  rateMin: "", rateMax: "",
   metricMissing: null,
   platform: "",
   srMin: "", srMax: "",
@@ -270,6 +283,7 @@ export const DEFAULT_FILTERS: Filters = {
   hpMin: "", hpMax: "",
   csMin: "", csMax: "",
   lenMin: "", lenMax: "",
+  comboMin: "", comboMax: "",
   rankedFrom: "", rankedTo: "",
   playedFrom: "", playedTo: "",
 };

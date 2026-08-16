@@ -1,7 +1,7 @@
 import { getDb, transaction } from "../db/db.js";
 import type { SoloScore } from "../osu/types.js";
 import { classicFromStandardised } from "./rulesets.js";
-import { computeFcState } from "./score.js";
+import { computeFcState, computeRate } from "./score.js";
 import { bumpScoresVersion } from "./scoreSql.js";
 
 /**
@@ -44,12 +44,12 @@ export function saveScores(
     INSERT INTO scores (
       id, legacy_score_id, beatmap_id, user_id, ruleset, ended_at, rank,
       accuracy, max_combo, total_score, classic_total_score, pp,
-      is_perfect_combo, legacy_perfect, fc_state, mods, statistics,
+      is_perfect_combo, legacy_perfect, fc_state, mods, rate, statistics,
       maximum_statistics, passed, raw
     ) VALUES (
       @id, @legacy_score_id, @beatmap_id, @user_id, @ruleset, @ended_at, @rank,
       @accuracy, @max_combo, @total_score, @classic_total_score, @pp,
-      @is_perfect_combo, @legacy_perfect, @fc_state, @mods, @statistics,
+      @is_perfect_combo, @legacy_perfect, @fc_state, @mods, @rate, @statistics,
       @maximum_statistics, @passed, @raw
     )
     ON CONFLICT(id) DO UPDATE SET
@@ -86,6 +86,7 @@ export function saveScores(
           s.legacy_perfect == null ? null : s.legacy_perfect ? 1 : 0,
         fc_state: fcState,
         mods: JSON.stringify(s.mods ?? []),
+        rate: computeRate(s.mods ?? []),
         statistics: JSON.stringify(s.statistics ?? {}),
         maximum_statistics: s.maximum_statistics
           ? JSON.stringify(s.maximum_statistics)

@@ -271,6 +271,34 @@ statsRouter.get("/stats", (req, res) => {
     )
     .all();
 
+  // Playback-rate histogram (0.1 buckets, 0.5x-2.0x): the rate of each map's
+  // BEST. Unlike the other dimensions a rate is a property of the SCORE, so
+  // "total" has no meaning here — only played/FC/grades do.
+  const byRate = db
+    .prepare(
+      `SELECT MIN(MAX(CAST(s.rate * 10 AS INTEGER), 5), 20) AS bucket,
+        COUNT(*) played,
+        SUM(COALESCE(u.any_fc, 0)) fc,
+        SUM(CASE WHEN s.fc_state = 0 THEN 1 ELSE 0 END) pfc,
+        SUM(CASE WHEN s.rank IN ('X','XH') THEN 1 ELSE 0 END) ss,
+        SUM(CASE WHEN s.rank IN ('S','SH','X','XH') THEN 1 ELSE 0 END) splus,
+        SUM(CASE WHEN u.global_rank = 1 THEN 1 ELSE 0 END) top1,
+        SUM(CASE WHEN u.global_rank <= 8 THEN 1 ELSE 0 END) top8,
+        SUM(CASE WHEN u.global_rank <= 15 THEN 1 ELSE 0 END) top15,
+        SUM(CASE WHEN u.global_rank <= 25 THEN 1 ELSE 0 END) top25,
+        SUM(CASE WHEN u.global_rank <= 50 THEN 1 ELSE 0 END) top50,
+        SUM(CASE WHEN u.global_rank <= 100 THEN 1 ELSE 0 END) top100,
+        ${R === 3 ? "SUM(CASE WHEN om.beatmap_id IS NOT NULL THEN 1 ELSE 0 END)" : "0"} onem,
+        SUM(COALESCE(u.country_first, 0)) country
+       FROM beatmap_user u
+       JOIN beatmaps b ON b.id = u.beatmap_id AND u.ruleset = ${R}
+       JOIN scores s ON s.id = u.best_lazer_score_id
+       ${ONEM_JOIN}
+       WHERE ${POOL} AND b.status IN ${STATUSES}
+       GROUP BY bucket ORDER BY bucket`
+    )
+    .all();
+
   const byAr = dist("b.ar", 10);
   const byOd = dist("b.od", 10);
   const byHp = dist("b.hp", 10);
@@ -284,7 +312,7 @@ statsRouter.get("/stats", (req, res) => {
   const payload = {
     totals, scoreSums: { ...scoreSums, ...missingSums }, grades, fc, globalTops,
     oneMillions,
-    bySr, byYear, byAr, byOd, byHp, byCs, byLen, byCombo, byStatus,
+    bySr, byYear, byAr, byOd, byHp, byCs, byLen, byCombo, byStatus, byRate,
   };
   statsCache.set(cacheKey, { version, at: Date.now(), payload });
   res.json(payload);
@@ -647,11 +675,12 @@ interface SnapIndex {
   country: ([string, number][] | undefined)[];
   /** transitions of the BEST score, ALIGNED WITH maps[] (not keyed by id: the
    * snapshot walks all 150k maps per slider tick and hash lookups dominated
-   * the cost): [day, gradeCode, fc_state, standardised, classic].
+   * the cost): [day, gradeCode, fc_state, standardised, classic, rateBucket].
    * gradeCode: 2 = SS, 1 = S+, 0 = below. The grade gauges follow leaderboard
    * semantics (grade OF the best), which is not monotone: an SS beaten later
-   * by a higher non-SS play disappears. */
-  bests: ([string, number, number, number, number][] | undefined)[];
+   * by a higher non-SS play disappears. rateBucket is rate*10 clamped to
+   * 5..20, exactly like the live histogram. */
+  bests: ([string, number, number, number, number, number][] | undefined)[];
   /** global leaderboard position transitions, aligned: [day, rank | 0] */
   global: ([string, number][] | undefined)[];
   mapIds: number[];
@@ -773,14 +802,15 @@ function buildSnapshotIndex(
       `SELECT s.beatmap_id AS bid, s.ended_at AS at,
               COALESCE(s.classic_total_score, s.total_score) AS total,
               s.total_score AS std,
-              s.rank, s.fc_state AS fcState
+              s.rank, s.fc_state AS fcState, s.rate
        FROM scores s WHERE s.ruleset = ${R} AND s.passed = 1
        ORDER BY s.ended_at`
     )
     .all() as {
-    bid: number; at: string; total: number; std: number; rank: string; fcState: number;
+    bid: number; at: string; total: number; std: number; rank: string;
+    fcState: number; rate: number;
   }[];
-  const bests: ([string, number, number, number, number][] | undefined)[] =
+  const bests: ([string, number, number, number, number, number][] | undefined)[] =
     new Array(mapIds.length);
   const bestTotal = new Map<number, number>();
   for (const sc of allScores) {
@@ -796,7 +826,10 @@ function buildSnapshotIndex(
         : sc.rank === "S" || sc.rank === "SH"
           ? 1
           : 0;
-    (bests[i] ??= []).push([sc.at.slice(0, 10), g, sc.fcState, sc.std, sc.total]);
+    // same bucket as the live histogram: CAST(rate * 10 AS INTEGER) truncates,
+    // clamped to lazer's 0.5x-2.0x range
+    const rb = Math.min(Math.max(Math.floor((sc.rate ?? 1) * 10), 5), 20);
+    (bests[i] ??= []).push([sc.at.slice(0, 10), g, sc.fcState, sc.std, sc.total, rb]);
   }
 
   // Global leaderboard position over time. The initial sweep records NO event
@@ -905,6 +938,7 @@ statsRouter.get("/snapshot", (req, res) => {
   const bestClassic = new Float64Array(n);
   const fcStateAt = new Int8Array(n).fill(-1); // -1 = not played that day
   const gradeAt = new Int8Array(n); // 2 = SS, 1 = S+, 0 = below
+  const rateAt = new Int8Array(n); // rate*10 of that best, 0 = not played
   const rankAt = new Int32Array(n);
   const c1At = new Uint8Array(n);
   // curve samples per 0.1★ slice, reused arrays (no Map, no per-request alloc)
@@ -922,6 +956,7 @@ statsRouter.get("/snapshot", (req, res) => {
           fcStateAt[i] = t[2];
           bestStd[i] = t[3];
           bestClassic[i] = t[4];
+          rateAt[i] = t[5];
         }
       if (m.q >= 0 && bestStd[i] > 0) qs[m.q].push(bestStd[i]);
       const ct = country[i];
@@ -946,10 +981,11 @@ statsRouter.get("/snapshot", (req, res) => {
 
   // Buckets are small integers: plain arrays instead of Map.get() 1.2M times
   const AGG_LEN = 19; // mania "CS" (key count) reaches 18
-  const arr = () => Array.from({ length: AGG_LEN }, mkAgg);
+  const arr = (len = AGG_LEN) => Array.from({ length: len }, mkAgg);
   const dims = {
     bySr: arr(), byLen: arr(), byCombo: arr(),
     byAr: arr(), byOd: arr(), byCs: arr(), byHp: arr(),
+    byRate: arr(21), // rate*10, 0.5x-2.0x
   };
   const byYear = new Map<string, Agg>(); // the only non-numeric dimension
   // per-slice aggregates for the historical curve panel
@@ -1023,6 +1059,8 @@ statsRouter.get("/snapshot", (req, res) => {
     bumpArr(dims.byOd, m.od, h);
     bumpArr(dims.byCs, m.cs, h);
     bumpArr(dims.byHp, m.hp, h);
+    // a rate belongs to the SCORE: only a map WITH a best that day has one
+    if (cleared && rateAt[i] > 0) bumpArr(dims.byRate, rateAt[i], h);
     if (m.year != null) {
       let a = byYear.get(m.year);
       if (!a) byYear.set(m.year, (a = mkAgg()));
@@ -1036,7 +1074,7 @@ statsRouter.get("/snapshot", (req, res) => {
     day,
     bySr: out(dims.bySr), byYear: outYear(), byLen: out(dims.byLen),
     byCombo: out(dims.byCombo), byAr: out(dims.byAr), byOd: out(dims.byOd),
-    byCs: out(dims.byCs), byHp: out(dims.byHp),
+    byCs: out(dims.byCs), byHp: out(dims.byHp), byRate: out(dims.byRate),
     fc: fcCounts.map((c, fc_state) => ({ fc_state, c })).filter((f) => f.c > 0),
     globalTops: tops,
     scoreSums: {
