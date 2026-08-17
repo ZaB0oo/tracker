@@ -136,14 +136,16 @@ export default function App() {
       {view === "metrics" && (
         <MetricsView
           ruleset={ruleset}
-          onMissingMaps={(id, name, matching, mRuleset, mPool) =>
+          onMissingMaps={(ids, name, matching, mRuleset, mPool) =>
             drillDown(
               {
                 ...DEFAULT_FILTERS,
                 mode: filters.mode,
                 ruleset: mRuleset ?? 0,
+                // each metric already applies its own pool inside its term;
+                // this one only matters when they all agree on it
                 pool: mPool ?? "all",
-                metricMissing: { id, name, matching },
+                metricMissing: { ids, name, matching },
               },
               [{ id: "star_rating", desc: false }]
             )

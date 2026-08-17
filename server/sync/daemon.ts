@@ -1318,7 +1318,10 @@ export function applyCountryCheck(
     );
   }
   db.prepare(
-    "UPDATE beatmap_user SET country_first = ?, country_checked_at = datetime('now') WHERE beatmap_id = ? AND ruleset = ?"
+    `UPDATE beatmap_user
+       SET country_first = ?, country_checked_at = datetime('now'),
+           country_seen_at = datetime('now')
+     WHERE beatmap_id = ? AND ruleset = ?`
   ).run(isFirst, beatmapId, ruleset);
 }
 
@@ -1346,15 +1349,26 @@ export async function runCountrySweep(force = false): Promise<void> {
   countryWanted = true;
   try {
     const db = getDb();
-    // one shared queue across the active rulesets (specific maps + converts);
-    // held #1s first, then std before the other modes
+    // One shared queue across the active rulesets (specific maps + converts).
+    // Priority, in order:
+    //  1. maps NEVER checked — the only ones that can still teach us anything;
+    //  2. then held #1s, oldest check first (snipe detection);
+    //  3. then the rest, oldest check first.
+    // Rule 1 matters during a full re-sweep: the 48h rotation keeps putting
+    // the held #1s back in the queue, and with ~20k of them at one request
+    // every 5s they used to jump ahead of maps that had never been looked at,
+    // which could starve them for days. country_seen_at survives the re-queue,
+    // country_checked_at does not.
     const nextBatch = db.prepare(
       `SELECT u.beatmap_id AS id, u.ruleset AS r FROM beatmap_user u
        JOIN beatmaps b ON b.id = u.beatmap_id
        WHERE u.played = 1 AND u.country_checked_at IS NULL
          AND u.ruleset IN (${sqlIn(getStartedRulesets())})
          AND (b.ruleset = u.ruleset OR b.ruleset = 0)
-       ORDER BY u.country_first DESC, u.ruleset, u.beatmap_id
+       ORDER BY u.country_seen_at IS NOT NULL,
+                u.country_first DESC,
+                u.country_seen_at,
+                u.ruleset, u.beatmap_id
        LIMIT 200`
     );
     let done = 0;

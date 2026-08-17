@@ -244,9 +244,10 @@ export interface Filters {
   globalTopMin: string; globalTopMax: string;
   /** playback rate of the best (lazer 0.5x-2.0x) */
   rateMin: string; rateMax: string;
-  /** matching=true (countdown metrics): list the maps the conditions SELECT
-   * (the maps to fix) instead of the missing ones */
-  metricMissing: { id: number; name: string; matching?: boolean } | null;
+  /** Maps left to do for one or more metrics (union when there are several).
+   * `matching` only drives the badge wording (countdown metrics say "to fix"),
+   * the direction itself is derived per metric on the server. */
+  metricMissing: { ids: number[]; name: string; matching?: boolean } | null;
   platform: "" | "lazer" | "stable";
   srMin: string; srMax: string;
   arMin: string; arMax: string;
@@ -255,6 +256,9 @@ export interface Filters {
   csMin: string; csMax: string;
   lenMin: string; lenMax: string;
   comboMin: string; comboMax: string;
+  /** hit counts of the best score, keyed by statistic (see RULESET_HIT_FIELDS).
+   * Bounds are strings so an empty box stays empty, like the other ranges. */
+  hits: Record<string, { min: string; max: string }>;
   /** full dates YYYY-MM-DD (empty = unbounded) */
   rankedFrom: string; rankedTo: string;
   playedFrom: string; playedTo: string;
@@ -284,6 +288,7 @@ export const DEFAULT_FILTERS: Filters = {
   csMin: "", csMax: "",
   lenMin: "", lenMax: "",
   comboMin: "", comboMax: "",
+  hits: {},
   rankedFrom: "", rankedTo: "",
   playedFrom: "", playedTo: "",
 };
@@ -302,3 +307,24 @@ export const FC_LABELS: Record<number, string> = {
   1: "FC",
   2: "non-FC",
 };
+
+/**
+ * Filters coming from outside the current session (saved presets in
+ * localStorage): fills in what a version that predates a field would not have.
+ */
+export function normalizeFilters(f: Filters): Filters {
+  const legacy = f.metricMissing as unknown as { id?: number } | null;
+  return {
+    ...DEFAULT_FILTERS,
+    ...f,
+    hits: f.hits ?? {},
+    metricMissing:
+      f.metricMissing == null
+        ? null
+        : {
+            ...f.metricMissing,
+            // presets saved when a single metric was the only possibility
+            ids: f.metricMissing.ids ?? (legacy?.id != null ? [legacy.id] : []),
+          },
+  };
+}

@@ -103,6 +103,20 @@ const SLIDER_END_MISS =
   "MAX(0, COALESCE(CAST(json_extract(s.maximum_statistics,'$.slider_tail_hit') AS INTEGER),0)" +
   " - COALESCE(CAST(json_extract(s.statistics,'$.slider_tail_hit') AS INTEGER),0))";
 
+/**
+ * SQL counting one kind of hit in the score aliased `s`. Most keys are raw
+ * osu-web statistics names (`great`, `ok`, `meh`, `miss`, `large_tick_hit`…);
+ * two are computed and have no counterpart in the JSON. Shared with the Maps
+ * filters so both places count the same thing. Returns null on a key that
+ * cannot be trusted in an interpolated string.
+ */
+export function hitCountExpr(key: string): string | null {
+  if (key === "slider_end_miss") return SLIDER_END_MISS;
+  if (key === "imperfections") return `(${N100} + ${SLIDER_END_MISS})`;
+  if (!/^[a-z_]{2,32}$/.test(key)) return null;
+  return `COALESCE(CAST(json_extract(s.statistics,'$.${key}') AS INTEGER),0)`;
+}
+
 function range(expr: string, r: Range | undefined, out: string[]): void {
   if (!r) return;
   const lo = num(r.min);

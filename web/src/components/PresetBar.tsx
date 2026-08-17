@@ -1,7 +1,8 @@
 import { useState } from "react";
-import type { Filters } from "../types";
+import { normalizeFilters, type Filters } from "../types";
 import type { SortSpec } from "../App";
 import { NamePrompt } from "./NamePrompt";
+import { appConfirm } from "../dialogs";
 
 interface SavedPreset {
   label: string;
@@ -56,13 +57,15 @@ export function PresetBar({
       )}
       {custom.map((p) => (
         <span key={p.label} className="chip chip-custom">
-          <button className="chip-apply" onClick={() => onApply({ ...p.filters, mode: filters.mode }, p.sort)}>
+          <button className="chip-apply" onClick={() => onApply(normalizeFilters({ ...p.filters, mode: filters.mode }), p.sort)}>
             {p.label}
           </button>
           <button
             className="chip-del"
             title="Delete this preset"
-            onClick={() => removeCustom(p.label)}
+            onClick={() => {
+              if (appConfirm(`Delete preset “${p.label}”?`)) removeCustom(p.label);
+            }}
           >
             ✕
           </button>

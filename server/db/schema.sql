@@ -64,6 +64,10 @@ CREATE TABLE IF NOT EXISTS scores (
   -- it is sorted, filtered and grouped on, and digging it out of the mods
   -- JSON per row made every one of those a full scan.
   rate REAL NOT NULL DEFAULT 1.0,
+  -- standardised mod multiplier. The API only hands it over on lazer scores
+  -- that carry mods, so it is learned from those and applied to the rest
+  -- (see logic/modMultiplier.ts). NULL = cannot be known without guessing.
+  mod_multiplier REAL,
   statistics TEXT NOT NULL DEFAULT '{}',
   maximum_statistics TEXT,
   passed INTEGER NOT NULL DEFAULT 1,
@@ -83,6 +87,11 @@ CREATE TABLE IF NOT EXISTS beatmap_user (
   any_fc INTEGER NOT NULL DEFAULT 0,  -- at least one FC (any mods)
   country_first INTEGER NOT NULL DEFAULT 0, -- I hold the country #1 on the leaderboard
   country_checked_at TEXT,                  -- last country leaderboard check
+  -- Same instant, but NEVER cleared by a re-queue: country_checked_at doubles
+  -- as the sweep queue (NULL = to check), so resetting it destroys the only
+  -- trace of a map having ever been checked. This one keeps that history, and
+  -- lets the queue put the never-checked maps first.
+  country_seen_at TEXT,
   -- Materialized "realistic missing" (skill-curve prediction minus my best),
   -- refreshed when scores change or the curve is recomputed: keeps /table and
   -- /stats free of the heavy per-row prediction CASE.

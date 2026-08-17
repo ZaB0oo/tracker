@@ -2,6 +2,7 @@ import { getDb, transaction } from "../db/db.js";
 import type { SoloScore } from "../osu/types.js";
 import { classicFromStandardised } from "./rulesets.js";
 import { computeFcState, computeRate } from "./score.js";
+import { multiplierFor, type MultiplierIndex, buildMultiplierIndex } from "./modMultiplier.js";
 import { bumpScoresVersion } from "./scoreSql.js";
 
 /**
@@ -44,13 +45,13 @@ export function saveScores(
     INSERT INTO scores (
       id, legacy_score_id, beatmap_id, user_id, ruleset, ended_at, rank,
       accuracy, max_combo, total_score, classic_total_score, pp,
-      is_perfect_combo, legacy_perfect, fc_state, mods, rate, statistics,
-      maximum_statistics, passed, raw
+      is_perfect_combo, legacy_perfect, fc_state, mods, rate, mod_multiplier,
+      statistics, maximum_statistics, passed, raw
     ) VALUES (
       @id, @legacy_score_id, @beatmap_id, @user_id, @ruleset, @ended_at, @rank,
       @accuracy, @max_combo, @total_score, @classic_total_score, @pp,
-      @is_perfect_combo, @legacy_perfect, @fc_state, @mods, @rate, @statistics,
-      @maximum_statistics, @passed, @raw
+      @is_perfect_combo, @legacy_perfect, @fc_state, @mods, @rate, @mod_multiplier,
+      @statistics, @maximum_statistics, @passed, @raw
     )
     ON CONFLICT(id) DO UPDATE SET
       total_score = excluded.total_score,
@@ -87,6 +88,13 @@ export function saveScores(
         fc_state: fcState,
         mods: JSON.stringify(s.mods ?? []),
         rate: computeRate(s.mods ?? []),
+        // the API only gives total_score_without_mods on modded lazer scores;
+        // everything else is filled from what the other scores taught us
+        mod_multiplier: multiplierFor(
+          JSON.stringify(s.mods ?? []),
+          multiplierIndex(db),
+          directMultiplier(s)
+        ),
         statistics: JSON.stringify(s.statistics ?? {}),
         maximum_statistics: s.maximum_statistics
           ? JSON.stringify(s.maximum_statistics)
@@ -371,4 +379,24 @@ export function markFetchedEmpty(beatmapId: number, ruleset = 0): void {
        ON CONFLICT(beatmap_id, ruleset) DO UPDATE SET fetched_at = excluded.fetched_at`
     )
     .run(beatmapId, ruleset);
+}
+
+/**
+ * The multiplier the API let us compute for THIS score: it publishes the score
+ * the play would have had without mods, but only on modded lazer scores.
+ */
+function directMultiplier(s: SoloScore): number | null {
+  const withoutMods = (s as { total_score_without_mods?: number }).total_score_without_mods;
+  if (withoutMods == null || !(withoutMods > 0)) return null;
+  return Math.round((s.total_score / withoutMods) * 10000) / 10000;
+}
+
+/**
+ * Mod-multiplier lookup, built once per process: it is derived from the whole
+ * scores table, so rebuilding it per inserted score would be absurd. New
+ * combinations that appear later are picked up by the boot backfill.
+ */
+let multIdx: MultiplierIndex | null = null;
+function multiplierIndex(db: ReturnType<typeof getDb>): MultiplierIndex {
+  return (multIdx ??= buildMultiplierIndex(db));
 }

@@ -7,6 +7,16 @@ export const RULESET_NAMES: Record<number, string> = {
 };
 
 export const RULESET_HIT_FIELDS: Record<number, { key: string; label: string }[]> = {
+  // std: "slider_end_miss" and "imperfections" are computed, not raw
+  // statistics (see hitCountExpr on the server)
+  0: [
+    { key: "great", label: "300s" },
+    { key: "ok", label: "100s" },
+    { key: "meh", label: "50s" },
+    { key: "miss", label: "Misses" },
+    { key: "slider_end_miss", label: "Missed slider ends" },
+    { key: "imperfections", label: "Imperfections (100s + slider ends)" },
+  ],
   1: [
     { key: "great", label: "Greats" },
     { key: "ok", label: "Goods (150)" },

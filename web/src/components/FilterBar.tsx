@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 import { firstPlaceLabel, useCountryCode } from "../country";
-import { collectionExportUrl, fetchLazerImportStatus, lazerImport } from "../api";
-import { rulesetStatFields } from "../rulesets";
+import {
+  collectionExportUrl,
+  fetchLazerCollections,
+  fetchLazerImportStatus,
+  lazerImport,
+  type LazerCollection,
+} from "../api";
+import { RULESET_HIT_FIELDS, rulesetStatFields } from "../rulesets";
 import { displayGrade } from "../format";
 import { DEFAULT_FILTERS, GRADE_ORDER, type Filters, type PoolMode } from "../types";
 import { NamePrompt } from "./NamePrompt";
@@ -32,8 +38,10 @@ function Range({
   return (
     <label className="range">
       <span>{label}</span>
-      <input type="number" step={step} min={lo} max={hi} placeholder={lo > 0 ? String(lo) : "min"} value={min} onChange={(e) => onMin(noNeg(e.target.value))} />
-      <input type="number" step={step} min={lo} max={hi} placeholder={hi != null ? String(hi) : "max"} value={max} onChange={(e) => onMax(noNeg(e.target.value))} />
+      {/* always "min"/"max": showing the bound instead (Global top, Rate) made
+          those two fields look like a different control entirely */}
+      <input type="number" step={step} min={lo} max={hi} placeholder="min" value={min} onChange={(e) => onMin(noNeg(e.target.value))} />
+      <input type="number" step={step} min={lo} max={hi} placeholder="max" value={max} onChange={(e) => onMax(noNeg(e.target.value))} />
     </label>
   );
 }
@@ -71,6 +79,9 @@ export function FilterBar({
   // which export is asking for a collection name (window.prompt does not
   // exist in Electron — this drives the in-app NamePrompt modal instead)
   const [naming, setNaming] = useState<"collection" | "lazer" | null>(null);
+  // Collections already in lazer, fetched when the prompt opens (the importer
+  // reads the realm, which takes a moment and can fail — never block on it).
+  const [lazerCollections, setLazerCollections] = useState<LazerCollection[]>([]);
   useEffect(() => {
     void fetchLazerImportStatus().then((s) => setLazerAvailable(s.available));
   }, []);
@@ -137,7 +148,11 @@ export function FilterBar({
   if (local.metricMissing)
     badges.push({
       key: "metric",
-      label: `${local.metricMissing.matching ? "To fix" : "Missing"}: ${local.metricMissing.name}`,
+      // several metrics: neither "missing" nor "to fix" fits them all
+      label:
+        local.metricMissing.ids.length > 1
+          ? `Left to do: ${local.metricMissing.name}`
+          : `${local.metricMissing.matching ? "To fix" : "Missing"}: ${local.metricMissing.name}`,
       clear: () => set("metricMissing", null),
     });
   if (local.platform)
@@ -172,6 +187,23 @@ export function FilterBar({
   rangeBadge("len", "Length", "lenMin", "lenMax");
   rangeBadge("globalTop", "Global top", "globalTopMin", "globalTopMax");
   rangeBadge("rate", "Rate", "rateMin", "rateMax", "x");
+  rangeBadge("combo", "Max combo", "comboMin", "comboMax");
+  // one badge per bounded hit count, labelled like the field that set it
+  for (const f of RULESET_HIT_FIELDS[local.ruleset ?? 0] ?? []) {
+    const r = local.hits?.[f.key];
+    if (!r || (r.min === "" && r.max === "")) continue;
+    const fmt = (v: string) => (v === "" ? "…" : v);
+    badges.push({
+      key: `hit-${f.key}`,
+      label: `${f.label} ${fmt(r.min)}–${fmt(r.max)}`,
+      clear: () =>
+        setLocal((fl) => {
+          const next = { ...fl.hits };
+          delete next[f.key];
+          return { ...fl, hits: next };
+        }),
+    });
+  }
   rangeBadge("ranked", "Ranked", "rankedFrom", "rankedTo");
   rangeBadge("playedDate", "Played", "playedFrom", "playedTo");
 
@@ -224,7 +256,11 @@ export function FilterBar({
             className="export-coll"
             disabled={lazerBusy}
             title="Send these maps to osu!lazer as a collection. Close osu! first, a backup is made."
-            onClick={() => setNaming("lazer")}
+            onClick={() => {
+              setLazerCollections([]);
+              void fetchLazerCollections().then(setLazerCollections);
+              setNaming("lazer");
+            }}
           >
             {lazerBusy ? "…" : "⇥ lazer"}
           </button>
@@ -232,28 +268,29 @@ export function FilterBar({
         {naming && (
           <NamePrompt
             title={
-              naming === "lazer"
-                ? "Collection name (merged into lazer)"
-                : "Collection name"
+              naming === "lazer" ? "Collection name (into lazer)" : "Collection name"
             }
+            existing={naming === "lazer" ? lazerCollections : undefined}
             initial={
               local.metricMissing
-                ? `${local.metricMissing.matching ? "To fix" : "Missing"} - ${local.metricMissing.name}`
+                ? local.metricMissing.ids.length > 1
+                  ? `Left to do - ${local.metricMissing.name}`
+                  : `${local.metricMissing.matching ? "To fix" : "Missing"} - ${local.metricMissing.name}`
                 : "osu!completionist"
             }
             submitLabel={naming === "lazer" ? "Import into lazer" : "Download"}
             onClose={() => setNaming(null)}
-            onSubmit={(name) => {
+            onSubmit={(name, replace) => {
               if (naming === "collection") {
                 window.location.href = collectionExportUrl(local, name);
                 return;
               }
               setLazerBusy(true);
-              lazerImport(local, name)
+              lazerImport(local, name, replace)
                 .then((r) =>
                   appAlert(
                     `Imported into osu!lazer:\n` +
-                      `  ${r.created} collection(s) created, ${r.updated} updated\n` +
+                      `  ${r.created} collection(s) created, ${r.updated} ${replace ? "replaced" : "updated"}\n` +
                       `  ${r.hashes} map(s) added (of ${r.mapCount} matching)` +
                       (r.remapped
                         ? `\n  ${r.remapped} remapped to your installed (outdated) versions`
@@ -361,50 +398,9 @@ export function FilterBar({
           </div>
         </div>
 
-        <div className="filter-group">
-          <span className="filter-group-label">Other</span>
-          <div className="chips">
-            <button
-              className={`chip ${local.countryFirst ? "on" : ""}`}
-              title="Only maps where I hold the country #1"
-              onClick={() => set("countryFirst", !local.countryFirst)}
-            >
-              {firstPlaceLabel(country)}
-            </button>
-          </div>
-          <Range
-            label="Global top"
-            min={local.globalTopMin}
-            max={local.globalTopMax}
-            onMin={(v) => set("globalTopMin", v)}
-            onMax={(v) => set("globalTopMax", v)}
-            step="1"
-            lo={1}
-          />
-          {/* playback rate of the best (lazer rate change, 0.5x-2.0x) */}
-          <Range
-            label="Rate"
-            min={local.rateMin}
-            max={local.rateMax}
-            onMin={(v) => set("rateMin", v)}
-            onMax={(v) => set("rateMax", v)}
-            step="0.05"
-            lo={0.5}
-          />
-        </div>
-
-        <div className="filter-group">
-          <span className="filter-group-label">Mods</span>
-          <input
-            className="mods-input"
-            placeholder="Mods (HD,DT — NM = nomod)"
-            value={local.mods}
-            onChange={(e) => set("mods", e.target.value.toUpperCase())}
-          />
-        </div>
-
+        {/* Properties of the MAP itself. */}
         <div className="filter-group filter-group-ranges">
-          <span className="filter-group-label">Ranges</span>
+          <span className="filter-group-label">Map</span>
           <div className="ranges">
             <Range label="★" min={local.srMin} max={local.srMax} onMin={(v) => set("srMin", v)} onMax={(v) => set("srMax", v)} />
             {rulesetStatFields(local.ruleset ?? 0).ar && (
@@ -416,8 +412,75 @@ export function FilterBar({
               <Range label={rulesetStatFields(local.ruleset ?? 0).csLabel} min={local.csMin} max={local.csMax} onMin={(v) => set("csMin", v)} onMax={(v) => set("csMax", v)} />
             )}
             <Range label="Length (s)" min={local.lenMin} max={local.lenMax} onMin={(v) => set("lenMin", v)} onMax={(v) => set("lenMax", v)} step="1" />
+            <Range label="Max combo" min={local.comboMin} max={local.comboMax} onMin={(v) => set("comboMin", v)} onMax={(v) => set("comboMax", v)} step="1" lo={0} />
             <DateRange label="Ranked" from={local.rankedFrom} to={local.rankedTo} onFrom={(v) => set("rankedFrom", v)} onTo={(v) => set("rankedTo", v)} />
+          </div>
+        </div>
+
+        {/* Properties of MY best score on it. */}
+        <div className="filter-group filter-group-ranges">
+          <span className="filter-group-label">My best</span>
+          <div className="ranges">
+            {/* the mods are the mods OF that best score, not of the map */}
+            <input
+              className="mods-input"
+              placeholder="Mods (HD,DT — NM = nomod)"
+              value={local.mods}
+              onChange={(e) => set("mods", e.target.value.toUpperCase())}
+            />
+            <button
+              className={`chip ${local.countryFirst ? "on" : ""}`}
+              title="Only maps where I hold the country #1"
+              onClick={() => set("countryFirst", !local.countryFirst)}
+            >
+              {firstPlaceLabel(country)}
+            </button>
+            <Range
+              label="Global top"
+              min={local.globalTopMin}
+              max={local.globalTopMax}
+              onMin={(v) => set("globalTopMin", v)}
+              onMax={(v) => set("globalTopMax", v)}
+              step="1"
+              lo={1}
+            />
+            {/* playback rate of the best (lazer rate change, 0.5x-2.0x) */}
+            <Range
+              label="Rate"
+              min={local.rateMin}
+              max={local.rateMax}
+              onMin={(v) => set("rateMin", v)}
+              onMax={(v) => set("rateMax", v)}
+              step="0.05"
+              lo={0.5}
+            />
             <DateRange label="Played" from={local.playedFrom} to={local.playedTo} onFrom={(v) => set("playedFrom", v)} onTo={(v) => set("playedTo", v)} />
+          </div>
+        </div>
+
+        {/* Hit counts of the best score, per ruleset: 300/100/50/misses in
+            std (plus the two computed ones), droplets in catch, 305/300/200…
+            in mania. Any bound implies a played map. */}
+        <div className="filter-group filter-group-ranges">
+          <span className="filter-group-label">Hits</span>
+          <div className="ranges">
+            {(RULESET_HIT_FIELDS[local.ruleset ?? 0] ?? []).map((f) => {
+              const r = local.hits?.[f.key] ?? { min: "", max: "" };
+              const setHit = (next: { min: string; max: string }) =>
+                setLocal((fl) => ({ ...fl, hits: { ...fl.hits, [f.key]: next } }));
+              return (
+                <Range
+                  key={f.key}
+                  label={f.label}
+                  min={r.min}
+                  max={r.max}
+                  onMin={(v) => setHit({ ...r, min: v })}
+                  onMax={(v) => setHit({ ...r, max: v })}
+                  step="1"
+                  lo={0}
+                />
+              );
+            })}
           </div>
         </div>
       </div>

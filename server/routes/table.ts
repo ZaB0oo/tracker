@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { getDb } from "../db/db.js";
-import { mapWhere, scoreWhere, type MetricParams } from "../logic/metrics.js";
+import { hitCountExpr, mapWhere, scoreWhere, type MetricParams } from "../logic/metrics.js";
 import { ensureMissingFresh } from "../logic/scoreSql.js";
 import { keysWhere, maniaKeysSql, parseRulesetParam, poolWhere } from "../logic/rulesets.js";
 import { parseLengthSeconds, parseSearch, parseStatus } from "../logic/searchQuery.js";
@@ -29,7 +29,7 @@ const SORT_COLUMNS: Record<string, string> = {
   fc_state: "s.fc_state",
   accuracy: "s.accuracy",
   pp: "s.pp",
-  mod_multiplier: "mod_multiplier",
+  mod_multiplier: "s.mod_multiplier",
   rate: "s.rate",
   artist: "st.artist COLLATE NOCASE",
   title: "st.title COLLATE NOCASE",
@@ -123,34 +123,54 @@ function buildFilters(
   // playback rate of the best (0.5x-2.0x): any bound implies a played map
   num("rateMin", "s.rate", ">=");
   num("rateMax", "s.rate", "<=");
-  // Maps of a metric: maps matching its MAP conditions whose BEST score does
-  // not match its SCORE conditions — the missing maps (leaderboard semantics,
-  // same rule as the metric evaluation; the inner alias `s` shadows the outer
-  // best-score join on purpose — scoreWhere targets the subquery row).
-  // metricMatching=1 flips to the maps the conditions SELECT (countdown
-  // metrics: the maps to fix).
+  // Maps of one or more metrics (metricMissing=3 or metricMissing=3,7,9): maps
+  // matching a metric's MAP conditions whose BEST score does not match its
+  // SCORE conditions — the missing maps (leaderboard semantics, same rule as
+  // the metric evaluation; the inner alias `s` shadows the outer best-score
+  // join on purpose — scoreWhere targets the subquery row).
+  //
+  // Several ids = UNION: a map is listed as soon as it is left to do for AT
+  // LEAST ONE of them ("what is left for these goals"). Each metric keeps its
+  // own map conditions, pool and direction inside its own term, so mixing a
+  // countdown with a normal metric works without the caller saying anything.
   if (q.metricMissing != null && q.metricMissing !== "") {
-    const row = db
-      .prepare("SELECT params FROM metrics WHERE id = ?")
-      .get(Number(q.metricMissing)) as { params: string } | undefined;
-    let p: MetricParams | null = null;
-    try {
-      if (row) p = JSON.parse(row.params) as MetricParams;
-    } catch {
-      p = null; // corrupt metric params: ignore the filter
-    }
-    if (p) {
+    const ids = q.metricMissing
+      .split(",")
+      .map((v) => Number(v.trim()))
+      .filter((v) => Number.isInteger(v) && v > 0)
+      .slice(0, 20); // a URL cannot turn into an unbounded query builder
+    const terms: string[] = [];
+    for (const id of ids) {
+      const row = db.prepare("SELECT params FROM metrics WHERE id = ?").get(id) as
+        | { params: string }
+        | undefined;
+      let p: MetricParams | null = null;
+      try {
+        if (row) p = JSON.parse(row.params) as MetricParams;
+      } catch {
+        p = null; // corrupt metric params: ignore this one
+      }
+      if (!p) continue;
       // interpolated into SQL below: coerce whatever the stored JSON says
       p = { ...p, ruleset: parseRulesetParam(p.ruleset) };
       // goal-mode countdown (invert): its "matching" maps are the played maps
       // whose best FAILS the goal — same inverted predicate as the evaluation
       const inv = p.kind === "count" && p.descending === true && p.invert === true;
-      where.push(mapWhere(p.map, { ruleset: p.ruleset ?? 0, pool: p.pool }));
-      where.push(
-        `${q.metricMatching === "1" ? "EXISTS" : "NOT EXISTS"} (SELECT 1 FROM scores s
-           WHERE s.id = u.best_lazer_score_id AND ${scoreWhere(p.score, inv)})`
+      // A countdown metric counts DOWN, so what is left to do is the maps its
+      // conditions SELECT, not the ones they miss. Derived here rather than
+      // taken from the query: with several metrics the direction is per metric
+      // (the legacy metricMatching=1 param still forces it, for old links).
+      const matching =
+        q.metricMatching === "1" ||
+        (p.kind === "count" && p.descending === true);
+      terms.push(
+        `(${mapWhere(p.map, { ruleset: p.ruleset ?? 0, pool: p.pool })}
+          AND ${matching ? "EXISTS" : "NOT EXISTS"} (SELECT 1 FROM scores s
+            WHERE s.id = u.best_lazer_score_id AND ${scoreWhere(p.score, inv)}))`
       );
     }
+    // every id was unknown/corrupt: filter on nothing rather than on everything
+    if (ids.length > 0) where.push(terms.length ? `(${terms.join(" OR ")})` : "0");
   }
   // best's platform: native lazer (no legacy id) vs stable (converted)
   if (q.platform === "lazer") where.push("s.legacy_score_id IS NULL AND s.id IS NOT NULL");
@@ -275,6 +295,45 @@ function buildFilters(
   date("playedTo", "date(s.ended_at)", "<=");
   num("accMin", "s.accuracy * 100", ">="); num("accMax", "s.accuracy * 100", "<=");
   num("missingMin", missingSql, ">=");
+  // Hit counts of the best score, per ruleset (300s/100s/misses, droplets,
+  // missed slider ends…): {"miss":{"max":0},"ok":{"min":1,"max":5}}. Same
+  // expressions as the metric conditions (hitCountExpr), so "1x100" means the
+  // same thing in both places.
+  //
+  // These are properties OF A SCORE, and two different things can be absent:
+  //  - the statistic key, inside a score that exists (a play with no 50 has no
+  //    "meh" key at all) — that is what the COALESCE(…, 0) in hitCountExpr is
+  //    for, and it is right: that score really did zero 50s;
+  //  - the score itself, on a map never played — where the same COALESCE would
+  //    otherwise invent a flawless play out of nothing.
+  // Hence the explicit guard below. It is the same semantics as the accuracy
+  // filter, which excludes unplayed maps for free (NULL comparisons are never
+  // true); only the COALESCE hides it here.
+  if (q.hits) {
+    let h: Record<string, { min?: unknown; max?: unknown }> | null = null;
+    try {
+      const parsed: unknown = JSON.parse(q.hits);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+        h = parsed as Record<string, { min?: unknown; max?: unknown }>;
+    } catch {
+      h = null; // hand-edited URL: ignore rather than 500
+    }
+    let bounded = false;
+    for (const [key, r] of Object.entries(h ?? {})) {
+      const expr = hitCountExpr(key);
+      if (!expr || !r || typeof r !== "object") continue;
+      for (const [bound, cmp] of [["min", ">="], ["max", "<="]] as const) {
+        const v = Number(r[bound]);
+        if (r[bound] === "" || r[bound] == null || !Number.isFinite(v)) continue;
+        where.push(`${expr} ${cmp} ${Math.trunc(v)}`);
+        bounded = true;
+      }
+    }
+    // `s` is the best score, and refreshBest only ever picks among passed
+    // scores — so this says "I have a pass here", exactly what the metric
+    // conditions mean with their own `s.passed = 1`.
+    if (bounded) where.push("s.id IS NOT NULL");
+  }
   return { where, params };
 }
 
@@ -341,9 +400,7 @@ tableRouter.get("/table", (req, res) => {
         st.download_disabled AS dmca,
         s.id AS score_id, s.ended_at, s.rank AS grade, s.accuracy,
         s.max_combo AS score_max_combo, s.pp, s.mods, s.fc_state,
-        ROUND(CAST(s.total_score AS REAL)
-          / NULLIF(json_extract(s.raw, '$.total_score_without_mods'), 0), 2)
-          AS mod_multiplier,
+        s.mod_multiplier,
         s.rate AS rate,
         s.total_score, s.classic_total_score,
         ${scoreExpr} AS score_value,

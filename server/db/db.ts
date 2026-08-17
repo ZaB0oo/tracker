@@ -12,6 +12,7 @@ import {
   DEFAULT_SCORE_CONDS,
   type MetricParams,
 } from "../logic/metrics.js";
+import { backfillModMultipliers } from "../logic/modMultiplier.js";
 import { withConvertSource } from "../logic/rulesets.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -293,6 +294,40 @@ function migrate(d: DatabaseSync): void {
       "INSERT INTO sync_state (key, value) VALUES (?, 'v3') ON CONFLICT(key) DO UPDATE SET value = 'v3'"
     ).run(RATE_KEY);
     console.log("[db] migration: playback rate computed for every stored score");
+  }
+  // Country sweep history (see schema.sql). Backfilled from the current check
+  // date: maps re-queued before this migration look never-checked once, which
+  // only means they are swept first — and it fixes itself after that pass.
+  if (!buCols2.some((c) => c.name === "country_seen_at")) {
+    d.exec("ALTER TABLE beatmap_user ADD COLUMN country_seen_at TEXT");
+    // Holding a #1 proves a check established it, even when the date was wiped
+    // by a re-queue — and such a map was almost certainly re-queued by the
+    // periodic rotation, i.e. checked very recently. Everything still NULL
+    // after this really has never been looked at, and goes first.
+    d.exec(
+      `UPDATE beatmap_user
+          SET country_seen_at = COALESCE(country_checked_at,
+                CASE WHEN country_first = 1 THEN datetime('now') END)
+        WHERE country_checked_at IS NOT NULL OR country_first = 1`
+    );
+  }
+  // Mod multiplier, materialized like `rate`: the column is sorted and shown,
+  // and the value is derived from the whole scores table (not from the row),
+  // so computing it per query was out of the question. Re-run whenever rows
+  // are still missing one — a combination becomes known as soon as a single
+  // lazer score uses it.
+  if (!scCols.some((c) => c.name === "mod_multiplier"))
+    d.exec("ALTER TABLE scores ADD COLUMN mod_multiplier REAL");
+  const missingMult = (
+    d.prepare("SELECT COUNT(*) c FROM scores WHERE mod_multiplier IS NULL").get() as {
+      c: number;
+    }
+  ).c;
+  if (missingMult > 0) {
+    const filled = backfillModMultipliers(d);
+    console.log(
+      `[db] mod multipliers: ${filled} of ${missingMult} scores filled in`
+    );
   }
   // "ever checked" flag: distinguishes a re-queued map (global_checked_at
   // reset to NULL) from a never-checked one, so tier transitions found on

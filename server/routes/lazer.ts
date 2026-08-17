@@ -5,6 +5,7 @@ import path from "node:path";
 import { Router, type Request } from "express";
 import { config } from "../config.js";
 import { getState } from "../db/db.js";
+import { parseCollectionList } from "../logic/collectionList.js";
 import { buildCollectionDb } from "./table.js";
 
 /**
@@ -45,9 +46,40 @@ lazerRouter.get("/lazer-import/status", async (req, res) => {
 });
 
 /**
- * POST /api/lazer-import?name=...&<same filters as /table>
+ * GET /api/lazer-import/collections — the collections already in lazer, so the
+ * UI can offer to add to (or replace) one instead of guessing its name.
+ * Listing only READS the realm and happens before the importer's "osu! is
+ * running" check, so it works with the game open. Failures are reported in the
+ * body with a 200: an old executable or a locked database must degrade to
+ * "no list", not break the import button.
+ */
+lazerRouter.get("/lazer-import/collections", async (req, res) => {
+  if (!isLoopback(req))
+    return res.status(403).json({ collections: [], error: "local requests only" });
+  const exe = await importerPath();
+  if (!exe) return res.json({ collections: [], error: "importer not configured" });
+  const out = await new Promise<{ ok: boolean; output: string }>((resolve) => {
+    execFile(
+      exe,
+      ["--list", "--yes"], // --yes: no "Press Enter to exit" (it would hang)
+      { timeout: 30_000, windowsHide: true },
+      (err, stdout, stderr) => resolve({ ok: err == null, output: `${stdout}\n${stderr}` })
+    );
+  });
+  const collections = parseCollectionList(out.output);
+  if (!out.ok && collections.length === 0) {
+    const tail = out.output.split("\n").map((l) => l.trim()).filter(Boolean).slice(-2).join(" · ");
+    return res.json({ collections: [], error: tail || "could not list the collections" });
+  }
+  res.json({ collections });
+});
+
+/**
+ * POST /api/lazer-import?name=...&replace=1&<same filters as /table>
  * Builds the collection.db for the current filters and hands it to the
- * importer (merge mode: nothing is ever deleted in lazer).
+ * importer. Merge by default (nothing is ever deleted in lazer); `replace=1`
+ * empties a same-name collection first — lazer keeps the collection itself,
+ * only its content is swapped.
  */
 lazerRouter.post("/lazer-import", async (req, res) => {
   if (!isLoopback(req))
@@ -78,10 +110,11 @@ lazerRouter.post("/lazer-import", async (req, res) => {
 
     // --yes: non-interactive; no --force: the importer still refuses while
     // osu! is running, and that message is surfaced to the UI below.
+    const replace = req.query.replace === "1";
     const out = await new Promise<{ ok: boolean; output: string }>((resolve) => {
       execFile(
         exe,
-        [file, "--ids", idsFile, "--yes"],
+        [file, "--ids", idsFile, "--yes", ...(replace ? ["--replace"] : [])],
         { timeout: 120_000, windowsHide: true },
         (err, stdout, stderr) =>
           resolve({ ok: err == null, output: `${stdout}\n${stderr}` })

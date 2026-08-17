@@ -123,6 +123,8 @@ function MetricCard({
   onDelete,
   onEdit,
   onMissing,
+  picked,
+  onPick,
   onCtx,
   dragging,
   dropTarget,
@@ -136,6 +138,9 @@ function MetricCard({
   onDelete: (id: number) => void;
   onEdit: (m: Metric) => void;
   onMissing: (m: Metric) => void;
+  /** null = this metric has no "maps left" to speak of (ranked score, pp) */
+  picked: boolean | null;
+  onPick: (on: boolean) => void;
   onCtx: OnMapContext;
   dragging: boolean;
   dropTarget: boolean;
@@ -243,17 +248,29 @@ function MetricCard({
           </span>
         )}
         {!isRanked && !isPp && (
-          <button
-            className="metric-btn"
-            title={
-              isDesc
-                ? "List the maps to fix in the Maps tab"
-                : "List the missing maps in the Maps tab"
-            }
-            onClick={() => onMissing(m)}
-          >
-            <MissingIcon />
-          </button>
+          <>
+            <label
+              className="metric-pick"
+              title="Tick a few metrics to list what is left for all of them at once"
+            >
+              <input
+                type="checkbox"
+                checked={picked === true}
+                onChange={(e) => onPick(e.target.checked)}
+              />
+            </label>
+            <button
+              className="metric-btn"
+              title={
+                isDesc
+                  ? "List the maps to fix in the Maps tab"
+                  : "List the missing maps in the Maps tab"
+              }
+              onClick={() => onMissing(m)}
+            >
+              <MissingIcon />
+            </button>
+          </>
         )}
         <button className="metric-btn" title="Edit this metric" onClick={() => onEdit(m)}>
           ✎
@@ -405,7 +422,8 @@ export function MetricsView({
   ruleset = 0,
 }: {
   onMissingMaps: (
-    id: number,
+    /** one metric, or several (union of what is left for each) */
+    ids: number[],
     name: string,
     matching: boolean,
     ruleset?: number,
@@ -415,6 +433,10 @@ export function MetricsView({
 }) {
   const qc = useQueryClient();
   const [gran, setGran] = useState<"month" | "day">("month");
+  // metrics ticked for a combined list. Reset on ruleset change: the tab only
+  // ever shows one mode's metrics, a leftover selection would be invisible.
+  const [picked, setPicked] = useState<number[]>([]);
+  useEffect(() => setPicked([]), [ruleset]);
   const [builderOpen, setBuilderOpen] = useState(false);
   const [editing, setEditing] = useState<Metric | null>(null);
   const { data, isLoading, isFetching, error } = useQuery({
@@ -539,6 +561,46 @@ export function MetricsView({
       {data.metrics.length === 0 && (
         <p className="goal-note">No metric yet — create one with “+ New metric”.</p>
       )}
+
+      {/* Combined list. Only appears once something is ticked, and spells out
+          what the button will show — the word "union" is never used. */}
+      {(() => {
+        const sel = data.metrics.filter(
+          (m) => (m.params.ruleset ?? 0) === ruleset && picked.includes(m.id)
+        );
+        if (sel.length === 0) return null;
+        const names = sel.map((m) => m.name);
+        const label =
+          names.length <= 3
+            ? names.join(" + ")
+            : `${names.slice(0, 3).join(" + ")} +${names.length - 3}`;
+        // each metric applies its own pool inside its own term; this one only
+        // means something when they all happen to agree
+        const pools = new Set(sel.map((m) => m.params.pool ?? "all"));
+        return (
+          <div className="metrics-picked">
+            <span className="mp-count">
+              {sel.length} selected: <b>{label}</b>
+            </span>
+            <button
+              className="primary"
+              onClick={() =>
+                onMissingMaps(
+                  sel.map((m) => m.id),
+                  label,
+                  false,
+                  ruleset,
+                  pools.size === 1 ? [...pools][0] : "all"
+                )
+              }
+            >
+              Show the maps left for {sel.length === 1 ? "it" : "them"}
+            </button>
+            <button onClick={() => setPicked([])}>Clear</button>
+            <small className="dim">union of the selected metrics</small>
+          </div>
+        );
+      })()}
       <div className="metrics-grid" ref={gridRef}>
         {data.metrics
           .filter((m) => (m.params.ruleset ?? 0) === ruleset)
@@ -555,9 +617,19 @@ export function MetricsView({
             onDrop={() => dropOn(m.id)}
             onDelete={(id) => del.mutate(id)}
             onEdit={(metric) => setEditing(metric)}
+            picked={
+              m.params.kind === "ranked_score" || m.params.kind === "pp"
+                ? null
+                : picked.includes(m.id)
+            }
+            onPick={(on) =>
+              setPicked((cur) =>
+                on ? [...cur, m.id] : cur.filter((id) => id !== m.id)
+              )
+            }
             onMissing={(metric) =>
               onMissingMaps(
-                metric.id,
+                [metric.id],
                 metric.name,
                 metric.params.kind === "count" && !!metric.params.descending,
                 metric.params.ruleset ?? 0,

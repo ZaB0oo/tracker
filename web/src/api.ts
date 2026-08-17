@@ -106,11 +106,25 @@ function buildTableQuery(
   if (filters.statuses.length) p.set("statuses", filters.statuses.join(","));
   if (filters.mods) p.set("mods", filters.mods);
   if (filters.countryFirst) p.set("countryFirst", "1");
-  if (filters.metricMissing) {
-    p.set("metricMissing", String(filters.metricMissing.id));
-    if (filters.metricMissing.matching) p.set("metricMatching", "1");
-  }
+  // one id or several (union). The direction (missing / to fix) is derived
+  // per metric server-side, so nothing else needs to be sent.
+  if (filters.metricMissing?.ids.length)
+    p.set("metricMissing", filters.metricMissing.ids.join(","));
   if (filters.platform) p.set("platform", filters.platform);
+  // hit counts: one JSON param, empty bounds dropped so the URL stays short
+  // and an all-empty filter never reaches the server
+  const hits = Object.fromEntries(
+    Object.entries(filters.hits ?? {})
+      .map(([k, r]) => [
+        k,
+        {
+          ...(r.min !== "" ? { min: Number(r.min) } : {}),
+          ...(r.max !== "" ? { max: Number(r.max) } : {}),
+        },
+      ])
+      .filter(([, r]) => Object.keys(r as object).length > 0)
+  );
+  if (Object.keys(hits).length) p.set("hits", JSON.stringify(hits));
   for (const k of [
     "srMin", "srMax", "arMin", "arMax", "odMin", "odMax", "hpMin", "hpMax",
     "csMin", "csMax", "lenMin", "lenMax", "comboMin", "comboMax",
@@ -410,10 +424,39 @@ export async function fetchLazerImportStatus(): Promise<{ available: boolean }> 
   return res.json();
 }
 
-/** Imports the maps matching the filters straight into osu!lazer (merge mode). */
-export async function lazerImport(filters: Filters, name: string): Promise<LazerImportResult> {
+export interface LazerCollection {
+  name: string;
+  count: number;
+  /** YYYY-MM-DD */
+  lastModified: string;
+}
+
+/**
+ * Collections already in lazer. Never throws: an old importer or a locked
+ * database just means "no list", and the import must stay usable.
+ */
+export async function fetchLazerCollections(): Promise<LazerCollection[]> {
+  try {
+    const res = await fetch("/api/lazer-import/collections");
+    if (!res.ok) return [];
+    const json = (await res.json()) as { collections?: LazerCollection[] };
+    return json.collections ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Imports the maps matching the filters straight into osu!lazer. Merge by
+ * default; `replace` empties a same-name collection first.
+ */
+export async function lazerImport(
+  filters: Filters,
+  name: string,
+  replace = false
+): Promise<LazerImportResult> {
   const res = await fetch(
-    `/api/lazer-import?${buildTableQuery(filters, [], 0, 1)}&name=${encodeURIComponent(name)}`,
+    `/api/lazer-import?${buildTableQuery(filters, [], 0, 1)}&name=${encodeURIComponent(name)}${replace ? "&replace=1" : ""}`,
     { method: "POST" }
   );
   const json = (await res.json()) as LazerImportResult & { ok: boolean; error?: string };

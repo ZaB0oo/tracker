@@ -19,6 +19,8 @@ interface Col {
   label: string;
   width: number;
   sortable?: boolean;
+  /** server sort key when it differs from the column id */
+  sortId?: string;
   render: (r: TableRow) => React.ReactNode;
   className?: (r: TableRow) => string;
 }
@@ -109,7 +111,12 @@ const COLUMNS: Col[] = [
   { id: "mods_col", label: "Mods", width: 140, render: (r) => <Mods raw={r.mods} /> },
   {
     id: "mod_multiplier", label: "Multi", width: 60, sortable: true,
-    render: (r) => (r.mod_multiplier == null ? "—" : `×${r.mod_multiplier.toFixed(2)}`),
+    // 2 decimals for the round ones (×1.00, ×1.23), 3 when they carry
+    // information (Classic is 0.985, and ×0.98 was a lie)
+    render: (r) =>
+      r.mod_multiplier == null
+        ? "—"
+        : `×${r.mod_multiplier.toFixed(Math.abs(r.mod_multiplier * 100 - Math.round(r.mod_multiplier * 100)) < 1e-6 ? 2 : 3)}`,
   },
   {
     id: "country_first", label: "#1", width: 40,
@@ -124,10 +131,16 @@ const COLUMNS: Col[] = [
   { id: "pp", label: "pp", width: 45, sortable: true, render: (r) => (r.pp == null ? "—" : Math.round(r.pp)) },
   { id: "ended_at", label: "Played on", width: 90, sortable: true, render: (r) => fmtDate(r.ended_at) },
   {
-    id: "score_combo", label: "Combo", width: 90, sortable: true,
+    // sorts on the MAP's max combo: "which maps are long" is the useful
+    // question, and the combo I reached is already sorted by score/accuracy
+    id: "score_combo", label: "Combo", width: 90, sortable: true, sortId: "max_combo",
+    // "my combo / the map's". Unplayed maps have no combo of MINE, but the
+    // map's own max combo is known and worth showing (dimmed).
     render: (r) =>
       r.score_max_combo == null
-        ? "—"
+        ? r.map_max_combo
+          ? <span className="tip-dim">—/{r.map_max_combo}</span>
+          : "—"
         : `${r.score_max_combo}${r.map_max_combo ? `/${r.map_max_combo}` : ""}`,
   },
   { id: "star_rating", label: "★", width: 55, sortable: true, render: (r) => r.star_rating?.toFixed(2) ?? "—" },
@@ -276,14 +289,15 @@ export function ScoreTable({
         <div style={{ width: totalWidth, minWidth: "100%" }}>
           <div className="thead" style={{ display: "flex" }}>
             {visibleCols.map((c) => {
-              const s = sort.find((x) => x.id === c.id);
-              const idx = sort.findIndex((x) => x.id === c.id);
+              const sortKey = c.sortId ?? c.id;
+              const s = sort.find((x) => x.id === sortKey);
+              const idx = sort.findIndex((x) => x.id === sortKey);
               return (
                 <div
                   key={c.id}
                   className={`th ${c.sortable ? "sortable" : ""}`}
                   style={{ width: c.width, flexShrink: 0 }}
-                  onClick={(e) => c.sortable && toggleSort(c.id, e.shiftKey)}
+                  onClick={(e) => c.sortable && toggleSort(c.sortId ?? c.id, e.shiftKey)}
                 >
                   {c.label}
                   {s && (
