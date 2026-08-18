@@ -162,17 +162,30 @@ export function getDb(): DatabaseSync {
   if (db) return db;
   fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
   applyStagedImport();
-  db = new DatabaseSync(config.dbPath);
-  db.exec("PRAGMA journal_mode = WAL");
-  db.exec("PRAGMA synchronous = NORMAL");
-  db.exec("PRAGMA foreign_keys = OFF"); // bulk imports, order is not guaranteed
+  // Opened into a LOCAL until the schema and the migrations have both gone
+  // through. `db` used to be assigned first: when the schema threw, the throw
+  // was swallowed upstream and every later call got that half-open handle
+  // back, so the app ran on an unmigrated database forever, on every restart.
+  const fresh = new DatabaseSync(config.dbPath);
+  fresh.exec("PRAGMA journal_mode = WAL");
+  fresh.exec("PRAGMA synchronous = NORMAL");
+  fresh.exec("PRAGMA foreign_keys = OFF"); // bulk imports, order is not guaranteed
   // 64 MB page cache (default is 2 MB for a 250 MB+ database) and in-memory
   // temp b-trees: the dashboard aggregates group/sort over 150k+ rows.
-  db.exec("PRAGMA cache_size = -65536");
-  db.exec("PRAGMA temp_store = MEMORY");
+  fresh.exec("PRAGMA cache_size = -65536");
+  fresh.exec("PRAGMA temp_store = MEMORY");
+  // Tables first, MIGRATIONS, then indexes. The indexes are written against
+  // today's columns, several of which migrate() is the one to add — running
+  // schema.sql in one go threw on any database older than them, before a
+  // single migration had run. The file is plain DDL, one statement per `;`.
   const schema = fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8");
-  db.exec(schema);
-  migrate(db);
+  const statements = schema.split(/;\s*\n/).map((s) => s.trim()).filter(Boolean);
+  const isIndex = (s: string) =>
+    /^CREATE\s+(UNIQUE\s+)?INDEX/i.test(s.replace(/^(?:\s*--[^\n]*\n)+/, "").trim());
+  for (const s of statements) if (!isIndex(s)) fresh.exec(`${s};`);
+  migrate(fresh);
+  for (const s of statements) if (isIndex(s)) fresh.exec(`${s};`);
+  db = fresh;
   // Query-planner statistics: the dashboard joins 4-5 tables and SQLite was
   // choosing join orders blind. Run once per version-ish (cheap: seconds on
   // this schema), tracked by a state key so it is not repeated on every boot.
@@ -351,6 +364,7 @@ function migrate(d: DatabaseSync): void {
         any_fc INTEGER NOT NULL DEFAULT 0,
         country_first INTEGER NOT NULL DEFAULT 0,
         country_checked_at TEXT,
+        country_seen_at TEXT,
         missing_lazer INTEGER,
         missing_classic INTEGER,
         missing_wither INTEGER,
@@ -361,7 +375,7 @@ function migrate(d: DatabaseSync): void {
       );
       INSERT INTO beatmap_user_new
         SELECT beatmap_id, fetched_at, played, any_fc, country_first,
-               country_checked_at, missing_lazer, missing_classic,
+               country_checked_at, country_seen_at, missing_lazer, missing_classic,
                missing_wither, best_lazer_score_id, global_rank,
                global_checked_at, global_seen
         FROM beatmap_user;
@@ -386,6 +400,7 @@ function migrate(d: DatabaseSync): void {
         any_fc INTEGER NOT NULL DEFAULT 0,
         country_first INTEGER NOT NULL DEFAULT 0,
         country_checked_at TEXT,
+        country_seen_at TEXT,
         missing_lazer INTEGER,
         missing_classic INTEGER,
         missing_wither INTEGER,
@@ -397,7 +412,7 @@ function migrate(d: DatabaseSync): void {
       );
       INSERT INTO beatmap_user_mr
         SELECT beatmap_id, 0, fetched_at, played, any_fc, country_first,
-               country_checked_at, missing_lazer, missing_classic,
+               country_checked_at, country_seen_at, missing_lazer, missing_classic,
                missing_wither, best_lazer_score_id, global_rank,
                global_checked_at, global_seen
         FROM beatmap_user;
