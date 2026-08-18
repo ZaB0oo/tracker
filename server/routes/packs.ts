@@ -56,16 +56,20 @@ packsRouter.get("/packs", (req, res) => {
   // per-pack aggregates over the maps of its sets, seen from this mode's
   // pool: total diffs, played, cleared, FC'd (only ranked/approved/loved).
   // Time machine (at): replayed from the stored scores instead of the live
-  // flags — same definitions (passed = played, fc_state <= 1 = FC) as any_fc.
+  // flags. FC is the state of the BEST score made by that date — the same
+  // definition as best_fc and as the pack detail below, so the counter and
+  // the rows of the modal cannot disagree.
   const playedCol = at
     ? `SUM(CASE WHEN EXISTS(SELECT 1 FROM scores s WHERE s.beatmap_id = b.id
          AND s.ruleset = ${R} AND s.passed = 1 AND date(s.ended_at) <= @at)
          THEN 1 ELSE 0 END) AS played,
-       SUM(CASE WHEN EXISTS(SELECT 1 FROM scores s WHERE s.beatmap_id = b.id
-         AND s.ruleset = ${R} AND s.passed = 1 AND s.fc_state <= 1
-         AND date(s.ended_at) <= @at) THEN 1 ELSE 0 END) AS fced`
+       SUM(CASE WHEN (SELECT s2.fc_state FROM scores s2
+           WHERE s2.beatmap_id = b.id AND s2.ruleset = ${R} AND s2.passed = 1
+             AND date(s2.ended_at) <= @at
+           ORDER BY COALESCE(s2.classic_total_score, s2.total_score) DESC
+           LIMIT 1) <= 1 THEN 1 ELSE 0 END) AS fced`
     : `SUM(CASE WHEN u.played = 1 THEN 1 ELSE 0 END) AS played,
-       SUM(COALESCE(u.any_fc, 0)) AS fced`;
+       SUM(COALESCE(u.best_fc, 0)) AS fced`;
   const rows = db
     .prepare(
       `SELECT p.tag, p.name, p.type, p.date,

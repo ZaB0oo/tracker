@@ -38,6 +38,36 @@ const fmtDate = (at: string) => {
 };
 const fmtInt = (n: number | null | undefined) => (n == null ? "—" : fmtNum(n));
 
+/**
+ * Column headers. Rendered by the PANEL rather than by the list, so they sit
+ * in the same sticky block as the filters above them — two stacked sticky
+ * rows would need the second to hardcode the first one's height. Side effect:
+ * they now stay visible while a list is loading or empty, which is what a
+ * table header does anyway.
+ */
+function ClearsHeader() {
+  return (
+    <div className="hist-header">
+      <span className="fr-event-date">Date</span>
+      <span className="fr-event-badge">Grade</span>
+      <span className="fr-event-map">Map</span>
+      <span className="fc">FC</span>
+      <span className="fr-event-score">Score</span>
+      <span className="fr-event-acc">Acc</span>
+    </div>
+  );
+}
+function EventsHeader({ by }: { by: string }) {
+  return (
+    <div className="hist-header">
+      <span className="fr-event-date">Date</span>
+      <span className="fr-event-badge">Event</span>
+      <span className="fr-event-map">Map</span>
+      <span className="fr-event-by">{by}</span>
+    </div>
+  );
+}
+
 function ClearsList({ onCtx, ruleset }: { onCtx: OnMapContext; ruleset: number }) {
   const query = useInfiniteQuery({
     queryKey: ["clears", ruleset],
@@ -57,14 +87,6 @@ function ClearsList({ onCtx, ruleset }: { onCtx: OnMapContext; ruleset: number }
 
   return (
     <>
-      <div className="hist-header">
-        <span className="fr-event-date">Date</span>
-        <span className="fr-event-badge">Grade</span>
-        <span className="fr-event-map">Map</span>
-        <span className="fc">FC</span>
-        <span className="fr-event-score">Score</span>
-        <span className="fr-event-acc">Acc</span>
-      </div>
       {rows.map((c, i) => (
         <div
           key={c.id}
@@ -140,12 +162,6 @@ function CountryList({
 
   return (
     <>
-      <div className="hist-header">
-        <span className="fr-event-date">Date</span>
-        <span className="fr-event-badge">Event</span>
-        <span className="fr-event-map">Map</span>
-        <span className="fr-event-by">Sniped by</span>
-      </div>
       {rows.map((e, i) => (
         <div
           key={e.id}
@@ -240,12 +256,6 @@ function GlobalList({
 
   return (
     <>
-      <div className="hist-header">
-        <span className="fr-event-date">Date</span>
-        <span className="fr-event-badge">Event</span>
-        <span className="fr-event-map">Map</span>
-        <span className="fr-event-by">Rank</span>
-      </div>
       {rows.map((e, i) => {
         const gained =
           e.new_rank != null && (e.old_rank == null || e.new_rank < e.old_rank);
@@ -314,10 +324,14 @@ export function HistoryView({ ruleset = 0 }: { ruleset?: number }) {
     <div className="dashboard">
       <div className="history-cols">
         <div className="panel history-panel">
-          <h3>Clears</h3>
+          <div className="sticky-head">
+            <h3>Clears</h3>
+            <ClearsHeader />
+          </div>
           <ClearsList onCtx={onCtx} ruleset={ruleset} />
         </div>
         <div className="panel history-panel">
+          <div className="sticky-head">
           <div className="hist-col-head">
             <div className="seg">
               <button
@@ -344,6 +358,8 @@ export function HistoryView({ ruleset = 0 }: { ruleset?: number }) {
                 Lost
               </button>
             </div>
+          </div>
+            <EventsHeader by={src === "country" ? "Sniped by" : "Rank"} />
           </div>
           {src === "country" ? (
             <CountryList filter={frFilter} onCtx={onCtx} ruleset={ruleset} />

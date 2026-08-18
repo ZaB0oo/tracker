@@ -542,6 +542,7 @@ export function MetricsView({
 
   return (
     <div className="dashboard">
+      <div className="sticky-head">
       <div className="metrics-toolbar">
         <button className="primary" onClick={() => setBuilderOpen(true)}>
           + New metric
@@ -557,10 +558,6 @@ export function MetricsView({
         <small>evolution shown per metric · drag a chart to zoom</small>
         {isFetching && <span className="loading-chip">Computing…</span>}
       </div>
-
-      {data.metrics.length === 0 && (
-        <p className="goal-note">No metric yet — create one with “+ New metric”.</p>
-      )}
 
       {/* Combined list. Only appears once something is ticked, and spells out
           what the button will show — the word "union" is never used. */}
@@ -601,6 +598,10 @@ export function MetricsView({
           </div>
         );
       })()}
+      </div>
+      {data.metrics.length === 0 && (
+        <p className="goal-note">No metric yet — create one with “+ New metric”.</p>
+      )}
       <div className="metrics-grid" ref={gridRef}>
         {data.metrics
           .filter((m) => (m.params.ruleset ?? 0) === ruleset)

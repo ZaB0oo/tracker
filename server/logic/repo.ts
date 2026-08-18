@@ -194,12 +194,16 @@ export function refreshBest(
        best_lazer_score_id = excluded.best_lazer_score_id`
   ).run(beatmapId, ruleset, markFetched ? 1 : 0, rows.length > 0 ? 1 : 0, bestLazer);
 
+  // Leaderboard semantics, like the grade and the PFC/SS gauges: the flag
+  // describes the score that counts on the leaderboard, so an FC beaten later
+  // by a higher-scoring non-FC play stops counting. Reads the pointer the
+  // INSERT above has just written. SQL twin of the backfill in db.ts.
   db.prepare(
-    `UPDATE beatmap_user SET any_fc = EXISTS(
+    `UPDATE beatmap_user SET best_fc = EXISTS(
        SELECT 1 FROM scores s
-       WHERE s.beatmap_id = ? AND s.ruleset = ? AND s.passed = 1 AND s.fc_state <= 1)
+       WHERE s.id = beatmap_user.best_lazer_score_id AND s.fc_state <= 1)
      WHERE beatmap_id = ? AND ruleset = ?`
-  ).run(beatmapId, ruleset, beatmapId, ruleset);
+  ).run(beatmapId, ruleset);
 }
 
 /**
@@ -312,7 +316,7 @@ export function recomputeFcForMap(beatmapId: number, ruleset: number): void {
  * nothing" sentinel) made every score on them a PERFECT FC at insert time
  * (score.combo >= 0 is always true). Recompute those scores' fc_state with no
  * combo reference — the statistics-based rules still apply — then refresh the
- * affected bests/any_fc. Idempotent, no-op when nothing is wrong.
+ * affected bests/best_fc. Idempotent, no-op when nothing is wrong.
  */
 export function repairZeroComboFc(): { scores: number; maps: number } {
   const db = getDb();

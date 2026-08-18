@@ -5,13 +5,25 @@ Local desktop app that keeps your best score on **every ranked, approved and lov
 ![Dashboard](docs/dashboard.png)
 
 <details>
-<summary>More screenshots: maps table, custom metrics, history</summary>
+<summary>More screenshots: the rest of the dashboard, maps table, map details, custom metrics, metric builder, history, OBS overlay</summary>
+
+![Completion by star rating, year, length and combo, a year back](docs/dashboard2.png)
+
+![Rate histogram and official packs](docs/dashboard3.png)
+
+![Predicted reachable score by star rating](docs/dashboard4.png)
 
 ![Maps table](docs/maps.png)
 
+![Map details](docs/map.png)
+
 ![Custom metrics](docs/metrics.png)
 
+![Metric builder](docs/metric-builder.png)
+
 ![History](docs/history.png)
+
+![OBS overlay](docs/overlay.png)
 
 </details>
 

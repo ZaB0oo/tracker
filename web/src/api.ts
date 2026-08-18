@@ -129,10 +129,16 @@ function buildTableQuery(
     "srMin", "srMax", "arMin", "arMax", "odMin", "odMax", "hpMin", "hpMax",
     "csMin", "csMax", "lenMin", "lenMax", "comboMin", "comboMax",
     "globalTopMin", "globalTopMax", "rateMin", "rateMax",
+    "missingMin", "missingMax", "multMin", "multMax",
     "rankedFrom", "rankedTo", "playedFrom", "playedTo",
   ] as const) {
     if (filters[k] !== "") p.set(k, filters[k]);
   }
+  // The score bounds are typed in the displayed unit; the server keeps one
+  // param per unit, so the toggle decides which pair gets filled.
+  const unit = filters.mode === "classic" ? "classic" : "std";
+  if (filters.scoreMin !== "") p.set(`${unit}Min`, filters.scoreMin);
+  if (filters.scoreMax !== "") p.set(`${unit}Max`, filters.scoreMax);
   return p.toString();
 }
 

@@ -33,7 +33,6 @@ export interface TableRow {
   missing_value: number;
   missing_pct: number | null;
   played: number;
-  any_fc: number;
   country_first: number;
   global_rank: number | null;
 }
@@ -76,7 +75,8 @@ export interface MapDetail {
   }[];
   user: {
     played: number;
-    any_fc: number;
+    /** my BEST score on the map is an FC (leaderboard semantics) */
+    best_fc: number;
     country_first: number;
     country_checked_at: string | null;
     fetched_at: string | null;
@@ -244,6 +244,13 @@ export interface Filters {
   globalTopMin: string; globalTopMax: string;
   /** playback rate of the best (lazer 0.5x-2.0x) */
   rateMin: string; rateMax: string;
+  /** score of the best AND what is left on the map, both in the unit the
+   * Classic / Standardised toggle displays — same unit as the two columns
+   * they bound. Sent as classicMin/stdMin by buildTableQuery. */
+  scoreMin: string; scoreMax: string;
+  missingMin: string; missingMax: string;
+  /** mod multiplier of the best */
+  multMin: string; multMax: string;
   /** Maps left to do for one or more metrics (union when there are several).
    * `matching` only drives the badge wording (countdown metrics say "to fix"),
    * the direction itself is derived per metric on the server. */
@@ -279,6 +286,9 @@ export const DEFAULT_FILTERS: Filters = {
   countryFirst: false,
   globalTopMin: "", globalTopMax: "",
   rateMin: "", rateMax: "",
+  scoreMin: "", scoreMax: "",
+  missingMin: "", missingMax: "",
+  multMin: "", multMax: "",
   metricMissing: null,
   platform: "",
   srMin: "", srMax: "",

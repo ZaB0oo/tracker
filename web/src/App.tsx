@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchVersion, type DashScope } from "./api";
-import { DEFAULT_FILTERS, type Filters } from "./types";
+import { DEFAULT_FILTERS, normalizeFilters, type Filters } from "./types";
 import { modeIcon } from "./rulesets";
 import { FilterBar } from "./components/FilterBar";
 import { PresetBar } from "./components/PresetBar";
@@ -27,8 +27,27 @@ const RULESET_TABS: [number, string][] = [
   [3, "mania"],
 ];
 
+/**
+ * Filters of the last session. Restored rather than reset because setting them
+ * up again on every launch is the annoying part; every restored filter still
+ * shows its badge above the table, and "Reset all" is one click away, so the
+ * table is never quietly narrowed. Shapes older than the current Filters are
+ * healed by normalizeFilters.
+ */
+function loadFilters(): Filters {
+  try {
+    const raw = localStorage.getItem("filters");
+    return raw ? normalizeFilters(JSON.parse(raw)) : DEFAULT_FILTERS;
+  } catch {
+    return DEFAULT_FILTERS;
+  }
+}
+
 export default function App() {
-  const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+  const [filters, setFilters] = useState<Filters>(loadFilters);
+  useEffect(() => {
+    localStorage.setItem("filters", JSON.stringify(filters));
+  }, [filters]);
   const [sort, setSort] = useState<SortSpec>([{ id: "missing", desc: true }]);
   const [view, setView] = useState<View>("table");
   const ruleset = filters.ruleset;

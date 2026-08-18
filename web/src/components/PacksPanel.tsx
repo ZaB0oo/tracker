@@ -16,6 +16,7 @@ import { GradeBadge } from "./GradeBadge";
 import { MapModal } from "./MapModal";
 import { FC_LABELS } from "../types";
 import { useEscape } from "../useEscape";
+import { useTipPlacement } from "../useTipPlacement";
 
 const TYPE_LABELS: Record<string, string> = {
   standard: "Standard",
@@ -36,6 +37,16 @@ function packState(p: PackRow): "off" | "part" | "done" | "fc" {
   if (p.played > 0) return "part";
   return "off";
 }
+
+/** suffix of the tooltip's last line — nothing for a pack barely started */
+const STATE_LABELS: Record<ReturnType<typeof packState>, string> = {
+  fc: " · full FC",
+  done: " · completed",
+  part: "",
+  off: " · untouched",
+};
+const pct = (v: number, total: number) =>
+  total > 0 ? `${((v / total) * 100).toFixed(1)}%` : "—";
 
 type SortKey = "map" | "sr" | "grade" | "acc" | "date";
 const GRADE_RANK: Record<string, number> = {
@@ -314,6 +325,11 @@ export function PacksPanel({
   const [openTag, setOpenTag] = useState<string | null>(null);
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  // ONE tooltip for the whole grid: a stateful component per dot would mean
+  // thousands of them. The hovered pack is also what re-measures the tooltip,
+  // so it follows the cursor from dot to dot.
+  const [hovered, setHovered] = useState<PackRow | null>(null);
+  const { setWrap, tipRef, tipStyle, clearTip } = useTipPlacement(hovered?.tag);
   if (!data) return null;
 
   if (data.synced === 0)
@@ -436,7 +452,14 @@ export function PacksPanel({
                 <button
                   key={p.tag}
                   className={`pack-dot pack-${packState(p)}`}
-                  title={`(${p.tag}) ${p.name}\n${p.played}/${p.total} cleared · ${p.fced} FC`}
+                  onMouseEnter={(e) => {
+                    setWrap(e.currentTarget);
+                    setHovered(p);
+                  }}
+                  onMouseLeave={() => {
+                    setHovered(null);
+                    clearTip();
+                  }}
                   onClick={() => setOpenTag(p.tag)}
                 />
               ))}
@@ -444,6 +467,36 @@ export function PacksPanel({
           </div>
         );
       })}
+      {hovered && (
+        <div ref={tipRef} className="bar-tip" style={tipStyle}>
+          <div className="bar-tip-row">
+            <b className="bar-tip-title">
+              ({hovered.tag}) {hovered.name}
+            </b>
+          </div>
+          <div className="bar-tip-row">
+            <span className="gauge-dot" style={{ background: "var(--accent)" }} />{" "}
+            Cleared{" "}
+            <b>
+              {fmtNum(hovered.played)} / {fmtNum(hovered.total)}
+            </b>
+            <span className="tip-dim">
+              {" "}
+              ({pct(hovered.played, hovered.total)})
+            </span>
+          </div>
+          <div className="bar-tip-row">
+            <span className="gauge-dot" style={{ background: "var(--yellow)" }} /> FC{" "}
+            <b>{fmtNum(hovered.fced)}</b>
+            <span className="tip-dim"> ({pct(hovered.fced, hovered.total)})</span>
+          </div>
+          <div className="bar-tip-row tip-dim">
+            {TYPE_LABELS[hovered.type] ?? hovered.type}
+            {hovered.date ? ` · ${fmtDate(hovered.date)}` : ""}
+            {STATE_LABELS[packState(hovered)]}
+          </div>
+        </div>
+      )}
       {openTag && (
         <PackModal
           tag={openTag}

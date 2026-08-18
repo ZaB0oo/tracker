@@ -95,13 +95,20 @@ const COLUMNS: Col[] = [
   },
   { id: "score", label: "Score", width: 101, sortable: true, render: (r) => fmtInt(r.score_value) },
   {
-    id: "missing", label: "Missing", width: 101, sortable: true,
-    render: (r) => fmtInt(r.missing_value),
-    className: (r) => (r.missing_value === 0 ? "missing-zero" : "missing"),
-  },
-  {
-    id: "missing_pct", label: "Missing %", width: 75, sortable: true,
-    render: (r) => (r.missing_pct != null ? `${r.missing_pct.toFixed(1)}%` : "—"),
+    // absolute and share of the prediction in one cell: the percentage says
+    // nothing without the value it is a share of, and two columns for one
+    // number cost 75px of table. Sorting is on the absolute (the default
+    // sort of the table); `missing_pct` stays a valid sort key server-side
+    // for the presets saved when it had its own column.
+    id: "missing", label: "Missing", width: 150, sortable: true,
+    render: (r) => (
+      <>
+        {fmtInt(r.missing_value)}
+        {r.missing_pct != null && (
+          <span className="missing-share">{r.missing_pct.toFixed(1)}%</span>
+        )}
+      </>
+    ),
     className: (r) => (r.missing_value === 0 ? "missing-zero" : "missing"),
   },
   {

@@ -14,6 +14,7 @@ import type { PoolMode } from "../types";
 import { fmtCompact, fmtDate, fmtNum } from "../format";
 import { GradeBadge } from "./GradeBadge";
 import { MapModal } from "./MapModal";
+import { useTipPlacement } from "../useTipPlacement";
 
 const CELL = 12;
 const GAP = 3;
@@ -121,6 +122,11 @@ export function HeatmapPanel({
   const [ctx, setCtx] = useState<{ x: number; y: number; row: ClearRow } | null>(null);
   const [sortKey, setSortKey] = useState<"time" | "title" | "sr" | "grade" | "acc">("time");
   const [sortDesc, setSortDesc] = useState(false);
+  // Hovered day: the numbers come from the timeline already in cache, so the
+  // tooltip costs nothing per cell. The map list stays behind the click — it
+  // is a fetch per day, and sweeping the year would fire one per square.
+  const [hoverDay, setHoverDay] = useState<string | null>(null);
+  const { setWrap, tipRef, tipStyle, clearTip } = useTipPlacement(hoverDay);
   if (!data) return null;
 
   const GRADE_ORDER: Record<string, number> = {
@@ -161,6 +167,14 @@ export function HeatmapPanel({
     : [];
 
   const byDay = new Map(data.days.map((d) => [d.d, d.c]));
+  const hoverStats = hoverDay && tl ? dayStats(tl.points, tl.tiers, hoverDay) : null;
+  const hoverGrades =
+    hoverStats && tl
+      ? tl.tiers
+          .map((t, i) => ({ tier: t, d: hoverStats.grades[i] }))
+          .filter((g) => g.d !== 0)
+          .reverse() // XH first, like the day panel
+      : [];
   const jan1 = new Date(Date.UTC(year, 0, 1));
   const startDow = jan1.getUTCDay(); // 0 = Sunday
   const daysInYear = (Date.UTC(year + 1, 0, 1) - Date.UTC(year, 0, 1)) / 86_400_000;
@@ -241,13 +255,59 @@ export function HeatmapPanel({
               strokeWidth={iso === selDay ? 1.5 : 0}
               style={{ cursor: "pointer" }}
               onClick={() => setSelDay(iso)}
-            >
-              <title>{`${iso}: ${c} clear(s)`}</title>
-            </rect>
+              onMouseEnter={(e) => {
+                // nothing to say on an empty day, and a dimmed one is AFTER
+                // the time machine's date: showing its count would leak the
+                // future that the dimming is there to hide
+                if (c === 0 || dimmed) return;
+                setWrap(e.currentTarget);
+                setHoverDay(iso);
+              }}
+              onMouseLeave={() => {
+                setHoverDay(null);
+                clearTip();
+              }}
+            />
           );
         })}
         </svg>
       </div>
+      {hoverDay && hoverStats && (
+        <div ref={tipRef} className="bar-tip" style={tipStyle}>
+          <div className="bar-tip-row">
+            <b className="bar-tip-title">
+              {hoverDay === todayIso ? "Today" : fmtDate(hoverDay)}
+            </b>
+            <b>+{fmtNum(byDay.get(hoverDay) ?? 0)}</b>&nbsp;clears
+          </div>
+          {/* zero rows dropped, like the gauges of the other tooltips: a day
+              with no FC has nothing to say about FCs */}
+          {hoverStats.fc > 0 && (
+            <div className="bar-tip-row">
+              <span className="gauge-dot" style={{ background: "var(--yellow)" }} /> FC{" "}
+              <b>+{fmtNum(hoverStats.fc)}</b>
+            </div>
+          )}
+          {hoverStats.ranked > 0 && (
+            <div className="bar-tip-row">
+              <span className="gauge-dot" style={{ background: "var(--accent)" }} /> Ranked{" "}
+              <b>+{fmtCompact(hoverStats.ranked)}</b>
+            </div>
+          )}
+          {hoverGrades.length > 0 && (
+            <div className="bar-tip-row hm-tip-grades">
+              {hoverGrades.map((g) => (
+                <span key={g.tier} className="hm-day-grade">
+                  <GradeBadge grade={g.tier} width={22} />
+                  <b className={g.d < 0 ? "dim" : ""}>
+                    {g.d > 0 ? `+${g.d}` : g.d}
+                  </b>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       <div className="hm-legend">
         <span className="dim">New clears / day</span>
         <span className="hm-legend-label">0</span>

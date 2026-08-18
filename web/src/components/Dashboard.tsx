@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { rulesetStatFields } from "../rulesets";
 import { fetchSkillCurve, fetchSnapshot, fetchStats, fetchTimeline, type DashScope, type Snapshot, type SnapshotBucket } from "../api";
@@ -9,6 +9,7 @@ import { GradeBadge } from "./GradeBadge";
 import { HeatmapPanel } from "./Heatmap";
 import { KeysChips } from "./KeysChips";
 import { PacksPanel } from "./PacksPanel";
+import { useTipPlacement } from "../useTipPlacement";
 import { PoolSeg } from "./PoolSeg";
 import { TimeMachineBar } from "./TimeMachine";
 import { MedalIcon } from "./Icons";
@@ -62,7 +63,7 @@ function RateColumn({
   onView?: () => void;
 }) {
   const [hover, setHover] = useState(false);
-  const { wrapRef, tipRef, tipStyle, clearTip } = useTipPlacement(hover);
+  const { setWrap, tipRef, tipStyle, clearTip } = useTipPlacement(hover);
   // same rule as the completion bars: biggest layer first, the smaller ones
   // drawn on top of it, so every enabled gauge stays visible
   const layers = GAUGES.filter(
@@ -73,7 +74,7 @@ function RateColumn({
   const share = (v: number) => (b.played > 0 ? (v / b.played) * 100 : 0);
   return (
     <div
-      ref={wrapRef}
+      ref={setWrap}
       className={`rate-col${hover ? " on" : ""}`}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => {
@@ -427,34 +428,6 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
  * Completion gauge. The yellow portion (country) is overlaid on the played
  * portion: it shows the share of country #1s out of the gauge total.
  */
-/**
- * Places a hover tooltip by MEASURING it: rendered fixed, put above the
- * anchor when its actual height fits the viewport, else below, clamped
- * horizontally — it can never overflow the window. Shared by the completion
- * bars and the rate histogram.
- */
-function useTipPlacement(hover: boolean) {
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const tipRef = useRef<HTMLDivElement>(null);
-  const [tipStyle, setTipStyle] = useState<React.CSSProperties>();
-  useLayoutEffect(() => {
-    if (!hover || !tipRef.current || !wrapRef.current) return;
-    const anchor = wrapRef.current.getBoundingClientRect();
-    const tip = tipRef.current.getBoundingClientRect();
-    const above = anchor.top - tip.height - 7;
-    const top = above >= 8 ? above : anchor.bottom + 7;
-    const left = Math.max(
-      8,
-      Math.min(
-        anchor.left + anchor.width / 2 - tip.width / 2,
-        window.innerWidth - tip.width - 8
-      )
-    );
-    setTipStyle({ position: "fixed", top, left, bottom: "auto", transform: "none" });
-  }, [hover]);
-  return { wrapRef, tipRef, tipStyle, clearTip: () => setTipStyle(undefined) };
-}
-
 /** Selectable completion gauges (one bar layer each). The legend groups them:
  * grades, global-top tiers (cumulative shades), country #1. */
 export const GAUGES = [
@@ -506,10 +479,10 @@ function Bar({
   // width (gauge counts used to overflow and vanish on narrow bars). The
   // full detail lives in a hover tooltip, one line per visible gauge.
   const [hover, setHover] = useState(false);
-  const { wrapRef, tipRef, tipStyle, clearTip } = useTipPlacement(hover);
+  const { setWrap, tipRef, tipStyle, clearTip } = useTipPlacement(hover);
   return (
     <div
-      ref={wrapRef}
+      ref={setWrap}
       className="bar-wrap"
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => {
@@ -1052,6 +1025,7 @@ export function Dashboard({
 
   return (
     <div className="dashboard">
+      <div className="sticky-head">
       <div className="dash-pool">
         <div className="seg">
           <button className={scope === "all" ? "active" : ""} onClick={() => setScopePersist("all")}>
@@ -1080,6 +1054,7 @@ export function Dashboard({
       {points.length > 1 && (
         <TimeMachineBar points={points} idx={tmIdx} onChange={setTmIdx} />
       )}
+      </div>
       {/* Hero: the essentials at a glance */}
       <div className="card hero">
         <div className="hero-bars">

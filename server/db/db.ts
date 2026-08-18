@@ -410,6 +410,34 @@ function migrate(d: DatabaseSync): void {
     `);
   }
 
+  // FC follows leaderboard semantics like every other gauge: the flag now says
+  // "my BEST is an FC", not "I FC'd this map once". Renamed rather than
+  // re-purposed — `any_fc` holding a best-only value would be a permanent
+  // trap, and the rename makes SQLite reject any call site left behind.
+  // Runs AFTER the two table rebuilds above, which still speak of any_fc.
+  const buCols4 = d.prepare("PRAGMA table_info(beatmap_user)").all() as { name: string }[];
+  if (buCols4.some((c) => c.name === "any_fc"))
+    d.exec("ALTER TABLE beatmap_user RENAME COLUMN any_fc TO best_fc");
+  // Versioned: the rename carries the OLD values over, so every row has to be
+  // recomputed once. SQL twin of the UPDATE in refreshBest() — same predicate.
+  const FC_KEY = "best_fc_backfill";
+  const fcDone = (
+    d.prepare("SELECT value FROM sync_state WHERE key = ?").get(FC_KEY) as
+      | { value: string }
+      | undefined
+  )?.value;
+  if (fcDone !== "v1") {
+    d.exec(
+      `UPDATE beatmap_user SET best_fc = COALESCE((
+         SELECT CASE WHEN s.fc_state <= 1 THEN 1 ELSE 0 END FROM scores s
+         WHERE s.id = beatmap_user.best_lazer_score_id), 0)`
+    );
+    d.prepare(
+      "INSERT INTO sync_state (key, value) VALUES (?, 'v1') ON CONFLICT(key) DO UPDATE SET value = 'v1'"
+    ).run(FC_KEY);
+    console.log("[db] migration: FC now describes the best score of each map");
+  }
+
   // osu!std is now started explicitly, like the other modes (nothing runs for a
   // mode before its "Start initial sync"). An install that already has a std
   // catalog did that start historically: flag it, or its sync would stop dead.

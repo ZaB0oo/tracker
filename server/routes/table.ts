@@ -18,7 +18,8 @@ export const tableRouter = Router();
  *  offset, limit
  *  filters: played, fcState, grades, statuses, mods, srMin/Max, arMin/Max,
  *  odMin/Max, csMin/Max, hpMin/Max, lenMin/Max, yearMin/Max, comboMin/Max,
- *  accMin/Max, missingMin, q (free text artist/title/creator/version)
+ *  accMin/Max, classicMin/Max, stdMin/Max, missingMin/Max, multMin/Max,
+ *  q (free text artist/title/creator/version)
  */
 const SORT_COLUMNS: Record<string, string> = {
   ended_at: "s.ended_at",
@@ -123,6 +124,17 @@ function buildFilters(
   // playback rate of the best (0.5x-2.0x): any bound implies a played map
   num("rateMin", "s.rate", ">=");
   num("rateMax", "s.rate", "<=");
+  // Score of the best, in BOTH units: the mode toggle picks the displayed
+  // column, filtering on the other one has to stay possible. Same expression
+  // as that column, so what you filter is what you read. Any bound implies a
+  // played map — s is NULL otherwise, and no comparison against NULL is true.
+  const CLASSIC = "COALESCE(s.classic_total_score, s.total_score)";
+  num("classicMin", CLASSIC, ">="); num("classicMax", CLASSIC, "<=");
+  num("stdMin", "s.total_score", ">="); num("stdMax", "s.total_score", "<=");
+  // mod multiplier of the best. Left NULL on the scores whose combination the
+  // multiplier index could not resolve: a bound excludes those, like any other
+  // score-derived statistic that was never determined.
+  num("multMin", "s.mod_multiplier", ">="); num("multMax", "s.mod_multiplier", "<=");
   // Maps of one or more metrics (metricMissing=3 or metricMissing=3,7,9): maps
   // matching a metric's MAP conditions whose BEST score does not match its
   // SCORE conditions — the missing maps (leaderboard semantics, same rule as
@@ -294,7 +306,10 @@ function buildFilters(
   date("playedFrom", "date(s.ended_at)", ">=");
   date("playedTo", "date(s.ended_at)", "<=");
   num("accMin", "s.accuracy * 100", ">="); num("accMax", "s.accuracy * 100", "<=");
-  num("missingMin", missingSql, ">=");
+  // realistic missing, in the displayed unit (missing_classic / missing_lazer),
+  // exactly like the Missing column. Unplayed maps carry their full prediction
+  // here, so they DO match a lower bound — that is the point of the column.
+  num("missingMin", missingSql, ">="); num("missingMax", missingSql, "<=");
   // Hit counts of the best score, per ruleset (300s/100s/misses, droplets,
   // missed slider ends…): {"miss":{"max":0},"ok":{"min":1,"max":5}}. Same
   // expressions as the metric conditions (hitCountExpr), so "1x100" means the
@@ -410,7 +425,6 @@ tableRouter.get("/table", (req, res) => {
              WHEN 'A' THEN 3 WHEN 'B' THEN 2 WHEN 'C' THEN 1 WHEN 'D' THEN 0
              ELSE -1 END AS grade_order,
         COALESCE(u.played, 0) AS played,
-        COALESCE(u.any_fc, 0) AS any_fc,
         COALESCE(u.country_first, 0) AS country_first,
         u.global_rank
       ${baseSql}
@@ -460,7 +474,7 @@ tableRouter.get("/map/:id", (req, res) => {
   const user =
     db
       .prepare(
-        `SELECT played, any_fc, country_first, country_checked_at, fetched_at,
+        `SELECT played, best_fc, country_first, country_checked_at, fetched_at,
            global_rank
          FROM beatmap_user WHERE beatmap_id = ? AND ruleset = ?`
       )

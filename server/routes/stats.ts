@@ -79,9 +79,9 @@ statsRouter.get("/stats", (req, res) => {
       SUM(COALESCE(u.country_first, 0)) country_firsts,
       SUM(CASE WHEN b.status IN (1, 2) THEN COALESCE(u.country_first, 0) ELSE 0 END) country_ranked,
       SUM(CASE WHEN b.status = 4 THEN COALESCE(u.country_first, 0) ELSE 0 END) country_loved,
-      SUM(COALESCE(u.any_fc, 0)) fc,
-      SUM(CASE WHEN b.status IN (1, 2) THEN COALESCE(u.any_fc, 0) ELSE 0 END) fc_ranked,
-      SUM(CASE WHEN b.status = 4 THEN COALESCE(u.any_fc, 0) ELSE 0 END) fc_loved
+      SUM(COALESCE(u.best_fc, 0)) fc,
+      SUM(CASE WHEN b.status IN (1, 2) THEN COALESCE(u.best_fc, 0) ELSE 0 END) fc_ranked,
+      SUM(CASE WHEN b.status = 4 THEN COALESCE(u.best_fc, 0) ELSE 0 END) fc_loved
     FROM beatmaps b LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}
     WHERE ${POOL} AND b.status IN ${STATUSES}`);
 
@@ -219,7 +219,7 @@ statsRouter.get("/stats", (req, res) => {
       `SELECT MIN(CAST(${SR_EXPR} AS INTEGER), 10) sr,
         COUNT(*) total, SUM(CASE WHEN u.played = 1 THEN 1 ELSE 0 END) played,
         SUM(COALESCE(u.country_first, 0)) country,
-        SUM(COALESCE(u.any_fc, 0)) fc${GAUGE_COLS}
+        SUM(COALESCE(u.best_fc, 0)) fc${GAUGE_COLS}
        FROM beatmaps b LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}
        ${FLAGS_JOIN} ${CA_JOIN}
        WHERE ${POOL} AND b.status IN ${STATUSES} AND ${SR_EXPR} IS NOT NULL
@@ -232,7 +232,7 @@ statsRouter.get("/stats", (req, res) => {
       `SELECT strftime('%Y', st.ranked_date) year,
         COUNT(*) total, SUM(CASE WHEN u.played = 1 THEN 1 ELSE 0 END) played,
         SUM(COALESCE(u.country_first, 0)) country,
-        SUM(COALESCE(u.any_fc, 0)) fc${GAUGE_COLS}
+        SUM(COALESCE(u.best_fc, 0)) fc${GAUGE_COLS}
        FROM beatmaps b
        JOIN beatmapsets st ON st.id = b.beatmapset_id
        LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}
@@ -249,7 +249,7 @@ statsRouter.get("/stats", (req, res) => {
         `SELECT MIN(CAST(${expr} AS INTEGER), ${cap}) AS bucket,
           COUNT(*) total, SUM(CASE WHEN u.played = 1 THEN 1 ELSE 0 END) played,
           SUM(COALESCE(u.country_first, 0)) country,
-          SUM(COALESCE(u.any_fc, 0)) fc${GAUGE_COLS}
+          SUM(COALESCE(u.best_fc, 0)) fc${GAUGE_COLS}
          FROM beatmaps b LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}
          ${FLAGS_JOIN} ${CA_JOIN}
          WHERE ${POOL} AND b.status IN ${STATUSES} AND ${expr} IS NOT NULL
@@ -263,7 +263,7 @@ statsRouter.get("/stats", (req, res) => {
       `SELECT CASE WHEN b.status = 4 THEN 'loved' ELSE 'ranked' END AS bucket,
         COUNT(*) total, SUM(CASE WHEN u.played = 1 THEN 1 ELSE 0 END) played,
         SUM(COALESCE(u.country_first, 0)) country,
-        SUM(COALESCE(u.any_fc, 0)) fc${GAUGE_COLS}
+        SUM(COALESCE(u.best_fc, 0)) fc${GAUGE_COLS}
        FROM beatmaps b LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}
        ${FLAGS_JOIN}
        WHERE ${POOL} AND b.status IN ${STATUSES}
@@ -278,7 +278,7 @@ statsRouter.get("/stats", (req, res) => {
     .prepare(
       `SELECT MIN(MAX(CAST(s.rate * 10 AS INTEGER), 5), 20) AS bucket,
         COUNT(*) played,
-        SUM(COALESCE(u.any_fc, 0)) fc,
+        SUM(COALESCE(u.best_fc, 0)) fc,
         SUM(CASE WHEN s.fc_state = 0 THEN 1 ELSE 0 END) pfc,
         SUM(CASE WHEN s.rank IN ('X','XH') THEN 1 ELSE 0 END) ss,
         SUM(CASE WHEN s.rank IN ('S','SH','X','XH') THEN 1 ELSE 0 END) splus,
@@ -494,25 +494,28 @@ statsRouter.get("/timeline", (req, res) => {
   const clears = firstDates("s.passed = 1");
   const clearsRanked = firstDates("s.passed = 1 AND b.status IN (1, 2)");
   const clearsLoved = firstDates("s.passed = 1 AND b.status = 4");
-  const fcAll = firstDates("s.passed = 1 AND s.fc_state <= 1");
-  const fcRanked = firstDates("s.passed = 1 AND s.fc_state <= 1 AND b.status IN (1, 2)");
-  const fcLoved = firstDates("s.passed = 1 AND s.fc_state <= 1 AND b.status = 4");
-
-  // ranked classic + grade spread: one replay of successive bests. The tier
-  // counted is the grade OF THE CURRENT BEST (classic) score — the same
-  // definition as the dashboard's Grades panel, so an SS later beaten by a
-  // higher-scoring S stops counting as SS from that moment on.
+  // ranked classic + grade spread + FC: one replay of successive bests. What
+  // is counted is the state OF THE CURRENT BEST (classic) score — the same
+  // definition as the dashboard, so an SS later beaten by a higher-scoring S
+  // stops counting as SS from that moment on, and an FC beaten by a
+  // higher-scoring non-FC stops counting as an FC. Both series can therefore
+  // go DOWN, which is why they are transitions and not first-dates.
   const scoreRows = db
     .prepare(
       `SELECT s.beatmap_id AS bid, s.ended_at AS at, s.rank AS rank,
+         s.fc_state AS fcState, b.status AS status,
          COALESCE(s.classic_total_score, s.total_score) AS v
        ${CATALOG} AND s.passed = 1 ORDER BY s.ended_at`
     )
-    .all() as { bid: number; at: string; rank: string; v: number }[];
+    .all() as {
+    bid: number; at: string; rank: string; fcState: number; status: number; v: number;
+  }[];
   const tierOf = new Map(TIERS.map((t, i) => [t, i]));
   const best = new Map<number, number>();
   const mapTier = new Map<number, number>();
+  const mapFc = new Set<number>();
   const gradeEvents: { at: string; to: number | null; from: number | null }[] = [];
+  const fcEvents: { at: string; delta: number; status: number }[] = [];
   let rankedTotal = 0;
   const rankedPts: { at: string; total: number }[] = [];
   for (const r of scoreRows) {
@@ -527,6 +530,12 @@ statsRouter.get("/timeline", (req, res) => {
       gradeEvents.push({ at: r.at, to, from });
       if (to == null) mapTier.delete(r.bid);
       else mapTier.set(r.bid, to);
+    }
+    const fcNow = r.fcState <= 1;
+    if (fcNow !== mapFc.has(r.bid)) {
+      fcEvents.push({ at: r.at, delta: fcNow ? 1 : -1, status: r.status });
+      if (fcNow) mapFc.add(r.bid);
+      else mapFc.delete(r.bid);
     }
   }
 
@@ -586,19 +595,20 @@ statsRouter.get("/timeline", (req, res) => {
   const days = [
     ...new Set([
       ...clears.map(dayOf),
-      ...fcAll.map(dayOf),
       ...gradeEvents.map((e) => dayOf(e.at)),
+      ...fcEvents.map((e) => dayOf(e.at)),
       ...rankedPts.map((p) => dayOf(p.at)),
       ...deltas.map((d) => dayOf(d.at)),
     ]),
   ].sort();
 
-  const idx = { c: 0, cr: 0, cl: 0, f: 0, fr: 0, fl: 0, g: 0, r: 0, d: 0, h: 0 };
+  const idx = { c: 0, cr: 0, cl: 0, g: 0, f: 0, r: 0, d: 0, h: 0 };
   let ranked = 0;
   const catalog = { total: 0, ranked: 0, loved: 0 };
   const country = { all: 0, ranked: 0, loved: 0 };
+  const fc = { all: 0, ranked: 0, loved: 0 };
   const grades = new Array(TIERS.length).fill(0) as number[];
-  const advance = (arr: string[], key: "c" | "cr" | "cl" | "f" | "fr" | "fl", day: string) => {
+  const advance = (arr: string[], key: "c" | "cr" | "cl", day: string) => {
     while (idx[key] < arr.length && dayOf(arr[idx[key]]) <= day) idx[key]++;
     return idx[key];
   };
@@ -606,9 +616,12 @@ statsRouter.get("/timeline", (req, res) => {
     const c = advance(clears, "c", day);
     const cr = advance(clearsRanked, "cr", day);
     const cl = advance(clearsLoved, "cl", day);
-    const f = advance(fcAll, "f", day);
-    const fr = advance(fcRanked, "fr", day);
-    const fl = advance(fcLoved, "fl", day);
+    while (idx.f < fcEvents.length && dayOf(fcEvents[idx.f].at) <= day) {
+      const e = fcEvents[idx.f++];
+      fc.all += e.delta;
+      if (e.status === 4) fc.loved += e.delta;
+      else fc.ranked += e.delta;
+    }
     while (idx.g < gradeEvents.length && dayOf(gradeEvents[idx.g].at) <= day) {
       const e = gradeEvents[idx.g++];
       if (e.to != null) grades[e.to]++;
@@ -632,7 +645,7 @@ statsRouter.get("/timeline", (req, res) => {
       day,
       total: catalog.total, totalRanked: catalog.ranked, totalLoved: catalog.loved,
       clears: c, clearsRanked: cr, clearsLoved: cl,
-      fc: f, fcRanked: fr, fcLoved: fl,
+      fc: fc.all, fcRanked: fc.ranked, fcLoved: fc.loved,
       ranked,
       country: country.all, countryRanked: country.ranked, countryLoved: country.loved,
       grades: [...grades], // D,C,B,A,S,SH,X,XH
@@ -652,7 +665,6 @@ statsRouter.get("/timeline", (req, res) => {
  */
 interface SnapMap {
   clear: string | null; // first clear day
-  fc: string | null; // first FC day
   onem: string | null; // mania: first 1,000,000 day (null elsewhere)
   rankedDay: string | null; // day the map entered the catalog
   sr: number;
@@ -717,7 +729,6 @@ function buildSnapshotIndex(
          b.ar, b.od, ${CS} cs, b.hp, strftime('%Y', st.ranked_date) year,
          date(st.ranked_date) ranked_day,
          MIN(CASE WHEN s.passed = 1 THEN s.ended_at END) clear,
-         MIN(CASE WHEN s.passed = 1 AND s.fc_state <= 1 THEN s.ended_at END) fc,
          ${R === 3
            ? `MIN(CASE WHEN s.passed = 1
                 AND COALESCE(json_extract(s.raw,'$.total_score_without_mods'), s.total_score) = 1000000
@@ -734,7 +745,7 @@ function buildSnapshotIndex(
     id: number; sr: number | null; n: number | null; len: number | null; combo: number | null;
     ar: number | null; od: number | null; cs: number | null; hp: number | null;
     year: string | null; ranked_day: string | null;
-    clear: string | null; fc: string | null; onem: string | null;
+    clear: string | null; onem: string | null;
   }[];
   const cap = (v: number | null, c: number) =>
     v == null ? -1 : Math.min(Math.floor(v), c);
@@ -744,7 +755,6 @@ function buildSnapshotIndex(
     mapIds.push(a.id);
     maps.push({
       clear: a.clear ? a.clear.slice(0, 10) : null,
-      fc: a.fc ? a.fc.slice(0, 10) : null,
       onem: a.onem ? a.onem.slice(0, 10) : null,
       rankedDay: a.ranked_day,
       sr: cap(a.sr, 10),
@@ -1008,7 +1018,9 @@ statsRouter.get("/snapshot", (req, res) => {
     const m = maps[i];
     const inCat = m.rankedDay != null && m.rankedDay <= day;
     const cleared = fcStateAt[i] >= 0;
-    const fced = m.fc != null && m.fc <= day;
+    // best AT THAT DATE, replayed above: a higher non-FC score set LATER is
+    // not in fcStateAt[i] yet, so it cannot take this FC away retroactively
+    const fced = cleared && fcStateAt[i] <= 1;
     const onemd = m.onem != null && m.onem <= day;
     const rank = inCat ? rankAt[i] : 0;
 
@@ -1043,7 +1055,8 @@ statsRouter.get("/snapshot", (req, res) => {
     }
 
     const c1 = cleared && c1At[i] === 1;
-    if (!inCat && !cleared && !fced && !c1 && rank === 0) continue;
+    // (!fced is implied by !cleared now that it derives from the best)
+    if (!inCat && !cleared && !c1 && rank === 0) continue;
     const h: Hit = {
       inCat, played: cleared, fc: fced, country: c1,
       pfc: cleared && fcStateAt[i] === 0,
@@ -1122,7 +1135,7 @@ statsRouter.get("/overlay", (req, res) => {
         COUNT(*) total_maps,
         SUM(COALESCE(u.played, 0)) clears,
         ${gradeCols},
-        SUM(COALESCE(u.any_fc, 0)) fc,
+        SUM(COALESCE(u.best_fc, 0)) fc,
         SUM(COALESCE(u.country_first, 0)) country,
         SUM(CASE WHEN u.global_rank = 1 THEN 1 ELSE 0 END) top1,
         SUM(CASE WHEN u.global_rank <= 8 THEN 1 ELSE 0 END) top8,

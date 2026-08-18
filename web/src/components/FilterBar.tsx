@@ -29,14 +29,15 @@ const STATUS_OPTS = [
 const noNeg = (v: string) => v.replace(/-/g, "");
 
 function Range({
-  label, min, max, onMin, onMax, step = "any", lo = 0, hi,
+  label, min, max, onMin, onMax, step = "any", lo = 0, hi, wide = false,
 }: {
   label: string; min: string; max: string;
   onMin: (v: string) => void; onMax: (v: string) => void;
-  step?: string; lo?: number; hi?: number;
+  /** wider boxes for the 7-to-9-digit fields (scores): 66px clips them */
+  step?: string; lo?: number; hi?: number; wide?: boolean;
 }) {
   return (
-    <label className="range">
+    <label className={wide ? "range range-wide" : "range"}>
       <span>{label}</span>
       {/* always "min"/"max": showing the bound instead (Global top, Rate) made
           those two fields look like a different control entirely */}
@@ -70,6 +71,11 @@ export function FilterBar({
   onChange: (f: Filters) => void;
 }) {
   const [local, setLocal] = useState(filters);
+  // Collapsed panel: the top row (mode, search, badges, Reset all) never
+  // collapses, so a filter can never act while being invisible.
+  const [collapsed, setCollapsed] = useState(
+    () => localStorage.getItem("filtersCollapsed") === "1"
+  );
   const country = useCountryCode();
   useEffect(() => setLocal(filters), [filters]);
 
@@ -185,9 +191,13 @@ export function FilterBar({
   rangeBadge("hp", "HP", "hpMin", "hpMax");
   rangeBadge("cs", rulesetStatFields(local.ruleset ?? 0).csLabel, "csMin", "csMax");
   rangeBadge("len", "Length", "lenMin", "lenMax");
-  rangeBadge("globalTop", "Global top", "globalTopMin", "globalTopMax");
-  rangeBadge("rate", "Rate", "rateMin", "rateMax", "x");
   rangeBadge("combo", "Max combo", "comboMin", "comboMax");
+  // then the ones describing my best, in the order of the "My best" group
+  rangeBadge("score", "Score", "scoreMin", "scoreMax");
+  rangeBadge("missing", "Missing", "missingMin", "missingMax");
+  rangeBadge("mult", "Multi", "multMin", "multMax", "x");
+  rangeBadge("rate", "Rate", "rateMin", "rateMax", "x");
+  rangeBadge("globalTop", "Global top", "globalTopMin", "globalTopMax");
   // one badge per bounded hit count, labelled like the field that set it
   for (const f of RULESET_HIT_FIELDS[local.ruleset ?? 0] ?? []) {
     const r = local.hits?.[f.key];
@@ -244,6 +254,22 @@ export function FilterBar({
             Reset all
           </button>
         )}
+        <button
+          className="filters-toggle"
+          title={
+            collapsed
+              ? "Show the filter panel"
+              : "Hide the filter panel — active filters stay listed as badges"
+          }
+          onClick={() =>
+            setCollapsed((c) => {
+              localStorage.setItem("filtersCollapsed", c ? "0" : "1");
+              return !c;
+            })
+          }
+        >
+          Filters {collapsed ? "▾" : "▴"}
+        </button>
         <button
           className="export-coll"
           title="Download these maps as a collection.db file"
@@ -308,6 +334,7 @@ export function FilterBar({
         )}
       </div>
 
+      {!collapsed && (
       <div className="filter-groups">
         <div className="filter-group">
           <span className="filter-group-label">Play state</span>
@@ -421,13 +448,57 @@ export function FilterBar({
         <div className="filter-group filter-group-ranges">
           <span className="filter-group-label">My best</span>
           <div className="ranges">
-            {/* the mods are the mods OF that best score, not of the map */}
+            {/* What the best is worth, and what is left on the map: both in
+                the unit the Classic / Standardised toggle displays, like the
+                two columns they bound. */}
+            <Range
+              label="Score"
+              min={local.scoreMin}
+              max={local.scoreMax}
+              onMin={(v) => set("scoreMin", v)}
+              onMax={(v) => set("scoreMax", v)}
+              wide
+              step="1"
+              lo={0}
+            />
+            <Range
+              label="Missing"
+              min={local.missingMin}
+              max={local.missingMax}
+              onMin={(v) => set("missingMin", v)}
+              onMax={(v) => set("missingMax", v)}
+              wide
+              step="1"
+              lo={0}
+            />
+            {/* How it was played. The mods are the mods OF that best score,
+                not of the map; the multiplier and the rate both derive from
+                them, hence the three side by side. */}
             <input
               className="mods-input"
               placeholder="Mods (HD,DT — NM = nomod)"
               value={local.mods}
               onChange={(e) => set("mods", e.target.value.toUpperCase())}
             />
+            <Range
+              label="Multi"
+              min={local.multMin}
+              max={local.multMax}
+              onMin={(v) => set("multMin", v)}
+              onMax={(v) => set("multMax", v)}
+              step="0.01"
+              lo={0}
+            />
+            <Range
+              label="Rate"
+              min={local.rateMin}
+              max={local.rateMax}
+              onMin={(v) => set("rateMin", v)}
+              onMax={(v) => set("rateMax", v)}
+              step="0.05"
+              lo={0.5}
+            />
+            {/* Where it ranks. */}
             <button
               className={`chip ${local.countryFirst ? "on" : ""}`}
               title="Only maps where I hold the country #1"
@@ -443,16 +514,6 @@ export function FilterBar({
               onMax={(v) => set("globalTopMax", v)}
               step="1"
               lo={1}
-            />
-            {/* playback rate of the best (lazer rate change, 0.5x-2.0x) */}
-            <Range
-              label="Rate"
-              min={local.rateMin}
-              max={local.rateMax}
-              onMin={(v) => set("rateMin", v)}
-              onMax={(v) => set("rateMax", v)}
-              step="0.05"
-              lo={0.5}
             />
             <DateRange label="Played" from={local.playedFrom} to={local.playedTo} onFrom={(v) => set("playedFrom", v)} onTo={(v) => set("playedTo", v)} />
           </div>
@@ -484,6 +545,7 @@ export function FilterBar({
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }

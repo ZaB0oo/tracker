@@ -10,6 +10,9 @@
   --yellow: #ffd966;
   --red: #ff6b6b;
   --border: #362d48;
+  /* One rhythm for the views: the full-bleed sticky bars cancel it with a
+     negative margin, so container padding and that margin cannot drift. */
+  --pane-pad: 12px;
   font-family: "Segoe UI", system-ui, sans-serif;
 }
 
@@ -256,8 +259,13 @@ h1 { font-size: 21px; margin: 0; }
 .range { display: flex; align-items: center; gap: 4px; color: var(--fg-dim); }
 /* wide enough for the "max" placeholder not to be clipped */
 .range input { width: 66px; }
+/* scores and missing run to nine digits: 66px cuts them mid-number */
+.range-wide input { width: 96px; }
 .range-date input { width: 128px; color-scheme: dark; }
 .reset { color: var(--fg-dim); }
+.filters-toggle { color: var(--fg-dim); }
+/* share of the prediction, next to the value it is a share of */
+.missing-share { margin-left: 7px; opacity: 0.65; font-size: 11px; }
 
 /* Table */
 .table-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
@@ -319,11 +327,51 @@ h1 { font-size: 21px; margin: 0; }
 .mods-none { color: var(--fg-dim); }
 
 /* Dashboard */
-.dashboard { padding: 14px; overflow: auto; display: flex; flex-direction: column; gap: 14px; }
+/* Scroll container of the Dashboard, Metrics and History views.
+   NO padding-top: a sticky child stops at the CONTENT box, so a top padding
+   would leave a band of exactly that height above it — and the page scrolls
+   through the band. The same 14px is given back as a margin on the first
+   child, because a margin scrolls away and a padding does not. */
+.dashboard {
+  padding: 0 var(--pane-pad) var(--pane-pad); overflow: auto;
+  display: flex; flex-direction: column; gap: var(--pane-pad);
+}
+.dashboard > :first-child { margin-top: var(--pane-pad); }
+
+/* Header block that stays on screen while its view scrolls under it.
+   The rows are WRAPPED rather than each made sticky: two stacked sticky bars
+   would need the second one's `top` to hardcode the first one's height, and
+   those heights move (mania adds the key chips, the toolbar wraps when the
+   window is narrow). One wrapper, one `top: 0`, nothing to keep in sync. */
+.sticky-head {
+  position: sticky; top: 0; z-index: 12;
+  display: flex; flex-direction: column; gap: 8px;
+  /* Reads as a fourth strip of app chrome under the header / tabs / syncbar,
+     which are all full-width --bg2 bands with a bottom rule. On the page
+     background it was a slab of near-black floating between them. */
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  margin: 0 calc(-1 * var(--pane-pad)); /* full-bleed: cancels the side padding */
+  padding: 8px var(--pane-pad);
+}
+/* it is the view's own toolbar, not content: no gap under the syncbar */
+.dashboard > .sticky-head:first-child { margin-top: 0; }
+/* Inside a panel it heads a column, it is not a page-wide strip. The negative
+   margin + equal padding cancel out at rest (nothing moves), and give the
+   head an OPAQUE band of that height once it is stuck — without it the title
+   ends up glued to the syncbar. A `top` offset would not do: the band it
+   would leave above is exactly where the page would show through. */
+.panel > .sticky-head {
+  border-bottom: none;
+  margin: calc(-1 * var(--pane-pad)) calc(-1 * var(--pane-pad)) 0;
+  padding: var(--pane-pad) var(--pane-pad) 4px;
+}
+/* the wrapper owns the spacing now */
+.sticky-head > * { margin-top: 0; margin-bottom: 0; }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; }
 .card, .panel {
   background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
-  padding: 12px 14px;
+  padding: var(--pane-pad);
 }
 .card h3, .panel h3 { margin: 0 0 8px; font-size: 16px; color: var(--fg-dim); }
 .big { font-size: 24px; font-weight: 800; }
@@ -344,6 +392,8 @@ h1 { font-size: 21px; margin: 0; }
 }
 .bar-tip-row .gauge-dot { width: 8px; height: 8px; }
 .bar-tip-title { color: var(--accent); margin-right: 8px; }
+/* grade deltas inside a tooltip: same pills as the day panel, one row */
+.hm-tip-grades { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
 .tip-dim { color: var(--fg-dim); }
 .gauge-group-title {
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
@@ -1032,8 +1082,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   display: flex; align-items: center; gap: 14px; padding: 8px 16px;
   background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
   margin-bottom: 14px;
-  /* stays visible while scrolling the dashboard */
-  position: sticky; top: 0; z-index: 12;
+  /* stickiness lives on the .sticky-head wrapper it shares with the scope row */
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
 .tm-title { font-weight: 700; white-space: nowrap; }
@@ -1313,6 +1362,9 @@ body.overlay-body { background: transparent; }
   width: 11px; height: 11px; border-radius: 3px; padding: 0;
   border: none; cursor: pointer; background: var(--bg3);
 }
+/* which of the 4000 dots the tooltip is describing — same affordance as
+   .rate-col:hover on the rate histogram */
+.pack-dots .pack-dot:hover { outline: 2px solid var(--fg-dim); outline-offset: 1px; }
 .pack-part { background: #95436f; }
 .pack-done { background: var(--accent); }
 .pack-fc { background: var(--yellow); }
@@ -1452,8 +1504,8 @@ body.overlay-body { background: transparent; }
   padding: 8px 14px; margin-bottom: 12px;
   background: var(--bg2); border: 1px solid var(--accent); border-radius: 10px;
   /* follows you down the grid: the metric you tick last is rarely the first
-     one on screen (same treatment as the time machine bar) */
-  position: sticky; top: 0; z-index: 12;
+     one on screen — carried by the .sticky-head wrapper it shares with the
+     toolbar, same as the time machine bar */
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
 .mp-count { font-size: 13px; }

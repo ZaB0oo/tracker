@@ -106,8 +106,10 @@ export function MapModal({
               {data.user?.global_rank != null && data.user.global_rank <= 100 ? (
                 <span className="mm-stat mm-gold">Global #{data.user.global_rank}</span>
               ) : null}
-              {data.user?.any_fc ? (
-                <span className="mm-stat mm-green">FC ✓</span>
+              {data.user?.best_fc ? (
+                <span className="mm-stat mm-green" title="My best score on this map is an FC">
+                  FC ✓
+                </span>
               ) : null}
             </div>
 

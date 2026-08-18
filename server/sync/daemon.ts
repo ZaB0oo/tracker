@@ -2053,7 +2053,7 @@ async function runBackfill(): Promise<void> {
 }
 
 /**
- * Recomputes the bests (and any_fc/played flags) of every map with scores —
+ * Recomputes the bests (and best_fc/played flags) of every map with scores —
  * catch-up after a logic change or scores imported by an older server version.
  */
 export function recomputeAllBests(): number {
