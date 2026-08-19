@@ -453,20 +453,29 @@ function migrate(d: DatabaseSync): void {
     console.log("[db] migration: FC now describes the best score of each map");
   }
 
-  // The cache key of modded_sr now carries the rate settings ("DT@s1.35"),
-  // because a row written for a bare "DT" holds the default 1.5x value and
-  // would answer for every other rate. The old rows can never match the new
-  // key, so they are cleared once instead of sitting there forever.
+  // modded_sr changed twice: its key now carries the mod settings
+  // ("DT@s1.35"), since a row written for a bare "DT" holds the default 1.5x
+  // value and would answer for every rate, and the ratings themselves are now
+  // computed locally instead of being asked to an API that only knows the
+  // legacy mod combinations. Old rows can never match, and it is only a cache:
+  // the table is rebuilt once and refills on demand.
   const SR_KEY = "modded_sr_key";
   const srDone = (
     d.prepare("SELECT value FROM sync_state WHERE key = ?").get(SR_KEY) as
       | { value: string }
       | undefined
   )?.value;
-  if (srDone !== "rate") {
-    d.exec("DELETE FROM modded_sr");
+  if (srDone !== "local") {
+    d.exec("DROP TABLE IF EXISTS modded_sr");
+    d.exec(`CREATE TABLE modded_sr (
+      beatmap_id INTEGER NOT NULL,
+      ruleset INTEGER NOT NULL DEFAULT 0,
+      mods TEXT NOT NULL,
+      star_rating REAL,
+      PRIMARY KEY (beatmap_id, ruleset, mods)
+    )`);
     d.prepare(
-      "INSERT INTO sync_state (key, value) VALUES (?, 'rate') ON CONFLICT(key) DO UPDATE SET value = 'rate'"
+      "INSERT INTO sync_state (key, value) VALUES (?, 'local') ON CONFLICT(key) DO UPDATE SET value = 'local'"
     ).run(SR_KEY);
   }
 

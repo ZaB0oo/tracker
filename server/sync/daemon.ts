@@ -23,7 +23,6 @@ import {
   getConvertAttrs,
   getCountryTop,
   getCountryTopScores,
-  getModdedStarRating,
   getRecentScores,
   getUserBeatmapPosition,
   getStoredCountryCode,
@@ -54,6 +53,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { srMods } from "../logic/score.js";
+import { localStarRating } from "../osu/difficulty.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -797,13 +797,12 @@ async function pollRecentScoresForMode(mode: number): Promise<number> {
   const discordOn = discord.webhookSet && discord.bests;
   if (bestEvents.length > 0) {
     for (const e of bestEvents) {
-      if (discordOn && mode === 0) {
-        // modded SR display: std only for now (the attributes cache is std).
-        // Settings travel with the mods, so a custom rate is asked for as the
-        // rate that was played, not as a plain DT.
+      if (discordOn) {
+        // Rating for the mods as they were played, rate included, computed
+        // from the .osu file: the API only knows the legacy mod combinations.
         const mods = srMods(e.modsJson);
         if (mods.length > 0)
-          e.moddedSr = await getModdedStarRating(e.beatmapId, mods, "high");
+          e.moddedSr = await localStarRating(e.beatmapId, mods, mode);
       }
       try {
         e.globalRank = await getUserBeatmapPosition(

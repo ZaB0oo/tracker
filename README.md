@@ -150,6 +150,14 @@ Every score is stored with **both systems** (modern `x-api-version` header):
 - **FC**: no miss and no break. For a **stable** no-miss score: dropping a slider end gives a 100 and removes exactly 1 combo, so FC iff `map_max_combo − score_combo ≤ number_of_100s`. Beyond that, certain slider break ⇒ non-FC. For a **lazer** no-miss score without `large_tick_miss`: FC.
 - **non-FC**: `miss` > 0, `large_tick_miss` > 0, or missing combo unexplainable by slider ends (rule above).
 
+### Star rating with mods
+
+The rating shown for a play is computed from the map's `.osu` file with the
+mods as they were set, settings included. The API cannot give this: it maps the
+mods down to a legacy bitset before looking the value up, so DT at 1.2x answers
+with the 1.5x rating and every setting is dropped. Files are downloaded once per
+map and kept next to the database.
+
 ### Grades
 
 D → SSH, with **silvers** (SH/SSH = HD/FL) counted separately. The API returns X/XH, the UI displays SS/SSH.
@@ -171,6 +179,7 @@ server/
   db/db.ts             # node:sqlite + migrations + transactions
   osu/rateLimiter.ts   # 60/min queue with 2 priorities + backoff (tested)
   osu/api.ts           # OAuth (client credentials + user auth code) + typed endpoints
+  osu/difficulty.ts    # star rating of the mods played, computed here (tested)
   logic/score.ts       # FC states / grades / bests (tested)
   logic/scoreSql.ts    # shared SQL expressions + skill curve
   logic/metrics.ts     # custom metric conditions compiled to SQL
@@ -186,7 +195,7 @@ desktop/               # Electron shell: tray, first-launch DB import, auto-upda
 .github/workflows/     # release CI: installers built on every version tag
 ```
 
-Database: `./data/tracker.db` in source mode, `%AppData%\osu-completionist\data\tracker.db` in the desktop app (SQLite, WAL mode; tray menu → "Open the data folder"). Delete the file to start from scratch. One-click backup: settings menu → "Export database". That file holds your API keys, your osu! token and your Discord webhook, so keep it to yourself.
+Database: `./data/tracker.db` in source mode, `%AppData%\osu-completionist\data\tracker.db` in the desktop app (SQLite, WAL mode; tray menu → "Open the data folder"). A `beatmaps/` folder next to it holds the `.osu` files downloaded to rate the mods you played; deleting it only means downloading them again. Delete the database to start from scratch. One-click backup: settings menu → "Export database". That file holds your API keys, your osu! token and your Discord webhook, so keep it to yourself.
 
 ## Tests
 
@@ -200,6 +209,7 @@ npm test    # rate limiter, FC and best logic, mods, metrics, search
 - Polling only sees the **last 24 hours** (limit of the `recent` endpoint) and ignores fails. If the app was off longer while you played, use "Poll now", and a full score re-import if needed.
 - Country leaderboards require **osu!supporter**; without a connected account, country #1 features stay dormant.
 - The initial global tops sweep spends one request per played map on the shared 60 req/min budget, so it takes about a day on a full account; positions outside the held top-100s only refresh when you set a new best on the map or via "Re-check all global tops" in the Maintenance menu.
+- Star ratings for the rate-changing ramps (Wind Up, Wind Down, Adaptive Speed) stay the map's own: the rate moves during the play, and the difficulty calculator works on a fixed one. lazer shows them the same way.
 - `node:sqlite` prints an `ExperimentalWarning` at startup: harmless.
 - A mode's dashboard needs two days of history before its time machine has anything to show.
 

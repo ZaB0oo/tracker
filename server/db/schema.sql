@@ -166,9 +166,10 @@ CREATE INDEX IF NOT EXISTS idx_global_events_at ON global_events(at);
 -- "attributes" endpoint the first time a modded score shows up in a list).
 CREATE TABLE IF NOT EXISTS modded_sr (
   beatmap_id INTEGER NOT NULL,
-  mods TEXT NOT NULL,                 -- sorted difficulty mods, e.g. "DT,HR"
+  ruleset INTEGER NOT NULL DEFAULT 0,
+  mods TEXT NOT NULL,                 -- difficulty mods and their settings, e.g. "DT@s1.35,HR"
   star_rating REAL,
-  PRIMARY KEY (beatmap_id, mods)
+  PRIMARY KEY (beatmap_id, ruleset, mods)
 );
 
 

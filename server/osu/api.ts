@@ -1,7 +1,6 @@
 import { config } from "../config.js";
 import { getState, setState } from "../db/db.js";
 import { RateLimiter, RetryableError, type Priority } from "./rateLimiter.js";
-import type { ModRef } from "../logic/score.js";
 import type {
   ApiBeatmap,
   BeatmapsetSearchResponse,
@@ -509,39 +508,6 @@ export async function getConvertAttrs(
         starRating: j.attributes?.star_rating ?? null,
         maxCombo: j.attributes?.max_combo ?? null,
       };
-    }, priority);
-  } catch {
-    return null;
-  }
-}
-
-export async function getModdedStarRating(
-  beatmapId: number,
-  /** mod OBJECTS, settings included: acronyms alone get the default rate back */
-  mods: ModRef[],
-  priority: Priority = "high"
-): Promise<number | null> {
-  try {
-    return await limiter.schedule(async () => {
-      const auth = await getToken();
-      const res = await netFetch(
-        `${config.apiBase}/beatmaps/${beatmapId}/attributes`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${auth}`,
-            Accept: "application/json",
-            "Content-Type": "application/json",
-            "User-Agent": config.userAgent,
-          },
-          // the endpoint takes "a bitset, an array of acronyms, or an array of
-          // mods" — the third form is the only one carrying speed_change
-          body: JSON.stringify({ mods, ruleset: "osu" }),
-        }
-      );
-      if (!res.ok) throw new Error(`attributes: HTTP ${res.status}`);
-      const j = (await res.json()) as { attributes?: { star_rating?: number } };
-      return j.attributes?.star_rating ?? null;
     }, priority);
   } catch {
     return null;

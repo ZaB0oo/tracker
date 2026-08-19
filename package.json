@@ -1,6 +1,6 @@
 {
   "name": "osu-completionist-tracker",
-  "version": "1.15.0",
+  "version": "1.16.0",
   "private": true,
   "type": "module",
   "main": "desktop/main.js",
@@ -72,6 +72,7 @@
     "dotenv": "^16.4.5",
     "electron-updater": "^6.8.9",
     "express": "^4.21.2",
+    "rosu-pp-js": "^4.0.1",
     "tar-stream": "^3.1.7",
     "unbzip2-stream": "^1.4.3"
   },

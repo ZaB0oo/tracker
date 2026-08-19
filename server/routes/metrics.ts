@@ -3,7 +3,7 @@ import { getDb } from "../db/db.js";
 import { srMods, srModsKey, type ModRef } from "../logic/score.js";
 import { evalMetric, previewMetric } from "../logic/metricEval.js";
 import { mapWhere, scoreWhere, type MetricParams } from "../logic/metrics.js";
-import { getModdedStarRating } from "../osu/api.js";
+import { localStarRating } from "../osu/difficulty.js";
 import { parseRulesetParam, poolWhere } from "../logic/rulesets.js";
 
 const KINDS = ["count", "ranked_score", "pp"] as const;
@@ -24,20 +24,25 @@ function loadParams(row: { id: number; params: string }): MetricParams | null {
   }
 }
 
-/** Lazy background fill of the modded-SR cache (one low-priority request). */
+/** Lazy background fill of the modded-SR cache, in the background. */
 const srInFlight = new Set<string>();
-function queueModdedSr(beatmapId: number, mods: ModRef[], key: string): void {
-  const inFlight = `${beatmapId}|${key}`;
+function queueModdedSr(
+  beatmapId: number,
+  mods: ModRef[],
+  key: string,
+  ruleset: number
+): void {
+  const inFlight = `${beatmapId}|${ruleset}|${key}`;
   if (srInFlight.has(inFlight)) return;
   srInFlight.add(inFlight);
-  void getModdedStarRating(beatmapId, mods, "low")
+  void localStarRating(beatmapId, mods, ruleset)
     .then((sr) => {
       if (sr != null)
         getDb()
           .prepare(
-            "INSERT OR REPLACE INTO modded_sr (beatmap_id, mods, star_rating) VALUES (?, ?, ?)"
+            "INSERT OR REPLACE INTO modded_sr (beatmap_id, ruleset, mods, star_rating) VALUES (?, ?, ?, ?)"
           )
-          .run(beatmapId, key, sr);
+          .run(beatmapId, ruleset, key, sr);
     })
     .finally(() => srInFlight.delete(inFlight));
 }
@@ -265,8 +270,9 @@ metricsRouter.get("/metrics/:id/pp-top", (req, res) => {
   })[];
   // modded star rating from the cache; misses are fetched in the background
   // and show up on the next refetch
+  const R = p.ruleset ?? 0;
   const cached = getDb().prepare(
-    "SELECT star_rating FROM modded_sr WHERE beatmap_id = ? AND mods = ?"
+    "SELECT star_rating FROM modded_sr WHERE beatmap_id = ? AND ruleset = ? AND mods = ?"
   );
   const out = rows.map((r) => {
     let acronyms: string[] = [];
@@ -283,11 +289,11 @@ metricsRouter.get("/metrics/:id/pp-top", (req, res) => {
     let sr: number | null = null;
     if (diff.length > 0) {
       const key = srModsKey(diff);
-      const hit = cached.get(r.beatmap_id, key) as
+      const hit = cached.get(r.beatmap_id, R, key) as
         | { star_rating: number | null }
         | undefined;
       if (hit) sr = hit.star_rating;
-      else queueModdedSr(r.beatmap_id, diff, key);
+      else queueModdedSr(r.beatmap_id, diff, key, R);
     }
     return { ...r, mods_list: acronyms, sr_mods: sr };
   });

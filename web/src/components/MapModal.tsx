@@ -42,7 +42,6 @@ const SCORE_COLS: {
   { id: "combo", label: "Combo", right: true, key: (s) => s.max_combo },
   { id: "fc", label: "FC", key: (s) => -s.fc_state },
   { id: "pp", label: "pp", right: true, key: (s) => s.pp },
-  { id: "passed", label: "", key: (s) => s.passed },
 ];
 const GRADE_RANK: Record<string, number> = {
   XH: 7, X: 6, SH: 5, S: 4, A: 3, B: 2, C: 1, D: 0,
@@ -204,7 +203,6 @@ export function MapModal({
                       <td className="num">{fmtNum(s.max_combo)}x</td>
                       <td className={`fc fc-${s.fc_state}`}>{FC_LABELS[s.fc_state]}</td>
                       <td className="num">{s.pp != null ? `${Math.round(s.pp)}pp` : ""}</td>
-                      <td className={s.passed ? "" : "mm-red"}>{s.passed ? "" : "fail"}</td>
                     </tr>
                   ))}
                 </tbody>
