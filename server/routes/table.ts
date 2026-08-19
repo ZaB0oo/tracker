@@ -176,7 +176,7 @@ function buildFilters(
         q.metricMatching === "1" ||
         (p.kind === "count" && p.descending === true);
       terms.push(
-        `(${mapWhere(p.map, { ruleset: p.ruleset ?? 0, pool: p.pool })}
+        `(${mapWhere(p.map, { ruleset: p.ruleset ?? 0, pool: p.pool, keys: p.keys })}
           AND ${matching ? "EXISTS" : "NOT EXISTS"} (SELECT 1 FROM scores s
             WHERE s.id = u.best_lazer_score_id AND ${scoreWhere(p.score, inv)}))`
       );
@@ -467,7 +467,7 @@ tableRouter.get("/map/:id", (req, res) => {
   const scores = db
     .prepare(
       `SELECT id, ended_at, rank, accuracy, max_combo, total_score,
-         classic_total_score, pp, mods, fc_state, passed
+         classic_total_score, pp, mods, fc_state, passed, rate, mod_multiplier
        FROM scores WHERE beatmap_id = ? AND ruleset = ? ORDER BY ended_at DESC`
     )
     .all(id, parseRulesetParam(req.query.ruleset));
@@ -475,7 +475,7 @@ tableRouter.get("/map/:id", (req, res) => {
     db
       .prepare(
         `SELECT played, best_fc, country_first, country_checked_at, fetched_at,
-           global_rank
+           global_rank, best_lazer_score_id
          FROM beatmap_user WHERE beatmap_id = ? AND ruleset = ?`
       )
       .get(id, parseRulesetParam(req.query.ruleset)) ?? null;

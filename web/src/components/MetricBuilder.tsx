@@ -13,6 +13,8 @@ import {
 import { displayGrade, fmtNum } from "../format";
 import { RULESET_HIT_FIELDS, RULESET_MOD_GROUPS, RULESET_NAMES, rulesetStatFields } from "../rulesets";
 import { useEscape } from "../useEscape";
+import { PoolSeg } from "./PoolSeg";
+import { KeysChips } from "./KeysChips";
 // count fields: [label, path in score.counts]
 const COUNT_FIELDS: { key: keyof MetricParams["score"]["counts"]; label: string }[] = [
   { key: "n100", label: "100s" },
@@ -477,6 +479,47 @@ export function MetricBuilder({
         )}
 
         <div className="mb-title">On maps matching…</div>
+        {/* Same scope controls as the dashboard: which maps of the mode the
+            metric counts. Saved WITH the metric — a metric is a definition,
+            not a view, so it must not follow whatever the dashboard shows. */}
+        <div className="mb-scope">
+          {(p.ruleset ?? 0) !== 0 && (
+            <PoolSeg
+              value={p.pool ?? "all"}
+              onChange={(pool) => setP((x) => ({ ...x, pool }))}
+            />
+          )}
+          {p.ruleset === 3 && (
+            <KeysChips
+              value={p.keys ?? []}
+              onChange={(keys) => setP((x) => ({ ...x, keys }))}
+            />
+          )}
+          {/* Status belongs to the scope, not to the map filters it was
+              buried in: it answers "which maps", like the pool and the key
+              counts. Chips, like the Status filter of the Maps table. */}
+          <div className="chips">
+            {STATUSES.map((o) => (
+              <button
+                key={o.v}
+                className={`chip ${p.map.statuses.includes(o.v) ? "on" : ""}`}
+                onClick={() =>
+                  setP((x) => ({
+                    ...x,
+                    map: {
+                      ...x.map,
+                      statuses: x.map.statuses.includes(o.v)
+                        ? x.map.statuses.filter((v) => v !== o.v)
+                        : [...x.map.statuses, o.v],
+                    },
+                  }))
+                }
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <Section title="Map filters (star rating, year, length, AR/OD/CS/HP…)">
           <input
             className="mb-query"
@@ -497,26 +540,6 @@ export function MetricBuilder({
             />
           ))}
           <div className="mb-inline">
-            {STATUSES.map((o) => (
-              <label key={o.v} className="mb-check">
-                <input
-                  type="checkbox"
-                  checked={p.map.statuses.includes(o.v)}
-                  onChange={() =>
-                    setP((s) => ({
-                      ...s,
-                      map: {
-                        ...s.map,
-                        statuses: s.map.statuses.includes(o.v)
-                          ? s.map.statuses.filter((x) => x !== o.v)
-                          : [...s.map.statuses, o.v],
-                      },
-                    }))
-                  }
-                />
-                {o.label}
-              </label>
-            ))}
             <label className="mb-check">
               <input
                 type="checkbox"

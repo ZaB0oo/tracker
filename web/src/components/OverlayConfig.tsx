@@ -47,6 +47,14 @@ function Section({
   );
 }
 
+/** default card background — kept in sync with .ov-card in styles.css */
+const DEFAULT_BG = "#17131f";
+/** 0-100 -> two hex digits, so the colour travels as one #rrggbbaa token */
+const alphaHex = (pct: number) =>
+  Math.round((Math.min(Math.max(pct, 0), 100) / 100) * 255)
+    .toString(16)
+    .padStart(2, "0");
+
 /**
  * Builds the OBS browser-source URL for the stream overlay. Selection is
  * encoded in the URL (?hide=…&metrics=…) because OBS browser sources don't
@@ -70,6 +78,11 @@ export function OverlayConfig({
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [metricIds, setMetricIds] = useState<Set<number>>(new Set());
   const [copied, setCopied] = useState(false);
+  // Card background. The PAGE stays transparent whatever happens (OBS needs
+  // that); this is the panel the stats sit on, so 0% opacity means the text
+  // floats straight over the gameplay.
+  const [bg, setBg] = useState(DEFAULT_BG);
+  const [bgAlpha, setBgAlpha] = useState(100);
   const { data: metricsData } = useQuery({
     queryKey: ["metrics", "month"],
     queryFn: () => fetchMetrics("month"),
@@ -90,7 +103,11 @@ export function OverlayConfig({
     (ruleset && pool !== "all" ? `&pool=${pool}` : "") +
     (ruleset === 3 && keys.length ? `&keys=${keys.join(",")}` : "") +
     (hideParam ? `&hide=${hideParam}` : "") +
-    (metricsParam ? `&metrics=${metricsParam}` : "");
+    (metricsParam ? `&metrics=${metricsParam}` : "") +
+    // only when it is not the default, like the other params
+    (bg !== DEFAULT_BG || bgAlpha !== 100
+      ? `&bg=${bg.slice(1)}${alphaHex(bgAlpha)}`
+      : "");
 
   const toggle = (id: string) =>
     setHidden((prev) => {
@@ -182,6 +199,39 @@ export function OverlayConfig({
             </div>
           </Section>
         )}
+
+        <Section title="Background">
+          <div className="ov-bg">
+            <label>
+              Colour
+              <input type="color" value={bg} onChange={(e) => setBg(e.target.value)} />
+            </label>
+            <label>
+              Opacity
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={bgAlpha}
+                onChange={(e) => setBgAlpha(Number(e.target.value))}
+              />
+              <b>{bgAlpha}%</b>
+            </label>
+            <button
+              onClick={() => {
+                setBg(DEFAULT_BG);
+                setBgAlpha(100);
+              }}
+            >
+              Reset
+            </button>
+            <span className="dim">
+              0% leaves the stats over the game with no panel. For a capture
+              that cannot key out transparency, pick your chroma colour here.
+            </span>
+          </div>
+        </Section>
 
         <div className="ov-url">
           <input readOnly value={url} onFocus={(e) => e.target.select()} />

@@ -1,11 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  FC_NONE,
-  FC_NO_MISS,
-  FC_PERFECT,
-  computeFcState,
-  computeRate,
-} from "../logic/score.js";
+import { FC_NONE, FC_NO_MISS, FC_PERFECT, computeFcState, computeRate, srMods, srModsKey } from "../logic/score.js";
 import type { SoloScore } from "../osu/types.js";
 
 function score(partial: Partial<SoloScore>): SoloScore {
@@ -163,5 +157,44 @@ describe("computeRate", () => {
 
   it("mod de rampe combiné à DT : la rampe décide", () => {
     expect(r([{ acronym: "DT" }, { acronym: "WD", settings: { initial_rate: 0.51, final_rate: 0.5 } }])).toBe(0.51);
+  });
+});
+
+describe("srMods / srModsKey", () => {
+  const j = (v: unknown) => JSON.stringify(v);
+
+  it("keeps only the mods that move the star rating", () => {
+    const mods = srMods(j([{ acronym: "CL" }, { acronym: "DT" }, { acronym: "SD" }, { acronym: "HD" }]));
+    expect(mods.map((m) => m.acronym)).toEqual(["DT", "HD"]);
+  });
+
+  it("carries the rate setting instead of dropping it", () => {
+    const mods = srMods(j([{ acronym: "DT", settings: { speed_change: 1.35 } }]));
+    expect(mods).toEqual([{ acronym: "DT", settings: { speed_change: 1.35 } }]);
+  });
+
+  it("gives two rates of the same mod two different keys", () => {
+    const a = srModsKey(srMods(j([{ acronym: "DT", settings: { speed_change: 1.35 } }])));
+    const b = srModsKey(srMods(j([{ acronym: "DT", settings: { speed_change: 1.5 } }])));
+    const plain = srModsKey(srMods(j([{ acronym: "DT" }])));
+    expect(a).not.toBe(b);
+    expect(a).not.toBe(plain);
+  });
+
+  it("keys one combination the same way whatever the mod order", () => {
+    const a = srModsKey(srMods(j([{ acronym: "HR" }, { acronym: "DT" }])));
+    const b = srModsKey(srMods(j([{ acronym: "DT" }, { acronym: "HR" }])));
+    expect(a).toBe(b);
+    expect(a).toBe("DT,HR");
+  });
+
+  it("keys the ramps by their own settings", () => {
+    const k = srModsKey(srMods(j([{ acronym: "WU", settings: { initial_rate: 1, final_rate: 1.4 } }])));
+    expect(k).toBe("WU@i1/f1.4");
+  });
+
+  it("survives a corrupt mods column", () => {
+    expect(srMods("not json")).toEqual([]);
+    expect(srMods(j({ acronym: "DT" }))).toEqual([]);
   });
 });

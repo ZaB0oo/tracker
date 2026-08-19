@@ -1,6 +1,6 @@
 # osu! Completionist Tracker
 
-Local desktop app that keeps your best score on **every ranked, approved and loved difficulty** of osu!, in all four modes, converts included. It comes with a sortable and filterable maps table, a completion dashboard, custom counters with milestones and charts, country #1 and global tops tracking, an OBS overlay, and it picks up new scores within a couple of minutes.
+Local desktop app that keeps your best score on every ranked, approved and loved difficulty of osu!, in all four modes, converts included. It gives you a sortable and filterable maps table, a completion dashboard, custom counters with milestones and charts, country #1 and global tops tracking and an OBS overlay. New scores show up a couple of minutes after you set them.
 
 ![Dashboard](docs/dashboard.png)
 
@@ -47,9 +47,9 @@ converts you played.
 
 ## Features
 
-- **Maps table**: your best on all ~150k osu! difficulties. Sorting and filters run in SQL (grade, FC state, star rating, AR/OD/CS/HP, length, ranked and played dates, mods, global rank, free text), with presets and virtualised rows.
+- **Maps table**: your best on every difficulty in the game. Sorting and filters run in SQL (grade, FC state, star rating, AR/OD/CS/HP, length, ranked and played dates, mods, score, global rank, free text), with presets and virtualised rows. Right-click a row to open the map details: every score you set on it in a sortable table, with the rate and the mod multiplier.
 - **Realistic missing score**: a skill curve built from your own bests (median per 0.1★, isotonic regression) predicts what *you* can score on a map, instead of its theoretical max.
-- **Custom metrics**: your own counters, like "FCs with HD on 4★+ maps from 2015" or "global top 8s in 6★+". Each one gets a progress bar, completion per bucket in the dimension you pick (star rating, year, length, combo, AR/OD/CS/HP), milestone dates and an evolution chart. Conditions are checked against each map's best score, the same rule leaderboards use. Clears, Full combos and Ranked score come built in.
+- **Custom metrics**: your own counters, like "FCs with HD on 4★+ maps from 2015" or "global top 8s in 6★+". Each one has its own scope (the mode's own maps or its converts, mania key counts, ranked/approved/loved) and its own conditions, checked against each map's best score, the same rule leaderboards use. You get a progress bar, completion per bucket in the dimension you pick (star rating, year, length, combo, AR/OD/CS/HP), milestone dates and an evolution chart. Clears, Full combos and Ranked score come built in.
 - **Country #1 tracking**: which of your scores are #1 on your country's leaderboard, gained/lost history with sniper names, automatic re-checks. (Requires osu!supporter + connecting your account.)
 - **Global tops tracking**: your exact position on every played map's global leaderboard, with top 1/8/15/25/50/100 counters on the dashboard, a sortable column, a range filter and a metric condition. The sweep is resumable, every new best is checked right away, and held top 100s are re-checked periodically.
 - **Discord notifications**: an optional webhook posts your new bests as embeds with the modded star rating, rate-adjusted map stats, hit counts, pp, cover art, your global rank when it is top 100, and the name of the player you sniped.
@@ -58,7 +58,7 @@ converts you played.
 - **Collection export**: turn any filter, a metric's missing maps included, into an osu! collection. Download the `.db`, or send it straight to osu!lazer in one click with [LazerCollectionImporter](https://github.com/ZaB0oo/LazerCollectionImporter) and `LAZER_IMPORTER_PATH`.
 - **Heatmap and streaks**: a clears-per-day calendar with your current and record streaks. Click a day to see what you gained (clears, FCs, ranked score, grade changes) and the maps you played.
 - **Time machine**: a slider that replays your account on any past day (clears, FCs, ranked score, country #1s), instantly and per mode.
-- **Stream overlay**: transparent browser source for OBS with live session gains.
+- **Stream overlay**: browser source for OBS with live session gains.
 - **Polite syncing**: 60 req/min max against the osu! API, resumable score import, daily catch-up of newly ranked/loved maps.
 
 ## Installation
@@ -123,7 +123,7 @@ Start it from the sync menu, where one button toggles start and pause. The app t
 - checks the position of **every new best immediately**.
 - re-checks held top-100 positions periodically (default every 48 h, "Re-check global tops (h)" in settings) to catch overtakes.
 
-Positions are exact whatever their value (#4523 included); only the periodic re-checks are limited to held top-100s. To refresh everything else on demand, use **"Re-check all global tops"** in the Maintenance menu (re-queues every played map, ~25 h, resumable). Counters (top 1/8/15/25/50/100) appear on the dashboard once the sweep has run.
+Positions are exact whatever their value (#4523 included); only the periodic re-checks are limited to held top-100s. To refresh everything else on demand, use "Re-check all global tops" in the Maintenance menu (re-queues every played map, resumable). Counters (top 1/8/15/25/50/100) appear on the dashboard once the sweep has run.
 
 ## Discord notifications
 
@@ -191,7 +191,7 @@ Database: `./data/tracker.db` in source mode, `%AppData%\osu-completionist\data\
 ## Tests
 
 ```bash
-npm test    # rate limiter + FC/best logic
+npm test    # rate limiter, FC and best logic, mods, metrics, search
 ```
 
 ## Known limits
@@ -199,12 +199,11 @@ npm test    # rate limiter + FC/best logic
 - Legacy (ScoreV1) max score is not computed: it depends on map geometry, which would mean parsing `.osu` files.
 - Polling only sees the **last 24 hours** (limit of the `recent` endpoint) and ignores fails. If the app was off longer while you played, use "Poll now", and a full score re-import if needed.
 - Country leaderboards require **osu!supporter**; without a connected account, country #1 features stay dormant.
-- The initial global tops sweep takes ~25 h for ~90k played maps (shared 60 req/min budget); positions outside the held top-100s only refresh when you set a new best on the map or via "Re-check all global tops" in the Maintenance menu.
+- The initial global tops sweep spends one request per played map on the shared 60 req/min budget, so it takes about a day on a full account; positions outside the held top-100s only refresh when you set a new best on the map or via "Re-check all global tops" in the Maintenance menu.
 - `node:sqlite` prints an `ExperimentalWarning` at startup: harmless.
 - A mode's dashboard needs two days of history before its time machine has anything to show.
-- Custom metrics always count the full pool of their mode (its own maps plus the converts).
 
 ## Credits
 
-This project was **entirely coded by AI**, [Claude](https://claude.com) (Anthropic), directed and tested by [ZaBoo](https://osu.ppy.sh/users/13344661). Mode icons come from [osu-resources](https://github.com/ppy/osu-resources) (ppy). Every feature, fix and design decision was specified, reviewed and checked against a real completionist database of ~90k played maps.
+This project was entirely coded by AI, [Claude](https://claude.com) (Anthropic), directed and tested by [ZaBoo](https://osu.ppy.sh/users/13344661). Mode icons come from [osu-resources](https://github.com/ppy/osu-resources) (ppy). Every feature, fix and design decision was specified, reviewed and checked against a real completionist database.
 

@@ -70,6 +70,62 @@ export function computeRate(
   return 1;
 }
 
+/**
+ * Mods that move the star rating (osu! DifficultyAdjustmentMods; HD counts
+ * since the 2026 reading rework). The three ramps are here because what they
+ * change IS the rate, which is what the difficulty calculator reads.
+ */
+export const SR_MODS = new Set([
+  "DT", "NC", "HT", "DC", "HR", "EZ", "FL", "HD", "TD", "WU", "WD", "AS",
+]);
+
+export interface ModRef {
+  acronym: string;
+  settings?: Record<string, unknown>;
+}
+
+/**
+ * The difficulty-changing mods of a score, SETTINGS INCLUDED. Asking the API
+ * for the attributes of a bare "DT" answers for the default 1.5x, so a rate
+ * the player customised came back as a plain double time. Sorted by acronym:
+ * one combination, one cache key.
+ */
+export function srMods(modsJson: string): ModRef[] {
+  let arr: ModRef[];
+  try {
+    arr = JSON.parse(modsJson) as ModRef[];
+  } catch {
+    return []; // hand-edited row: no mods rather than a throw
+  }
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .filter((m) => m?.acronym && SR_MODS.has(m.acronym))
+    .map((m) => (m.settings ? { acronym: m.acronym, settings: m.settings } : { acronym: m.acronym }))
+    .sort((a, b) => a.acronym.localeCompare(b.acronym));
+}
+
+/** Settings that move the rate, and only those: the rest does not change SR. */
+const RATE_SETTINGS = ["speed_change", "initial_rate", "final_rate"] as const;
+
+/**
+ * Cache key of a combination. The rate belongs IN the key: without it a DT at
+ * 1.35x and a DT at 1.5x share a row, and the first one fetched answers for
+ * both.
+ */
+export function srModsKey(mods: ModRef[]): string {
+  return mods
+    .map((m) => {
+      const parts = RATE_SETTINGS.map((k) => {
+        const v = m.settings?.[k];
+        return typeof v === "number" && Number.isFinite(v)
+          ? `${k[0]}${Math.round(v * 100) / 100}`
+          : "";
+      }).filter(Boolean);
+      return parts.length ? `${m.acronym}@${parts.join("/")}` : m.acronym;
+    })
+    .join(",");
+}
+
 export function computeFcState(
   score: Pick<
     SoloScore,

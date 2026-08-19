@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { mapUrl, rulesetStatFields } from "../rulesets";
 import { fetchMapDetail } from "../api";
@@ -5,7 +6,7 @@ import { firstPlaceLabel, useCountryCode } from "../country";
 import { GradeBadge } from "./GradeBadge";
 import { MedalIcon } from "./Icons";
 import { displayGrade, fmtDate, fmtDateTime, fmtNum } from "../format";
-import { FC_LABELS, STATUS_LABELS } from "../types";
+import { FC_LABELS, STATUS_LABELS, type MapDetail } from "../types";
 import { useEscape } from "../useEscape";
 
 const mmss = (s: number | null) =>
@@ -21,6 +22,32 @@ function modsText(raw: string): string {
 }
 
 /** Detailed map view: stats, all my scores, country #1 history. */
+/** Sortable columns of the score table. `key` reads the sort value of a row;
+ * null sorts last whatever the direction, like the Maps table. */
+type ScoreRow = MapDetail["scores"][number];
+const SCORE_COLS: {
+  id: string;
+  label: string;
+  right?: boolean;
+  key: (s: ScoreRow) => number | string | null;
+}[] = [
+  { id: "date", label: "Date", key: (s) => s.ended_at },
+  { id: "grade", label: "Grade", key: (s) => GRADE_RANK[s.rank] ?? -1 },
+  { id: "mods", label: "Mods", key: (s) => modsText(s.mods) },
+  { id: "rate", label: "Rate", right: true, key: (s) => s.rate },
+  { id: "multi", label: "Multi", right: true, key: (s) => s.mod_multiplier },
+  { id: "acc", label: "Acc", right: true, key: (s) => s.accuracy },
+  { id: "std", label: "Standardised", right: true, key: (s) => s.total_score },
+  { id: "classic", label: "Classic", right: true, key: (s) => s.classic_total_score },
+  { id: "combo", label: "Combo", right: true, key: (s) => s.max_combo },
+  { id: "fc", label: "FC", key: (s) => -s.fc_state },
+  { id: "pp", label: "pp", right: true, key: (s) => s.pp },
+  { id: "passed", label: "", key: (s) => s.passed },
+];
+const GRADE_RANK: Record<string, number> = {
+  XH: 7, X: 6, SH: 5, S: 4, A: 3, B: 2, C: 1, D: 0,
+};
+
 export function MapModal({
   beatmapId,
   onClose,
@@ -37,6 +64,22 @@ export function MapModal({
     queryKey: ["map", beatmapId, ruleset],
     queryFn: () => fetchMapDetail(beatmapId, ruleset),
   });
+  // Classic descending by default: the badges above (grade, FC, #1, global)
+  // all describe the BEST score, so the table has to open on it rather than
+  // on the most recent play.
+  const [sort, setSort] = useState({ id: "classic", desc: true });
+  const bestId = data?.user?.best_lazer_score_id ?? null;
+  const sortedScores = useMemo(() => {
+    const col = SCORE_COLS.find((c) => c.id === sort.id) ?? SCORE_COLS[0];
+    return [...(data?.scores ?? [])].sort((a, b) => {
+      const x = col.key(a);
+      const y = col.key(b);
+      if (x == null) return y == null ? 0 : 1; // nulls last, both directions
+      if (y == null) return -1;
+      const cmp = typeof x === "string" ? x.localeCompare(String(y)) : Number(x) - Number(y);
+      return sort.desc ? -cmp : cmp;
+    });
+  }, [data?.scores, sort]);
 
   return (
     <>
@@ -114,32 +157,59 @@ export function MapModal({
             </div>
 
             <h3>My scores ({data.scores.length})</h3>
-            {data.scores.length === 0 && (
+            {data.scores.length === 0 ? (
               <p className="goal-note">No score recorded on this map.</p>
+            ) : (
+              <table className="mm-scores">
+                <thead>
+                  <tr>
+                    {SCORE_COLS.map((c) => (
+                      <th
+                        key={c.id}
+                        className={`${c.right ? "num" : ""} ${sort.id === c.id ? "on" : ""}`}
+                        title="Click to sort"
+                        onClick={() =>
+                          setSort((p) =>
+                            p.id === c.id ? { id: c.id, desc: !p.desc } : { id: c.id, desc: true }
+                          )
+                        }
+                      >
+                        {c.label}
+                        {sort.id === c.id ? (sort.desc ? " ▼" : " ▲") : ""}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedScores.map((s) => (
+                    <tr
+                      key={s.id}
+                      className={s.id === bestId ? "mm-best" : ""}
+                      title={s.id === bestId ? "The score that counts on the leaderboard" : ""}
+                    >
+                      <td>{fmtDateTime(s.ended_at)}</td>
+                      <td>
+                        <GradeBadge grade={s.rank} width={34} title={displayGrade(s.rank)} />
+                      </td>
+                      <td>{modsText(s.mods)}</td>
+                      <td className="num">{s.rate != null && s.rate !== 1 ? `${s.rate}x` : ""}</td>
+                      <td className="num">
+                        {s.mod_multiplier != null ? `×${s.mod_multiplier.toFixed(2)}` : ""}
+                      </td>
+                      <td className="num">{(s.accuracy * 100).toFixed(2)}%</td>
+                      <td className="num">{fmtNum(s.total_score)}</td>
+                      <td className="num">
+                        {s.classic_total_score != null ? fmtNum(s.classic_total_score) : ""}
+                      </td>
+                      <td className="num">{fmtNum(s.max_combo)}x</td>
+                      <td className={`fc fc-${s.fc_state}`}>{FC_LABELS[s.fc_state]}</td>
+                      <td className="num">{s.pp != null ? `${Math.round(s.pp)}pp` : ""}</td>
+                      <td className={s.passed ? "" : "mm-red"}>{s.passed ? "" : "fail"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
-            {data.scores.map((s) => (
-              <div key={s.id} className="mm-score-row">
-                <span className="mm-date">{fmtDateTime(s.ended_at)}</span>
-                <span className="mm-grade">
-                  <GradeBadge grade={s.rank} width={34} title={displayGrade(s.rank)} />
-                </span>
-                <span className="mm-mods">{modsText(s.mods)}</span>
-                <span className="mm-acc">{(s.accuracy * 100).toFixed(2)}%</span>
-                <span className="mm-score">{fmtNum(s.total_score)} std</span>
-                <span className="mm-score">
-                  {s.classic_total_score != null
-                    ? `${fmtNum(s.classic_total_score)} classic`
-                    : ""}
-                </span>
-                <span className="mm-combo">{fmtNum(s.max_combo)}x</span>
-                <span className={`mm-fc fc fc-${s.fc_state}`}>
-                  {FC_LABELS[s.fc_state]}
-                </span>
-                <span className="mm-pp">
-                  {s.pp != null ? `${Math.round(s.pp)}pp` : ""}
-                </span>
-              </div>
-            ))}
 
             {data.countryEvents.length > 0 && (
               <>

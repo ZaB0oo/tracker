@@ -53,6 +53,7 @@ import {
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { srMods } from "../logic/score.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -795,15 +796,14 @@ async function pollRecentScoresForMode(mode: number): Promise<number> {
   const discord = getDiscordSettings();
   const discordOn = discord.webhookSet && discord.bests;
   if (bestEvents.length > 0) {
-    // mods that change star rating (osu! DifficultyAdjustmentMods — HD counts
-    // since the 2026 reading rework)
-    const DIFF_MODS = new Set(["DT", "NC", "HT", "DC", "HR", "EZ", "FL", "HD", "TD"]);
     for (const e of bestEvents) {
       if (discordOn && mode === 0) {
-        // modded SR display: std only for now (the attributes cache is std)
-        const acronyms = parseModAcronyms(e.modsJson).filter((a) => a !== "CL");
-        if (acronyms.some((a) => DIFF_MODS.has(a)))
-          e.moddedSr = await getModdedStarRating(e.beatmapId, acronyms, "high");
+        // modded SR display: std only for now (the attributes cache is std).
+        // Settings travel with the mods, so a custom rate is asked for as the
+        // rate that was played, not as a plain DT.
+        const mods = srMods(e.modsJson);
+        if (mods.length > 0)
+          e.moddedSr = await getModdedStarRating(e.beatmapId, mods, "high");
       }
       try {
         e.globalRank = await getUserBeatmapPosition(

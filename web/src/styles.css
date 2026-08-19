@@ -414,14 +414,10 @@ h1 { font-size: 21px; margin: 0; }
 .bar-fill-blue { background: #5aa8f0; }
 .bar-count { font-weight: 700; color: #fff; white-space: nowrap; }
 .bar-count .gauge-dot { width: 8px; height: 8px; vertical-align: baseline; }
-.gauge-legend { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin-right: auto; }
+.gauge-legend { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin-left: auto; }
 .gauge-group { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
-.gauge-chip {
-  display: inline-flex; align-items: center; gap: 5px;
-  font-size: 12px; padding: 3px 9px; border-radius: 12px;
-  background: var(--bg3); border: 1px solid var(--border); color: var(--fg);
-  cursor: pointer;
-}
+/* a gauge toggle IS a chip: only the colour dot and the off state are its own */
+.gauge-chip { display: inline-flex; align-items: center; gap: 5px; }
 .gauge-chip.off { opacity: 0.42; }
 .gauge-chip.off .gauge-dot { background: var(--fg-dim) !important; }
 .gauge-dot { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
@@ -481,7 +477,11 @@ h1 { font-size: 21px; margin: 0; }
 .rs-icon { width: 16px; height: 16px; vertical-align: -3px; margin-right: 5px; opacity: 0.85; }
 .rs-tab.active .rs-icon { opacity: 1; }
 .ov-pool { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-.dash-pool { display: flex; align-items: center; gap: 10px; align-self: flex-start; margin: -2px 0 2px; }
+/* scope on the left, gauge legend pushed to the right edge of the same line */
+.dash-pool {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  align-self: stretch; margin: -2px 0 2px;
+}
 
 /* avatar menu header: name + square settings button on the right */
 .avatar-head { display: flex; align-items: center; gap: 10px; }
@@ -825,6 +825,23 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .mm-combo { width: 70px; text-align: right; }
 .mm-fc { width: 60px; color: var(--green); }
 .mm-pp { width: 60px; text-align: right; color: var(--fg-dim); }
+/* Sortable score table of the map modal. */
+.mm-scores { width: 100%; border-collapse: collapse; font-size: 13px; }
+.mm-scores th {
+  position: sticky; top: 0; background: var(--bg2); z-index: 1;
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--fg-dim); font-weight: 600; text-align: left;
+  padding: 5px 8px; border-bottom: 1px solid var(--border);
+  cursor: pointer; user-select: none; white-space: nowrap;
+}
+.mm-scores th:hover { color: var(--fg); }
+.mm-scores th.on { color: var(--accent2); }
+.mm-scores th.num, .mm-scores td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.mm-scores td { padding: 3px 8px; border-bottom: 1px solid #241d31; white-space: nowrap; }
+/* the score that counts on the leaderboard: everything above the table
+   describes THIS row */
+.mm-scores tr.mm-best td { background: rgba(255, 102, 170, 0.09); }
+.mm-scores tr.mm-best td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 
 /* View toolbar + visibility "customize" popover */
 .view-toolbar { display: flex; justify-content: flex-end; margin-bottom: 8px; min-height: 26px; }
@@ -1290,6 +1307,12 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 /* OBS stream overlay (?overlay=1): transparent background, compact card */
 body.overlay-body { background: transparent; }
 .overlay-root { padding: 8px; display: inline-block; }
+/* overlay config: colour + opacity of the card, on one line */
+.mb-scope { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.ov-bg { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.ov-bg label { display: inline-flex; align-items: center; gap: 6px; }
+.ov-bg input[type="color"] { width: 44px; height: 26px; padding: 0; }
+.ov-bg .dim { color: var(--fg-dim); flex-basis: 100%; }
 /* Compact vertical card: one counter per stat (total + green session gain). */
 .ov-card {
   background: rgb(23, 19, 31); border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1312,6 +1335,16 @@ body.overlay-body { background: transparent; }
   letter-spacing: 0.1em; color: var(--accent);
 }
 .ov-timer { color: var(--fg-dim); font-variant-numeric: tabular-nums; }
+/* Light panel: the text flips with it. Only the neutral tones — the green
+   gains, the red losses and the gold tiers carry meaning and keep their hue,
+   darkened just enough to stay readable on a pale background. */
+.ov-card.ov-light { color: #17131f; }
+.ov-card.ov-light .ov-dim,
+.ov-card.ov-light .ov-timer { color: rgba(23, 19, 31, 0.62); }
+.ov-card.ov-light .ov-tag { color: #c2185b; }
+.ov-card.ov-light .ov-gain { color: #1c7a2e; }
+.ov-card.ov-light .ov-loss { color: #b32020; }
+.ov-card.ov-light .ov-tier { color: #8a6a00; }
 .ov-dim { color: var(--fg-dim); font-size: 13px; }
 /* Grades: 2 rows x 4 columns like the dashboard, gain under the total */
 .ov-grades {
@@ -1465,6 +1498,9 @@ body.overlay-body { background: transparent; }
 .rate-col-bar {
   width: 100%;
   min-height: 3px;
+  /* the unfold on hover is the whole point of the linear scale: make it read
+     as a movement, not as a jump */
+  transition: height 120ms ease-out;
   border-radius: 5px 5px 0 0;
   background: var(--accent);
   position: relative;

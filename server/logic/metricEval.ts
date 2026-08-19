@@ -107,7 +107,7 @@ function baseFrom(p: MetricParams, bestOnly: boolean): string {
     JOIN beatmapsets st ON st.id = b.beatmapset_id
     LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}
     WHERE s.ruleset = ${R}
-      AND ${bestOnly ? "s.id = u.best_lazer_score_id AND " : ""}${mapWhere(p.map, { ruleset: R, pool: p.pool })} AND ${scoreWhere(p.score, isInverted(p))}`;
+      AND ${bestOnly ? "s.id = u.best_lazer_score_id AND " : ""}${mapWhere(p.map, { ruleset: R, pool: p.pool, keys: p.keys })} AND ${scoreWhere(p.score, isInverted(p))}`;
 }
 
 /** Goal-mode countdown: count the played maps whose best fails the conditions. */
@@ -128,7 +128,7 @@ function mapTotal(p: MetricParams): number {
         `SELECT COUNT(*) c FROM beatmaps b
          JOIN beatmapsets st ON st.id = b.beatmapset_id
          LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${p.ruleset ?? 0}
-         WHERE ${mapWhere(p.map, { ignoreCountry1: true, ruleset: p.ruleset ?? 0, pool: p.pool })}`
+         WHERE ${mapWhere(p.map, { ignoreCountry1: true, ruleset: p.ruleset ?? 0, pool: p.pool, keys: p.keys })}`
       )
       .get() as { c: number }
   ).c;
@@ -156,7 +156,7 @@ function countByBucket(p: MetricParams): MetricResult["byBucket"] {
        FROM beatmaps b
        JOIN beatmapsets st ON st.id = b.beatmapset_id
        LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${p.ruleset ?? 0}
-       WHERE ${mapWhere(p.map, { ignoreCountry1: true, ruleset: p.ruleset ?? 0, pool: p.pool })} AND ${dim.notNull} IS NOT NULL
+       WHERE ${mapWhere(p.map, { ignoreCountry1: true, ruleset: p.ruleset ?? 0, pool: p.pool, keys: p.keys })} AND ${dim.notNull} IS NOT NULL
        GROUP BY bucket ORDER BY bucket`
     )
     .all() as { bucket: number | string; total: number }[];
@@ -184,7 +184,7 @@ function evalCount(p: MetricParams, gran: "month" | "day"): MetricResult {
        JOIN beatmapsets st ON st.id = b.beatmapset_id
        LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${p.ruleset ?? 0}
        WHERE s.ruleset = ${p.ruleset ?? 0}
-         AND ${mapWhere(p.map, { ruleset: p.ruleset ?? 0, pool: p.pool })} AND s.passed = 1
+         AND ${mapWhere(p.map, { ruleset: p.ruleset ?? 0, pool: p.pool, keys: p.keys })} AND s.passed = 1
        ORDER BY s.ended_at`
     )
     .all() as { bid: number; at: string; v: number; matches: number }[];
@@ -236,7 +236,7 @@ function evalRankedScore(p: MetricParams, gran: "month" | "day"): MetricResult {
        JOIN beatmapsets st ON st.id = b.beatmapset_id
        LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}
        WHERE s.ruleset = ${R} AND s.passed = 1
-         AND ${mapWhere(p.map, { ruleset: R, pool: p.pool })}
+         AND ${mapWhere(p.map, { ruleset: R, pool: p.pool, keys: p.keys })}
        ORDER BY s.ended_at`
     )
     .all() as { bid: number; at: string; v: number; matches: number }[];

@@ -86,7 +86,13 @@ function RateColumn({
     >
       <span className="rate-col-value">{b.played ? fmtNum(b.played) : ""}</span>
       <div className="rate-col-bar-wrap">
-        <div className="rate-col-bar" style={{ height: `${heightPct}%` }}>
+        {/* hovered: the bar unfolds to the full height of the chart. The
+            layers below are shares of the BUCKET, not of the axis, so they
+            stay exact — only the scale of the drawing changes. */}
+        <div
+          className="rate-col-bar"
+          style={{ height: `${hover && b.played > 0 ? 100 : heightPct}%` }}
+        >
           {layers.map((l) => (
             <div
               key={l.id}
@@ -157,18 +163,17 @@ const RateHistogram = memo(function RateHistogram({
   for (let b = LO; b <= HI; b++)
     buckets.push(byBucket.get(b) ?? { bucket: b, ...empty });
   const max = Math.max(...buckets.map((b) => b.played), 1);
-  // LOG height: the counts span single digits to 30k+, and a linear scale
-  // flattened every small bucket into an invisible line
-  const height = (v: number) =>
-    v <= 0 ? 0 : (Math.log10(v + 1) / Math.log10(max + 1)) * 100;
+  // Linear height, so the bars can be compared for what they are: the counts
+  // span single digits to tens of thousands, which leaves the small buckets
+  // as a sliver — hovering one grows it to full height (see RateColumn), and
+  // that is where its gauge breakdown becomes readable.
+  const height = (v: number) => (v <= 0 ? 0 : Math.max((v / max) * 100, 0.6));
 
   return (
     <div className="panel rate-panel">
       <h3>
         Maps by rate
-        <span className="dim">
-          {" "} · log scale
-        </span>
+        <span className="dim"> · hover a bar to unfold its gauges</span>
       </h3>
       <div className="rate-chart">
         {buckets.map((b) => (
@@ -553,7 +558,7 @@ function GaugeLegend({
           {gs.map((g) => (
             <button
               key={g.vis}
-              className={`gauge-chip${isHidden(g.vis) ? " off" : ""}`}
+              className={`chip gauge-chip${isHidden(g.vis) ? " off" : ""}`}
               onClick={() => onToggle(g.vis)}
               title={`${isHidden(g.vis) ? "Show" : "Hide"} the ${g.label} gauge`}
             >
@@ -1050,6 +1055,16 @@ export function Dashboard({
         {ruleset === 3 && onKeysChange && (
           <KeysChips value={keys} onChange={onKeysChange} />
         )}
+        {/* The gauges are drawn in the hero, every histogram, the rate columns
+            and all their tooltips — the legend belongs with the scope, not
+            above one grid it only appeared to control. Pushed right so the
+            two families stay told apart on the same line. */}
+        <GaugeLegend
+          isHidden={gaugeHidden.isHidden}
+          onToggle={gaugeHidden.toggle}
+          ruleset={ruleset}
+          countryLabel={firstPlaceLabel(country)}
+        />
       </div>
       {points.length > 1 && (
         <TimeMachineBar points={points} idx={tmIdx} onChange={setTmIdx} />
@@ -1167,12 +1182,6 @@ export function Dashboard({
       <HeatmapPanel cutoffDay={past?.day ?? null} ruleset={ruleset} pool={pool} keys={keys} scope={scope} />
 
       <div className="view-toolbar">
-        <GaugeLegend
-          isHidden={gaugeHidden.isHidden}
-          onToggle={gaugeHidden.toggle}
-          ruleset={ruleset}
-          countryLabel={firstPlaceLabel(country)}
-        />
         <VisibilityMenu
           items={dists.map((d) => ({ id: d.title, label: `Completion by ${d.title}` }))}
           isHidden={distHidden.isHidden}

@@ -721,6 +721,8 @@ export interface MetricParams {
   ruleset?: number;
   /** map pool for non-std rulesets (converts included by default) */
   pool?: PoolMode;
+  /** mania only: key-count restriction ("4", "7", "other") */
+  keys?: string[];
   score: MetricScoreConds;
   map: MetricMapConds;
   /** dimension of the per-bucket completion on the card (default sr) */
@@ -830,6 +832,7 @@ export async function deleteMetric(id: number): Promise<void> {
 }
 
 export const DEFAULT_METRIC_PARAMS: MetricParams = {
+  keys: [],
   kind: "count",
   score: {
     fc: "none",

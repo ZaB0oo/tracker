@@ -4,7 +4,7 @@
  * SQLite JSON functions for mods and hit counts), so everything stays fast.
  */
 
-import { poolWhere, type PoolMode } from "./rulesets.js";
+import { keysWhere, poolWhere, type PoolMode } from "./rulesets.js";
 
 export interface Range {
   min: number | null;
@@ -69,6 +69,8 @@ export interface MetricParams {
   ruleset?: number;
   /** map pool for non-std rulesets (converts included by default) */
   pool?: PoolMode;
+  /** mania only: key-count restriction ("4", "7", "other"); empty = every count */
+  keys?: string[];
   score: MetricScoreConds;
   map: MetricMapConds;
   /** dimension of the per-bucket completion shown on the card (default sr) */
@@ -202,11 +204,20 @@ export function scoreWhere(c: MetricScoreConds, invert = false): string {
  */
 export function mapWhere(
   c: MetricMapConds,
-  opts: { ignoreCountry1?: boolean; ruleset?: number; pool?: PoolMode } = {}
+  opts: {
+    ignoreCountry1?: boolean;
+    ruleset?: number;
+    pool?: PoolMode;
+    keys?: string[];
+  } = {}
 ): string {
   const R = opts.ruleset ?? 0;
   // same three-way pool rule as the views (see poolWhere)
   const w: string[] = [poolWhere(R, opts.pool)];
+  // and the same key-count rule, so a mania metric can be scoped like the
+  // dashboard is (no-op outside mania)
+  const keys = keysWhere(R, (opts.keys ?? []).join(","));
+  if (keys) w.push(keys);
   const sts = (c.statuses ?? []).filter((n) => [1, 2, 4].includes(n));
   w.push(`b.status IN (${(sts.length ? sts : [1, 2, 4]).join(",")})`);
   const r = (expr: string, lo: unknown, hi: unknown) => {

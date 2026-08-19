@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { getDb } from "../db/db.js";
+import { srMods, srModsKey, type ModRef } from "../logic/score.js";
 import { evalMetric, previewMetric } from "../logic/metricEval.js";
 import { mapWhere, scoreWhere, type MetricParams } from "../logic/metrics.js";
 import { getModdedStarRating } from "../osu/api.js";
@@ -23,25 +24,22 @@ function loadParams(row: { id: number; params: string }): MetricParams | null {
   }
 }
 
-// mods that change star rating (HD counts since the 2026 reading rework)
-const DIFF_MODS = new Set(["DT", "NC", "HT", "DC", "HR", "EZ", "FL", "HD", "TD"]);
-
 /** Lazy background fill of the modded-SR cache (one low-priority request). */
 const srInFlight = new Set<string>();
-function queueModdedSr(beatmapId: number, diffMods: string[]): void {
-  const key = `${beatmapId}|${diffMods.join(",")}`;
-  if (srInFlight.has(key)) return;
-  srInFlight.add(key);
-  void getModdedStarRating(beatmapId, diffMods, "low")
+function queueModdedSr(beatmapId: number, mods: ModRef[], key: string): void {
+  const inFlight = `${beatmapId}|${key}`;
+  if (srInFlight.has(inFlight)) return;
+  srInFlight.add(inFlight);
+  void getModdedStarRating(beatmapId, mods, "low")
     .then((sr) => {
       if (sr != null)
         getDb()
           .prepare(
             "INSERT OR REPLACE INTO modded_sr (beatmap_id, mods, star_rating) VALUES (?, ?, ?)"
           )
-          .run(beatmapId, diffMods.join(","), sr);
+          .run(beatmapId, key, sr);
     })
-    .finally(() => srInFlight.delete(key));
+    .finally(() => srInFlight.delete(inFlight));
 }
 
 // Custom metrics (milestones + evolution)
@@ -255,7 +253,7 @@ metricsRouter.get("/metrics/:id/pp-top", (req, res) => {
        JOIN beatmapsets st ON st.id = b.beatmapset_id
        LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${p.ruleset ?? 0}
        WHERE s.ruleset = ${p.ruleset ?? 0}
-         AND ${mapWhere(p.map, { ruleset: p.ruleset ?? 0, pool: p.pool })} AND ${scoreWhere(p.score)}
+         AND ${mapWhere(p.map, { ruleset: p.ruleset ?? 0, pool: p.pool, keys: p.keys })} AND ${scoreWhere(p.score)}
          AND s.pp IS NOT NULL AND s.passed = 1 AND ${bound}
        GROUP BY s.beatmap_id
        ORDER BY pp DESC
@@ -280,16 +278,18 @@ metricsRouter.get("/metrics/:id/pp-top", (req, res) => {
     } catch {
       // ignore, treated as nomod
     }
-    const diff = acronyms.filter((a) => DIFF_MODS.has(a)).sort();
-    let srMods: number | null = null;
+    // settings included: the cached value must belong to the rate played
+    const diff = srMods(r.mods);
+    let sr: number | null = null;
     if (diff.length > 0) {
-      const hit = cached.get(r.beatmap_id, diff.join(",")) as
+      const key = srModsKey(diff);
+      const hit = cached.get(r.beatmap_id, key) as
         | { star_rating: number | null }
         | undefined;
-      if (hit) srMods = hit.star_rating;
-      else queueModdedSr(r.beatmap_id, diff);
+      if (hit) sr = hit.star_rating;
+      else queueModdedSr(r.beatmap_id, diff, key);
     }
-    return { ...r, mods_list: acronyms, sr_mods: srMods };
+    return { ...r, mods_list: acronyms, sr_mods: sr };
   });
   res.json({ rows: out });
 });

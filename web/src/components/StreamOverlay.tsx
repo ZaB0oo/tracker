@@ -61,6 +61,24 @@ export function StreamOverlay() {
   const startedAt = useRef(Date.now());
   const [, tick] = useState(0);
 
+  // Card background from the URL (?bg=rrggbbaa), set in the overlay config.
+  // The PAGE stays transparent whatever it says: that is what OBS composites.
+  const card = (() => {
+    const raw = new URLSearchParams(window.location.search).get("bg");
+    if (!raw || !/^[0-9a-f]{6}([0-9a-f]{2})?$/i.test(raw)) return {};
+    const n = parseInt(raw.slice(0, 6), 16);
+    const rgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    const alpha = raw.length === 8 ? parseInt(raw.slice(6, 8), 16) / 255 : 1;
+    // Relative luminance (WCAG): dark text on a light panel, light text on a
+    // dark one. Below half opacity the real backdrop is the game, which we
+    // cannot measure — light text stays the safer bet there.
+    const lin = rgb
+      .map((v) => v / 255)
+      .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+    const luminance = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+    return { style: { background: `#${raw}` }, light: alpha >= 0.5 && luminance > 0.45 };
+  })();
+
   // transparent background for OBS
   useEffect(() => {
     document.body.classList.add("overlay-body");
@@ -132,7 +150,7 @@ export function StreamOverlay() {
 
   return (
     <div className="overlay-root">
-      <div className="ov-card">
+      <div className={`ov-card${card.light ? " ov-light" : ""}`} style={card.style}>
         {!hide.has("timer") && (
           <div className="ov-row ov-session">
             <span className="ov-tag">SESSION</span>

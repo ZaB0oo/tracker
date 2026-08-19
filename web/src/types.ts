@@ -72,6 +72,9 @@ export interface MapDetail {
     mods: string;
     fc_state: number;
     passed: number;
+    /** playback rate and mod multiplier of that score */
+    rate: number | null;
+    mod_multiplier: number | null;
   }[];
   user: {
     played: number;
@@ -81,6 +84,8 @@ export interface MapDetail {
     country_checked_at: string | null;
     fetched_at: string | null;
     global_rank: number | null;
+    /** the score that counts on the leaderboard — flagged in the table */
+    best_lazer_score_id: number | null;
   } | null;
   countryEvents: {
     event: string;
