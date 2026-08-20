@@ -470,16 +470,26 @@ export function SyncBar({
                 >
                   Start/resume {lbl} sweep
                   {!connected && " (account not connected)"}
+                  {connected && s.sweeps.countryPending === 0 && " (all checked)"}
                 </button>
               )}
               {s.sweeps.globalTracking || s.sweeps.global ? (
+                // Tracking stays on once the sweep is over: new bests are still
+                // checked on the spot and held top 100s are re-checked. Saying
+                // "pause the sweep" then reads as if it were still running.
                 <button
                   onClick={() => act("global-pause")}
+                  title={
+                    s.sweeps.global || s.sweeps.globalPending > 0
+                      ? "Stop the sweep. What is already checked is kept."
+                      : "Every played map is checked. Stopping also drops the check on each new best and the periodic re-check of your top 100s."
+                  }
                 >
-                  Pause global tops sweep
-                  {` (${fmtNum(s.sweeps.globalChecked)}/${fmtNum(
-                    s.sweeps.globalChecked + s.sweeps.globalPending
-                  )})`}
+                  {s.sweeps.global || s.sweeps.globalPending > 0
+                    ? `Pause global tops sweep (${fmtNum(s.sweeps.globalChecked)}/${fmtNum(
+                        s.sweeps.globalChecked + s.sweeps.globalPending
+                      )})`
+                    : `Stop tracking global tops (${fmtNum(s.sweeps.globalChecked)} maps checked)`}
                 </button>
               ) : (
                 <button
@@ -487,6 +497,9 @@ export function SyncBar({
                   title="Track your global top 100 positions. Slow, resumable."
                 >
                   Start/resume global tops sweep
+                  {s.sweeps.globalPending === 0 &&
+                    s.sweeps.globalChecked > 0 &&
+                    " (all checked)"}
                 </button>
               )}
 

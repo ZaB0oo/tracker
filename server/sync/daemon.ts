@@ -1371,9 +1371,22 @@ export async function runCountrySweep(force = false): Promise<void> {
        LIMIT 200`
     );
     let done = 0;
+    let firstBatch = true;
     while (countryWanted) {
       const rows = nextBatch.all() as { id: number; r: number }[];
-      if (rows.length === 0) break;
+      if (rows.length === 0) {
+        // A manual start with an empty queue used to do nothing at all, with no
+        // trace anywhere: the button just flipped back. Say so.
+        if (firstBatch && force) {
+          const cc = getStoredCountryCode();
+          logActivity(
+            `${cc ? `#1 ${cc}` : "country #1"} sweep`,
+            "nothing to do, every played map is already checked"
+          );
+        }
+        break;
+      }
+      firstBatch = false;
       for (const { id, r } of rows) {
         if (!countryWanted) break;
         try {
@@ -1545,9 +1558,15 @@ export async function runGlobalSweep(force = false): Promise<void> {
     );
     let done = 0;
     let failures = 0;
+    let firstBatch = true;
     while (globalWanted) {
       const rows = nextBatch.all() as { id: number; r: number }[];
-      if (rows.length === 0) break;
+      if (rows.length === 0) {
+        if (firstBatch && force)
+          logActivity("global tops sweep", "nothing to do, every played map is already checked");
+        break;
+      }
+      firstBatch = false;
       for (const { id, r } of rows) {
         if (!globalWanted) break;
         try {

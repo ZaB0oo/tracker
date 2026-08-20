@@ -209,6 +209,7 @@ npm test    # rate limiter, FC and best logic, mods, metrics, search
 - Polling only sees the **last 24 hours** (limit of the `recent` endpoint) and ignores fails. If the app was off longer while you played, use "Poll now", and a full score re-import if needed.
 - Country leaderboards require **osu!supporter**; without a connected account, country #1 features stay dormant.
 - The initial global tops sweep spends one request per played map on the shared 60 req/min budget, so it takes about a day on a full account; positions outside the held top-100s only refresh when you set a new best on the map or via "Re-check all global tops" in the Maintenance menu.
+- On osu!, the rating computed for your mods can sit slightly under the one the site shows: the difficulty calculator this uses has not caught up with the last star rating update yet. taiko, catch and mania match it. Only the displayed rating is concerned.
 - Star ratings for the rate-changing ramps (Wind Up, Wind Down, Adaptive Speed) stay the map's own: the rate moves during the play, and the difficulty calculator works on a fixed one. lazer shows them the same way.
 - `node:sqlite` prints an `ExperimentalWarning` at startup: harmless.
 - A mode's dashboard needs two days of history before its time machine has anything to show.
