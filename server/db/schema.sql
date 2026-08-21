@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS beatmap_user (
   ruleset INTEGER NOT NULL DEFAULT 0,
   fetched_at TEXT,                    -- last backfill of this map (NULL = never fetched)
   played INTEGER NOT NULL DEFAULT 0,
-  best_fc INTEGER NOT NULL DEFAULT 0,  -- at least one FC (any mods)
+  best_fc INTEGER NOT NULL DEFAULT 0,  -- my BEST score is an FC (leaderboard semantics)
   country_first INTEGER NOT NULL DEFAULT 0, -- I hold the country #1 on the leaderboard
   country_checked_at TEXT,                  -- last country leaderboard check
   -- Same instant, but NEVER cleared by a re-queue: country_checked_at doubles

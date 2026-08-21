@@ -45,7 +45,9 @@ statsRouter.get("/stats", (req, res) => {
   const STATUSES = statusIn(String(req.query.scope ?? ""));
 
   const version = scoresVersion();
-  const cacheKey = `${R}-${String(req.query.pool ?? "")}-${String(req.query.keys ?? "")}-${String(req.query.scope ?? "")}`;
+  // POOL/STATUSES are the canonical SQL strings (pool+keys fold into POOL):
+  // junk query values collapse into one entry instead of growing the cache
+  const cacheKey = `${R}|${POOL}|${STATUSES}`;
   const hit = statsCache.get(cacheKey);
   if (hit && hit.version === version && Date.now() - hit.at < STATS_TTL_MS)
     return res.json(hit.payload);
@@ -325,8 +327,17 @@ statsRouter.get("/stats", (req, res) => {
     bySr, byYear, byAr, byOd, byHp, byCs, byLen, byCombo, byStatus, byRate,
   };
   statsCache.set(cacheKey, { version, at: Date.now(), payload });
+  while (statsCache.size > 16)
+    statsCache.delete(statsCache.keys().next().value!);
   res.json(payload);
 });
+
+/** The score-curve x-axis dimensions the API accepts (anything else: sr). */
+const CURVE_DIM_KEYS = new Set(["sr", "ar", "od", "cs", "hp", "length", "combo", "month"]);
+
+// /skill-curve answers ~10 req/min (60s refetch + every dim/scope change) and
+// the non-sr dims pull every best row per request: cache like the others.
+const curveCache = new Map<string, { version: string; payload: unknown }>();
 
 /** Combo width of one score-curve band; mania combos run far higher. */
 function comboCurveStep(R: number): number {
@@ -383,8 +394,17 @@ statsRouter.get("/skill-curve", (req, res) => {
     R === 0
       ? ""
       : `LEFT JOIN convert_attrs ca ON ca.beatmap_id = b.id AND ca.ruleset = ${R} AND b.ruleset != ${R}`;
-  const dim = String(req.query.dim ?? "sr");
+  const dimRaw = String(req.query.dim ?? "sr");
+  const dim = CURVE_DIM_KEYS.has(dimRaw) ? dimRaw : "sr";
+  const version = scoresVersion();
+  const curveKey = `${R}|${POOL}|${STATUSES}|${dim}`;
+  const curveHit = curveCache.get(curveKey);
+  if (curveHit && curveHit.version === version) return res.json(curveHit.payload);
   const D = curveDimSql(R, dim);
+  // beatmapsets is only read by the month axis; joining it everywhere cost a
+  // PK probe per beatmap and silently dropped any map without a set row from
+  // the totals (INNER JOIN semantics)
+  const stJoin = dim === "month" ? "JOIN beatmapsets st ON st.id = b.beatmapset_id" : "";
   // per-band aggregates, along whatever axis the panel is looking at. The
   // curve follows the very same view as the sums: pool, keys, scope.
   const aggs = db
@@ -395,7 +415,7 @@ statsRouter.get("/skill-curve", (req, res) => {
         SUM(u.missing_classic) missing_classic,
         SUM(u.missing_wither) missing_wither
        FROM beatmaps b
-       JOIN beatmapsets st ON st.id = b.beatmapset_id
+       ${stJoin}
        LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}
        ${caJoin}
        WHERE ${POOL} AND b.status IN ${STATUSES} AND ${D.notNull}
@@ -418,7 +438,7 @@ statsRouter.get("/skill-curve", (req, res) => {
          FROM beatmap_user u
          JOIN scores s ON s.id = u.best_lazer_score_id
          JOIN beatmaps b ON b.id = u.beatmap_id
-         JOIN beatmapsets st ON st.id = b.beatmapset_id
+         ${stJoin}
          ${caJoin}
          WHERE u.ruleset = ${R} AND ${POOL} AND b.status IN ${STATUSES} AND ${D.notNull}`
       )
@@ -432,7 +452,7 @@ statsRouter.get("/skill-curve", (req, res) => {
     curveBuckets = fitSkillCurve(samples, D.steps);
   }
   const byQ = new Map(aggs.map((a) => [a.q, a]));
-  res.json({
+  const payload = {
     dim,
     buckets: curveBuckets
       .filter((b) => (byQ.get(b.q)?.total ?? 0) > 0)
@@ -450,7 +470,11 @@ statsRouter.get("/skill-curve", (req, res) => {
           missingWither: a.missing_wither ?? 0,
         };
       }),
-  });
+  };
+  curveCache.set(curveKey, { version, payload });
+  while (curveCache.size > 16)
+    curveCache.delete(curveCache.keys().next().value!);
+  res.json(payload);
 });
 
 /**
@@ -549,8 +573,9 @@ statsRouter.get("/timeline", (req, res) => {
 
   const db = getDb();
   const version = scoresVersion();
-  // keys AND scope included: same leak as the pool otherwise
-  const cacheKey = `${R}-${pool}-${String(req.query.keys ?? "")}-${String(req.query.scope ?? "")}`;
+  // keyed by the canonical SQL strings (pool+keys fold into POOL): junk
+  // values collapse into one entry instead of growing the cache
+  const cacheKey = `${R}|${POOL}|${STATUSES}`;
   const cached = timelineCache.get(cacheKey);
   if (cached && cached.version === version) return res.json(cached.payload);
 
@@ -812,6 +837,9 @@ statsRouter.get("/timeline", (req, res) => {
   });
   const payload = { tiers: TIERS, points };
   timelineCache.set(cacheKey, { version, payload });
+  // each entry is ~1MB: cap like the snapshot cache
+  while (timelineCache.size > 4)
+    timelineCache.delete(timelineCache.keys().next().value!);
   res.json(payload);
 });
 
@@ -856,7 +884,8 @@ interface SnapIndex {
   /** transitions of the BEST score, ALIGNED WITH maps[] (not keyed by id: the
    * snapshot walks all 150k maps per slider tick and hash lookups dominated
    * the cost): [day, gradeCode, fc_state, standardised, classic, rateBucket].
-   * gradeCode: 2 = SS, 1 = S+, 0 = below. The grade gauges follow leaderboard
+   * gradeCode: tier 0..5 = D, C, B, A, S (SH folded), SS (X/XH folded), as
+   * written by the encoder below. The grade gauges follow leaderboard
    * semantics (grade OF the best), which is not monotone: an SS beaten later
    * by a higher non-SS play disappears. rateBucket is rate*10 clamped to
    * 5..20, exactly like the live histogram. */
@@ -1075,7 +1104,8 @@ statsRouter.get("/snapshot", (req, res) => {
     return res.status(400).json({ ok: false, error: "day=YYYY-MM-DD required" });
   const STATUSES = statusIn(String(req.query.scope ?? ""));
   const db = getDb();
-  const snapKey = `${R}-${pool}-${String(req.query.keys ?? "")}-${String(req.query.scope ?? "")}`;
+  // canonical SQL strings as key: junk values collapse into one entry
+  const snapKey = `${R}|${POOL}|${STATUSES}`;
   let snapCache = snapCaches.get(snapKey);
   if (snapCache) {
     // refresh recency (Map keeps insertion order)
@@ -1259,24 +1289,27 @@ statsRouter.get("/snapshot", (req, res) => {
     const onemd = m.onem != null && m.onem <= day;
     const rank = inCat ? rankAt[i] : 0;
 
-    if (inCat && m.q >= 0) {
-      const pred = curve[m.q].value;
-      const mc = Math.max(0, classicFromStandardised(R, pred, m.n) - bestClassic[i]);
-      missing += Math.max(0, pred - bestStd[i]);
-      missingClassic += mc;
-      // the panel aggregates follow the SELECTED dimension; the missing
-      // itself stays defined against the SR curve
+    if (inCat) {
+      // the panel aggregates follow the SELECTED dimension (a map with an
+      // unknown SR still lands in its AR/length/... band, like the live
+      // curve); the missing itself stays defined against the SR curve
       const dq = dimIdxOf ? dimIdxOf(m) : m.q;
       const inBand = dq >= 0 && dq <= dimSteps;
       if (inBand) {
         curveTotal[dq]++;
         if (cleared) curvePlayed[dq]++;
-        curveMissC[dq] += mc;
       }
-      if (R === 0 && m.n > 0) {
-        const mw = Math.max(0, witherScore(pred, m.n) - witherScore(bestStd[i], m.n));
-        missingWither += mw;
-        if (inBand) curveMissW[dq] += mw;
+      if (m.q >= 0) {
+        const pred = curve[m.q].value;
+        const mc = Math.max(0, classicFromStandardised(R, pred, m.n) - bestClassic[i]);
+        missing += Math.max(0, pred - bestStd[i]);
+        missingClassic += mc;
+        if (inBand) curveMissC[dq] += mc;
+        if (R === 0 && m.n > 0) {
+          const mw = Math.max(0, witherScore(pred, m.n) - witherScore(bestStd[i], m.n));
+          missingWither += mw;
+          if (inBand) curveMissW[dq] += mw;
+        }
       }
     }
     if (inCat && cleared) {

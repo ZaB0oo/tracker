@@ -396,13 +396,8 @@ h1 { font-size: 21px; margin: 0; }
 /* grade deltas inside a tooltip: same pills as the day panel, one row */
 .hm-tip-grades { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
 .tip-dim { color: var(--fg-dim); }
-.gauge-group-title {
-  font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
-  color: var(--fg-dim); margin-right: 2px;
-}
 .bar-fill { position: absolute; inset: 0; width: 0; background: linear-gradient(90deg, #4a3a6a, var(--accent)); }
 .bar-fill-gold { background: #e8c84a; }
-.bar-fill-pfc { background: #a06ee8; }
 .bar-fill-ss { background: #de31ae; }
 .bar-fill-t100 { background: #cfc4f3; }
 .bar-fill-t50 { background: #b8a5ee; }
@@ -827,12 +822,6 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   border-bottom: 1px solid #241d31; font-size: 13px;
 }
 .mm-score-row .mm-date { width: 150px; color: var(--fg-dim); flex-shrink: 0; }
-.mm-mods { width: 110px; }
-.mm-acc { width: 70px; }
-.mm-score { width: 150px; text-align: right; }
-.mm-combo { width: 70px; text-align: right; }
-.mm-fc { width: 60px; color: var(--green); }
-.mm-pp { width: 60px; text-align: right; color: var(--fg-dim); }
 /* Sortable score table of the map modal. */
 .mm-scores { width: 100%; border-collapse: collapse; font-size: 13px; }
 .mm-scores th {

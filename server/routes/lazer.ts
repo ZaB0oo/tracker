@@ -29,6 +29,29 @@ function isLoopback(req: Request): boolean {
   return a === "127.0.0.1" || a === "::1" || a === "::ffff:127.0.0.1";
 }
 
+/**
+ * Rejects cross-origin browser requests: the API is unauthenticated, so any
+ * website can fire "simple" requests at localhost (CSRF) — and this router
+ * spawns a process and writes into the lazer realm. Browsers send
+ * Sec-Fetch-Site (and Origin on cross-origin requests); requests without
+ * them (curl, the Electron shell, the app's own pages) pass.
+ */
+function isSameOrigin(req: Request): boolean {
+  const sfs = req.headers["sec-fetch-site"];
+  if (sfs && sfs !== "same-origin" && sfs !== "none") return false;
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  try {
+    return new URL(origin).host === req.headers.host;
+  } catch {
+    return false;
+  }
+}
+
+// single-flight for the collections listing: concurrent requests await the
+// same child process instead of each spawning one (it opens the lazer realm)
+let listingInFlight: Promise<{ ok: boolean; output: string }> | null = null;
+
 async function importerPath(): Promise<string | null> {
   const p = getState("lazer_importer_path") || config.lazerImporterPath;
   if (!p || !path.isAbsolute(p)) return null;
@@ -54,18 +77,21 @@ lazerRouter.get("/lazer-import/status", async (req, res) => {
  * "no list", not break the import button.
  */
 lazerRouter.get("/lazer-import/collections", async (req, res) => {
-  if (!isLoopback(req))
+  if (!isLoopback(req) || !isSameOrigin(req))
     return res.status(403).json({ collections: [], error: "local requests only" });
   const exe = await importerPath();
   if (!exe) return res.json({ collections: [], error: "importer not configured" });
-  const out = await new Promise<{ ok: boolean; output: string }>((resolve) => {
+  listingInFlight ??= new Promise<{ ok: boolean; output: string }>((resolve) => {
     execFile(
       exe,
       ["--list", "--yes"], // --yes: no "Press Enter to exit" (it would hang)
       { timeout: 30_000, windowsHide: true },
       (err, stdout, stderr) => resolve({ ok: err == null, output: `${stdout}\n${stderr}` })
     );
+  }).finally(() => {
+    listingInFlight = null;
   });
+  const out = await listingInFlight;
   const collections = parseCollectionList(out.output);
   if (!out.ok && collections.length === 0) {
     const tail = out.output.split("\n").map((l) => l.trim()).filter(Boolean).slice(-2).join(" · ");
@@ -82,7 +108,7 @@ lazerRouter.get("/lazer-import/collections", async (req, res) => {
  * only its content is swapped.
  */
 lazerRouter.post("/lazer-import", async (req, res) => {
-  if (!isLoopback(req))
+  if (!isLoopback(req) || !isSameOrigin(req))
     return res.status(403).json({ ok: false, error: "local requests only" });
   const exe = await importerPath();
   if (!exe)

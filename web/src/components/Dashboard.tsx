@@ -225,6 +225,7 @@ interface CurveDimCfg {
   view: (q: number) => Partial<Filters>;
 }
 function curveDims(ruleset: number): Record<string, CurveDimCfg> {
+  const stat = rulesetStatFields(ruleset);
   // one combo band per curve bucket; mania combos run far higher
   const comboStep = ruleset === 3 ? 60 : ruleset === 2 ? 25 : 20;
   const tenthDim = (label: string, minKey: keyof Filters, maxKey: keyof Filters): CurveDimCfg => ({
@@ -235,7 +236,7 @@ function curveDims(ruleset: number): Record<string, CurveDimCfg> {
     upTo: (q) => (q >= 100 ? null : `${label} < ${((q + 1) / 10).toFixed(1)}`),
     view: (q) => tenthView(q, minKey, maxKey),
   });
-  return {
+  const all: Record<string, CurveDimCfg> = {
     sr: {
       label: "Star rating",
       tickEvery: 10,
@@ -292,6 +293,11 @@ function curveDims(ruleset: number): Record<string, CurveDimCfg> {
         ({ rankedFrom: `${monthLabel(q)}-01`, rankedTo: `${monthLabel(q)}-31` }) as Partial<Filters>,
     },
   };
+  // same gating as the completion panels: taiko has no AR or CS axis, mania
+  // no AR (its CS stays: it is the key count)
+  if (!stat.ar) delete all.ar;
+  if (!stat.cs) delete all.cs;
+  return all;
 }
 
 const SkillCurvePanel = memo(function SkillCurvePanel({
@@ -752,8 +758,6 @@ export function Dashboard({
   onKeysChange?: (keys: string[]) => void;
   /** opens the Maps tab filtered on a pack (search token pack=TAG) */
   onViewPack?: (tag: string, scope: DashScope) => void;
-  /** opens the Maps tab filtered on a star-rating range (max null = no cap),
-   * carrying the dashboard's status scope so the list matches the curve */
   /** opens the Maps tab filtered on a playback-rate range */
   onViewRate?: (min: number, max: number, scope: DashScope) => void;
   /** opens the Maps tab on a completion-bar bucket (star rating, year, …) */
@@ -842,7 +846,10 @@ export function Dashboard({
     };
     if (inFlight.current) pendingDay.current = tmDay;
     else run(tmDay);
-  }, [tmDay, curveDim]);
+    // ruleset/pool/keys/scope matter as much as the day: without them a tab
+    // switch with the time machine engaged kept showing the previous mode's
+    // snapshot (Dashboard is not remounted on ruleset change)
+  }, [tmDay, curveDim, ruleset, pool, keys.join(","), scope]);
 
   // Rate histogram rows: the snapshot replays the rate of the best held at
   // that date, so the panel follows the time machine like the others.
@@ -1038,10 +1045,6 @@ export function Dashboard({
     ];
   }, [data, snap, tmDay != null, ruleset]);
 
-  // Drill-down from any completion bar. The dashboard's Ranked/Loved scope is
-  // carried over (like the skill curve does) so the list holds exactly the
-  // maps the bar counted; the hero bars pick their own status and win.
-  // Stable identity: the DistPanel memos depend on it.
   // Every drill-down carries the dashboard's Ranked/Loved scope, so the Maps
   // list holds exactly what the panel counted. Wrapped in useCallback: the
   // panels below are memoized and a fresh arrow would re-render them all on
@@ -1330,7 +1333,16 @@ export function Dashboard({
                 className="grade-pill"
                 title="Maps with a perfect 1,000,000 play"
               >
-                <b className="fc fc-0">1M</b> {fmtNum(data.oneMillions)}
+                <b className="fc fc-0">1M</b>{" "}
+                {fmtNum(
+                  past
+                    ? scope === "loved"
+                      ? past.onemLoved
+                      : scope === "ranked"
+                        ? past.onemRanked
+                        : past.onemRanked + past.onemLoved
+                    : data.oneMillions
+                )}
               </div>
             )}
           </div>

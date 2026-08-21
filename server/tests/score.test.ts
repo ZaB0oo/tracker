@@ -39,7 +39,7 @@ describe("computeFcState", () => {
     ).toBe(FC_PERFECT);
   });
 
-  it("combo == max combo de la map => PERFECT (fallback)", () => {
+  it("combo == map max combo => PERFECT (fallback)", () => {
     expect(computeFcState(score({ max_combo: 500 }), 500)).toBe(FC_PERFECT);
   });
 
@@ -108,7 +108,7 @@ describe("computeFcState", () => {
     ).toBe(FC_NO_MISS);
   });
 
-  it("max combo map inconnu : no-miss => FC no-miss", () => {
+  it("unknown map max combo: no-miss => FC no-miss", () => {
     expect(
       computeFcState(score({ statistics: { miss: 0 }, max_combo: 300 }), null)
     ).toBe(FC_NO_MISS);
@@ -118,31 +118,31 @@ describe("computeFcState", () => {
 describe("computeRate", () => {
   const r = (mods: unknown[]) => computeRate(mods as Parameters<typeof computeRate>[0]);
 
-  it("sans mod de vitesse => 1.0", () => {
+  it("no speed mod => 1.0", () => {
     expect(r([])).toBe(1);
     expect(r([{ acronym: "HR" }, { acronym: "HD" }])).toBe(1);
   });
 
-  it("DT/NC/HT/DC nus => leurs valeurs par défaut", () => {
+  it("bare DT/NC/HT/DC => their default values", () => {
     expect(r([{ acronym: "DT" }])).toBe(1.5);
     expect(r([{ acronym: "NC" }])).toBe(1.5);
     expect(r([{ acronym: "HT" }])).toBe(0.75);
     expect(r([{ acronym: "DC" }])).toBe(0.75);
   });
 
-  it("speed_change gagne, arrondi à 2 décimales", () => {
+  it("speed_change wins, rounded to 2 decimals", () => {
     expect(r([{ acronym: "DT", settings: { speed_change: 1.35 } }])).toBe(1.35);
     // lazer stocke des 0.7000000000000001, qui couperaient un bucket en deux
     expect(r([{ acronym: "HT", settings: { speed_change: 0.7000000000000001 } }])).toBe(0.7);
   });
 
   // WU/WD/AS n'ont pas de speed_change : le rate BOUGE, on stocke la moyenne
-  it("Wind Up / Wind Down nus => moyenne des valeurs par défaut", () => {
+  it("bare Wind Up / Wind Down => average of their default values", () => {
     expect(r([{ acronym: "WU" }])).toBe(1.25); // 1.0 -> 1.5
     expect(r([{ acronym: "WD" }])).toBe(0.88); // 1.0 -> 0.75
   });
 
-  it("Wind Down réglé => moyenne initial/final", () => {
+  it("Wind Down configured => average of initial/final", () => {
     expect(r([{ acronym: "WD", settings: { initial_rate: 0.51, final_rate: 0.5 } }])).toBe(0.51);
     expect(r([{ acronym: "WD", settings: { initial_rate: 0.61, final_rate: 0.6 } }])).toBe(0.61);
     // un seul des deux réglé : l'autre garde son défaut
@@ -150,12 +150,12 @@ describe("computeRate", () => {
     expect(r([{ acronym: "WU", settings: { final_rate: 1.4 } }])).toBe(1.2);
   });
 
-  it("Adaptive Speed => son point de départ (il n'a pas de fin)", () => {
+  it("Adaptive Speed => its start point (it has no end)", () => {
     expect(r([{ acronym: "AS" }])).toBe(1);
     expect(r([{ acronym: "AS", settings: { initial_rate: 0.8 } }])).toBe(0.8);
   });
 
-  it("mod de rampe combiné à DT : la rampe décide", () => {
+  it("ramp mod combined with DT: the ramp decides", () => {
     expect(r([{ acronym: "DT" }, { acronym: "WD", settings: { initial_rate: 0.51, final_rate: 0.5 } }])).toBe(0.51);
   });
 });

@@ -3,6 +3,11 @@
  * score, u = beatmap_user) + the auto-calibrated skill curve.
  */
 import { getDb, getStartedRulesets } from "../db/db.js";
+import {
+  CURVE_STEPS,
+  fitSkillCurve,
+  type CurveBucket,
+} from "./skillCurve.js";
 
 // ---------- Shared SQL expressions (required aliases: b = beatmaps, s = best) ----------
 
@@ -182,17 +187,12 @@ export function ensureMissingFresh(): void {
 
 /**
  * Auto-calibrated skill curve: for each 0.1★ slice, the MEDIAN of my bests
- * (standardised) = the "realistic" score I can post at that difficulty,
- * adjusted into a decreasing curve by weighted isotonic regression (PAVA).
- * Gaps (< 5 bests) filled by carry-over. 10 min cache.
+ * (standardised) = the "realistic" score I can post at that difficulty.
+ * No monotone fit since 1.17: the curve follows the medians wherever they go
+ * (see skillCurve.ts). Gaps (< 5 bests) filled by carry-over from the left.
  * Used for the "realistic gain" = what I can still grab on a map given MY
  * level, not the theoretical max.
  */
-import {
-  CURVE_STEPS,
-  fitSkillCurve,
-  type CurveBucket,
-} from "./skillCurve.js";
 export { CURVE_STEPS, fitSkillCurve, type CurveBucket };
 const curveCaches = new Map<
   string,

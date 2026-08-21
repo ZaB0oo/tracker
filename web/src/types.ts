@@ -138,7 +138,7 @@ export interface Stats {
     top25: number; top50: number; top100: number;
     checked: number;
   };
-  /** playback-rate histogram of the bests (bucket = rate*10, 5..19) */
+  /** playback-rate histogram of the bests (bucket = rate*10, 5..20) */
   byRate: {
     bucket: number; played: number; fc: number; pfc: number; nonfc: number;
     ss: number; gradeS: number; gradeA: number; gradeB: number;
