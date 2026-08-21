@@ -8,6 +8,7 @@ import {
   computeSkillCurve,
   ensureMissingFresh,
   fitSkillCurve,
+  N_BASIC,
   scoresVersion,
   witherScore,
   witherSql,
@@ -131,7 +132,7 @@ statsRouter.get("/stats", (req, res) => {
           FROM scores s
           JOIN beatmaps b ON b.id = s.beatmap_id
           WHERE s.ruleset = 3 AND s.passed = 1
-            AND COALESCE(json_extract(s.raw,'$.total_score_without_mods'), s.total_score) = 1000000
+            AND COALESCE(s.nomod_score, s.total_score) = 1000000
             AND ${POOL} AND b.status IN ${STATUSES}`).c
       : 0;
 
@@ -187,7 +188,7 @@ statsRouter.get("/stats", (req, res) => {
     R === 3
       ? `LEFT JOIN (SELECT DISTINCT beatmap_id FROM scores
            WHERE ruleset = 3 AND passed = 1
-             AND COALESCE(json_extract(raw,'$.total_score_without_mods'), total_score) = 1000000
+             AND COALESCE(nomod_score, total_score) = 1000000
          ) om ON om.beatmap_id = b.id`
       : "";
   const FLAGS_JOIN = `LEFT JOIN scores bs ON bs.id = u.best_lazer_score_id ${ONEM_JOIN}`;
@@ -683,12 +684,16 @@ statsRouter.get("/timeline", (req, res) => {
   // that earned them — the same approximation the snapshot uses.
   const gEvents = db
     .prepare(
-      `SELECT e.beatmap_id AS bid, e.at, e.new_rank AS rank, b.status AS status
+      `SELECT e.beatmap_id AS bid, e.at, e.new_rank AS rank,
+         e.old_rank AS old, b.status AS status
        FROM global_events e JOIN beatmaps b ON b.id = e.beatmap_id
        WHERE e.ruleset = ${R} AND ${POOL} AND b.status IN ${STATUSES}
        ORDER BY e.at`
     )
-    .all() as { bid: number; at: string; rank: number | null; status: number }[];
+    .all() as {
+    bid: number; at: string; rank: number | null; old: number | null;
+    status: number;
+  }[];
   const gSeen = new Set(gEvents.map((e) => e.bid));
   const gHeld = db
     .prepare(
@@ -703,11 +708,24 @@ statsRouter.get("/timeline", (req, res) => {
   const topEvts: { at: string; old: number; nw: number; status: number }[] = [];
   {
     const lastRank = new Map<number, number>();
+    const bestAt = new Map(gHeld.map((r) => [r.bid, r.at]));
     for (const r of gHeld)
       if (!gSeen.has(r.bid))
         topEvts.push({ at: r.at, old: 0, nw: r.rank, status: r.status });
     for (const e of gEvents) {
-      const old = lastRank.get(e.bid) ?? 0;
+      let old = lastRank.get(e.bid) ?? 0;
+      if (!lastRank.has(e.bid) && e.old != null && e.old > 0) {
+        // rank recorded silently by the sweep before this map's first event:
+        // date the initial take at the best score, like the event-less holds
+        const at0 = bestAt.get(e.bid);
+        topEvts.push({
+          at: at0 && at0 < e.at ? at0 : e.at,
+          old: 0,
+          nw: e.old,
+          status: e.status,
+        });
+        old = e.old;
+      }
       const nw = e.rank ?? 0;
       topEvts.push({ at: e.at, old, nw, status: e.status });
       lastRank.set(e.bid, nw);
@@ -719,14 +737,14 @@ statsRouter.get("/timeline", (req, res) => {
     R === 3
       ? firstDates(
           `b.status IN (1, 2) AND s.passed = 1
-             AND COALESCE(json_extract(s.raw,'$.total_score_without_mods'), s.total_score) = 1000000`
+             AND COALESCE(s.nomod_score, s.total_score) = 1000000`
         )
       : [];
   const onemLoved =
     R === 3
       ? firstDates(
           `b.status = 4 AND s.passed = 1
-             AND COALESCE(json_extract(s.raw,'$.total_score_without_mods'), s.total_score) = 1000000`
+             AND COALESCE(s.nomod_score, s.total_score) = 1000000`
         )
       : [];
 
@@ -893,6 +911,8 @@ interface SnapIndex {
   /** global leaderboard position transitions, aligned: [day, rank | 0] */
   global: ([string, number][] | undefined)[];
   mapIds: number[];
+  /** Date.now() at build time, for the sync-churn throttle */
+  builtAt: number;
 }
 // One index per (ruleset, pool): it was built for std only and cached without
 // the mode, so the time machine showed osu! history on every tab.
@@ -929,7 +949,7 @@ function buildSnapshotIndex(
          MIN(CASE WHEN s.passed = 1 THEN s.ended_at END) clear,
          ${R === 3
            ? `MIN(CASE WHEN s.passed = 1
-                AND COALESCE(json_extract(s.raw,'$.total_score_without_mods'), s.total_score) = 1000000
+                AND COALESCE(s.nomod_score, s.total_score) = 1000000
                 THEN s.ended_at END)`
            : "NULL"} onem
        FROM beatmaps b
@@ -945,6 +965,21 @@ function buildSnapshotIndex(
     year: string | null; ranked_day: string | null; status: number;
     clear: string | null; onem: string | null;
   }[];
+  // taiko/catch: the classic formula wants the BASIC judgement count. The
+  // per-map fallback (max combo) overshoots on catch (~+10%: large droplets);
+  // use the best score's maximum_statistics when there is one, like the live
+  // missing does (N_MODE in scoreSql.ts).
+  const nBasic = new Map<number, number>();
+  if (R === 1 || R === 2) {
+    const rows = db
+      .prepare(
+        `SELECT u.beatmap_id bid, ${N_BASIC} nb
+         FROM beatmap_user u JOIN scores s ON s.id = u.best_lazer_score_id
+         WHERE u.ruleset = ${R}`
+      )
+      .all() as { bid: number; nb: number | null }[];
+    for (const r of rows) if (r.nb != null) nBasic.set(r.bid, r.nb);
+  }
   const cap = (v: number | null, c: number) =>
     v == null ? -1 : Math.min(Math.floor(v), c);
   const tenthQ = (v: number | null) =>
@@ -960,7 +995,7 @@ function buildSnapshotIndex(
       loved: a.status === 4,
       sr: cap(a.sr, 10),
       q: a.sr == null ? -1 : Math.min(Math.floor(a.sr * 10), CURVE_STEPS),
-      n: a.n ?? 0,
+      n: nBasic.get(a.id) ?? a.n ?? 0,
       year: a.year,
       len: a.len == null ? -1 : Math.min(Math.floor(a.len / 60), 10),
       combo: a.combo == null ? -1 : Math.min(Math.floor(a.combo / 250), 10),
@@ -1067,16 +1102,12 @@ function buildSnapshotIndex(
   // best score that earned it — the same approximation the country #1s use.
   const gEvents = db
     .prepare(
-      `SELECT beatmap_id AS bid, at, new_rank AS rank
+      `SELECT beatmap_id AS bid, at, new_rank AS rank, old_rank AS old
        FROM global_events WHERE ruleset = ${R} ORDER BY at`
     )
-    .all() as { bid: number; at: string; rank: number | null }[];
-  const global: ([string, number][] | undefined)[] = new Array(mapIds.length);
-  for (const e of gEvents) {
-    const i = slot.get(e.bid);
-    if (i == null) continue;
-    (global[i] ??= []).push([e.at.slice(0, 10), e.rank ?? 0]);
-  }
+    .all() as {
+    bid: number; at: string; rank: number | null; old: number | null;
+  }[];
   const heldGlobal = db
     .prepare(
       `SELECT u.beatmap_id AS bid, u.global_rank AS rank, s.ended_at AS at
@@ -1086,12 +1117,35 @@ function buildSnapshotIndex(
        WHERE u.global_rank IS NOT NULL AND ${POOL}`
     )
     .all() as { bid: number; rank: number; at: string }[];
+  const heldAt = new Map(heldGlobal.map((r) => [r.bid, r.at.slice(0, 10)]));
+  const global: ([string, number][] | undefined)[] = new Array(mapIds.length);
+  for (const e of gEvents) {
+    const i = slot.get(e.bid);
+    if (i == null) continue;
+    const arr = (global[i] ??= []);
+    if (arr.length === 0 && e.old != null && e.old > 0) {
+      // rank recorded silently by the sweep before this map's first event:
+      // date the initial take at the best score, like the event-less holds
+      const d1 = e.at.slice(0, 10);
+      const d0 = heldAt.get(e.bid);
+      arr.push([d0 && d0 < d1 ? d0 : d1, e.old]);
+    }
+    arr.push([e.at.slice(0, 10), e.rank ?? 0]);
+  }
   for (const r of heldGlobal) {
     const i = slot.get(r.bid);
     if (i != null && !global[i]) global[i] = [[r.at.slice(0, 10), r.rank]];
   }
 
-  return { version: scoresVersion(), maps, country, bests, global, mapIds };
+  return {
+    version: scoresVersion(),
+    maps,
+    country,
+    bests,
+    global,
+    mapIds,
+    builtAt: Date.now(),
+  };
 }
 
 statsRouter.get("/snapshot", (req, res) => {
@@ -1112,7 +1166,14 @@ statsRouter.get("/snapshot", (req, res) => {
     snapCaches.delete(snapKey);
     snapCaches.set(snapKey, snapCache);
   }
-  if (!snapCache || snapCache.version !== scoresVersion()) {
+  // During a sync every saved batch bumps the version, and rebuilding the
+  // index takes seconds (synchronous sqlite: everything freezes). Serve the
+  // slightly stale index and rebuild at most every 15s until things settle.
+  if (
+    !snapCache ||
+    (snapCache.version !== scoresVersion() &&
+      Date.now() - snapCache.builtAt > 15_000)
+  ) {
     snapCache = buildSnapshotIndex(db, R, POOL, STATUSES);
     snapCaches.set(snapKey, snapCache);
   }

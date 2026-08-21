@@ -35,14 +35,19 @@ function queueModdedSr(
   const inFlight = `${beatmapId}|${ruleset}|${key}`;
   if (srInFlight.has(inFlight)) return;
   srInFlight.add(inFlight);
-  void localStarRating(beatmapId, mods, ruleset)
+  // one macrotask per calculation: the WASM computation is synchronous
+  // (5-50ms) and a burst of 100 queued maps back-to-back starved every
+  // pending request
+  void new Promise((r) => setImmediate(r))
+    .then(() => localStarRating(beatmapId, mods, ruleset))
     .then((sr) => {
-      if (sr != null)
-        getDb()
-          .prepare(
-            "INSERT OR REPLACE INTO modded_sr (beatmap_id, ruleset, mods, star_rating) VALUES (?, ?, ?, ?)"
-          )
-          .run(beatmapId, ruleset, key, sr);
+      // null (dead download, suspicious map) is stored too: without the
+      // negative cache the 60s refetch re-downloaded the same failures forever
+      getDb()
+        .prepare(
+          "INSERT OR REPLACE INTO modded_sr (beatmap_id, ruleset, mods, star_rating) VALUES (?, ?, ?, ?)"
+        )
+        .run(beatmapId, ruleset, key, sr);
     })
     .finally(() => srInFlight.delete(inFlight));
 }

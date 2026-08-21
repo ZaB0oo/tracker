@@ -52,7 +52,7 @@ import {
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { srMods } from "../logic/score.js";
+import { srMods, srModsKey } from "../logic/score.js";
 import { localStarRating } from "../osu/difficulty.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -801,8 +801,28 @@ async function pollRecentScoresForMode(mode: number): Promise<number> {
         // Rating for the mods as they were played, rate included, computed
         // from the .osu file: the API only knows the legacy mod combinations.
         const mods = srMods(e.modsJson);
-        if (mods.length > 0)
-          e.moddedSr = await localStarRating(e.beatmapId, mods, mode);
+        if (mods.length > 0) {
+          // shared with the metrics view: read the modded_sr cache first and
+          // store what gets computed (misses re-ran the whole computation on
+          // every improved best of the same map+mods)
+          const key = srModsKey(mods);
+          const hit = getDb()
+            .prepare(
+              "SELECT star_rating FROM modded_sr WHERE beatmap_id = ? AND ruleset = ? AND mods = ?"
+            )
+            .get(e.beatmapId, mode, key) as
+            | { star_rating: number | null }
+            | undefined;
+          if (hit) e.moddedSr = hit.star_rating;
+          else {
+            e.moddedSr = await localStarRating(e.beatmapId, mods, mode);
+            getDb()
+              .prepare(
+                "INSERT OR REPLACE INTO modded_sr (beatmap_id, ruleset, mods, star_rating) VALUES (?, ?, ?, ?)"
+              )
+              .run(e.beatmapId, mode, key, e.moddedSr);
+          }
+        }
       }
       try {
         e.globalRank = await getUserBeatmapPosition(

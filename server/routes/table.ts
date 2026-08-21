@@ -115,7 +115,7 @@ function buildFilters(
   if (q.oneMillion === "1" && ruleset === 3)
     where.push(`EXISTS (SELECT 1 FROM scores s2 WHERE s2.beatmap_id = b.id
       AND s2.ruleset = 3 AND s2.passed = 1
-      AND COALESCE(json_extract(s2.raw,'$.total_score_without_mods'), s2.total_score) = 1000000)`);
+      AND COALESCE(s2.nomod_score, s2.total_score) = 1000000)`);
   if (q.countryFirst === "1") where.push("u.country_first = 1");
   // Global top filter: my exact position on the map's global leaderboard
   // (populated by the global tops sweep; any bound excludes unranked maps).

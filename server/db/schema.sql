@@ -71,7 +71,11 @@ CREATE TABLE IF NOT EXISTS scores (
   statistics TEXT NOT NULL DEFAULT '{}',
   maximum_statistics TEXT,
   passed INTEGER NOT NULL DEFAULT 1,
-  raw TEXT                            -- raw API response (audit / future recomputes)
+  raw TEXT,                           -- raw API response (audit / future recomputes)
+  -- total_score_without_mods from the API (modded lazer scores only, NULL
+  -- otherwise). Materialized: the mania 1M checks and the multiplier learning
+  -- parsed the raw JSON of every score in a dozen full scans.
+  nomod_score INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_scores_beatmap_user ON scores(beatmap_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_scores_ended ON scores(ended_at);

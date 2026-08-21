@@ -37,10 +37,10 @@ export function buildMultiplierIndex(db: DatabaseSync): MultiplierIndex {
   const rows = db
     .prepare(
       `SELECT mods,
-              MIN(CAST(total_score AS REAL) / json_extract(raw,'$.total_score_without_mods')) lo,
-              MAX(CAST(total_score AS REAL) / json_extract(raw,'$.total_score_without_mods')) hi
+              MIN(CAST(total_score AS REAL) / nomod_score) lo,
+              MAX(CAST(total_score AS REAL) / nomod_score) hi
        FROM scores
-       WHERE json_extract(raw,'$.total_score_without_mods') > 0
+       WHERE nomod_score > 0
        GROUP BY mods`
     )
     .all() as { mods: string; lo: number; hi: number }[];
@@ -104,9 +104,9 @@ export function backfillModMultipliers(db: DatabaseSync): number {
   db.exec(
     `UPDATE scores
         SET mod_multiplier = ROUND(CAST(total_score AS REAL)
-              / json_extract(raw,'$.total_score_without_mods'), 4)
+              / nomod_score, 4)
       WHERE mod_multiplier IS NULL
-        AND json_extract(raw,'$.total_score_without_mods') > 0`
+        AND nomod_score > 0`
   );
   const idx = buildMultiplierIndex(db);
   const todo = db

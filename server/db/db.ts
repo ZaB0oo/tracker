@@ -329,6 +329,14 @@ function migrate(d: DatabaseSync): void {
   // so computing it per query was out of the question. Re-run whenever rows
   // are still missing one — a combination becomes known as soon as a single
   // lazer score uses it.
+  // total_score_without_mods materialized out of the raw JSON (see
+  // schema.sql). Must exist before the multiplier backfill below reads it.
+  if (!scCols.some((c) => c.name === "nomod_score")) {
+    d.exec("ALTER TABLE scores ADD COLUMN nomod_score INTEGER");
+    d.exec(
+      "UPDATE scores SET nomod_score = json_extract(raw,'$.total_score_without_mods')"
+    );
+  }
   if (!scCols.some((c) => c.name === "mod_multiplier"))
     d.exec("ALTER TABLE scores ADD COLUMN mod_multiplier REAL");
   const missingMult = (
@@ -465,7 +473,9 @@ function migrate(d: DatabaseSync): void {
       | { value: string }
       | undefined
   )?.value;
-  if (srDone !== "local") {
+  // "local-da": DA and the mania key mods joined SR_MODS (v1.19 audit), so
+  // keys computed before that miss them and the cache must rebuild once more.
+  if (srDone !== "local-da") {
     d.exec("DROP TABLE IF EXISTS modded_sr");
     d.exec(`CREATE TABLE modded_sr (
       beatmap_id INTEGER NOT NULL,
@@ -475,7 +485,7 @@ function migrate(d: DatabaseSync): void {
       PRIMARY KEY (beatmap_id, ruleset, mods)
     )`);
     d.prepare(
-      "INSERT INTO sync_state (key, value) VALUES (?, 'local') ON CONFLICT(key) DO UPDATE SET value = 'local'"
+      "INSERT INTO sync_state (key, value) VALUES (?, 'local-da') ON CONFLICT(key) DO UPDATE SET value = 'local-da'"
     ).run(SR_KEY);
   }
 

@@ -46,12 +46,12 @@ export function saveScores(
       id, legacy_score_id, beatmap_id, user_id, ruleset, ended_at, rank,
       accuracy, max_combo, total_score, classic_total_score, pp,
       is_perfect_combo, legacy_perfect, fc_state, mods, rate, mod_multiplier,
-      statistics, maximum_statistics, passed, raw
+      statistics, maximum_statistics, passed, raw, nomod_score
     ) VALUES (
       @id, @legacy_score_id, @beatmap_id, @user_id, @ruleset, @ended_at, @rank,
       @accuracy, @max_combo, @total_score, @classic_total_score, @pp,
       @is_perfect_combo, @legacy_perfect, @fc_state, @mods, @rate, @mod_multiplier,
-      @statistics, @maximum_statistics, @passed, @raw
+      @statistics, @maximum_statistics, @passed, @raw, @nomod_score
     )
     ON CONFLICT(id) DO UPDATE SET
       total_score = excluded.total_score,
@@ -59,7 +59,8 @@ export function saveScores(
       pp = excluded.pp,
       rank = excluded.rank,
       fc_state = excluded.fc_state,
-      raw = excluded.raw
+      raw = excluded.raw,
+      nomod_score = excluded.nomod_score
   `);
 
   const existsStmt = db.prepare("SELECT 1 FROM scores WHERE id = ?");
@@ -101,6 +102,9 @@ export function saveScores(
           : null,
         passed: s.passed ? 1 : 0,
         raw: JSON.stringify(s),
+        nomod_score:
+          (s as { total_score_without_mods?: number }).total_score_without_mods ??
+          null,
       });
     }
     refreshBest(beatmapId, opts?.markFetched ?? true, ruleset);

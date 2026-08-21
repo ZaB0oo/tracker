@@ -193,6 +193,19 @@ describe("srMods / srModsKey", () => {
     expect(k).toBe("WU@i1/f1.4");
   });
 
+  it("keeps DA and keys its overrides", () => {
+    const a = srModsKey(srMods(j([{ acronym: "DA", settings: { circle_size: 4 } }])));
+    const b = srModsKey(srMods(j([{ acronym: "DA", settings: { circle_size: 5 } }])));
+    const plain = srModsKey(srMods(j([{ acronym: "DA" }])));
+    expect(a).not.toBe(b);
+    expect(a).not.toBe(plain);
+  });
+
+  it("keeps the mania key-count mods", () => {
+    const mods = srMods(j([{ acronym: "4K" }, { acronym: "CL" }]));
+    expect(mods.map((m) => m.acronym)).toEqual(["4K"]);
+  });
+
   it("survives a corrupt mods column", () => {
     expect(srMods("not json")).toEqual([]);
     expect(srMods(j({ acronym: "DT" }))).toEqual([]);

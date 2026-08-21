@@ -73,10 +73,14 @@ export function computeRate(
 /**
  * Mods that move the star rating (osu! DifficultyAdjustmentMods; HD counts
  * since the 2026 reading rework). The three ramps are here because what they
- * change IS the rate, which is what the difficulty calculator reads.
+ * change IS the rate, which is what the difficulty calculator reads. DA
+ * overrides CS/AR/OD/HP, and the mania key mods change the convert itself —
+ * rosu-pp applies both when they are passed along.
  */
 export const SR_MODS = new Set([
   "DT", "NC", "HT", "DC", "HR", "EZ", "FL", "HD", "TD", "WU", "WD", "AS",
+  "DA",
+  "1K", "2K", "3K", "4K", "5K", "6K", "7K", "8K", "9K", "10K", "DS",
 ]);
 
 export interface ModRef {
@@ -104,18 +108,21 @@ export function srMods(modsJson: string): ModRef[] {
     .sort((a, b) => a.acronym.localeCompare(b.acronym));
 }
 
-/** Settings that move the rate, and only those: the rest does not change SR. */
-const RATE_SETTINGS = ["speed_change", "initial_rate", "final_rate"] as const;
+/** Settings that change the star rating: the rates, and DA's overrides. */
+const SR_SETTINGS = [
+  "speed_change", "initial_rate", "final_rate",
+  "circle_size", "approach_rate", "drain_rate", "overall_difficulty",
+] as const;
 
 /**
  * Cache key of a combination. The rate belongs IN the key: without it a DT at
  * 1.35x and a DT at 1.5x share a row, and the first one fetched answers for
- * both.
+ * both. Same for DA's CS/AR/OD/HP overrides.
  */
 export function srModsKey(mods: ModRef[]): string {
   return mods
     .map((m) => {
-      const parts = RATE_SETTINGS.map((k) => {
+      const parts = SR_SETTINGS.map((k) => {
         const v = m.settings?.[k];
         return typeof v === "number" && Number.isFinite(v)
           ? `${k[0]}${Math.round(v * 100) / 100}`

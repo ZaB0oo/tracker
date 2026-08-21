@@ -28,7 +28,7 @@ function classicFromStd(stdExpr: string): string {
 // (squared in the formula). Exact when a best score exists (sum of the basic
 // keys of maximum_statistics), else max_combo: exact for taiko (combo = hits),
 // slight overestimate for catch (combo = fruits + large droplets, ~+10%).
-const N_BASIC = `NULLIF(
+export const N_BASIC = `NULLIF(
   COALESCE(json_extract(s.maximum_statistics,'$.perfect'),0)
   + COALESCE(json_extract(s.maximum_statistics,'$.great'),0)
   + COALESCE(json_extract(s.maximum_statistics,'$.good'),0)
