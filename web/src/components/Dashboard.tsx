@@ -248,8 +248,13 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
   }
 
   const W = 1000, H = 300, ML = 62, MR = 16, MT = 12, MB = 28;
+  // A point is not a measure AT sr, it is the value of the whole band
+  // [sr, sr+BAND). The chart is drawn as steps for that reason: a sloped
+  // segment between two points would put the break at the left band's lower
+  // bound instead of the boundary where it actually happens.
+  const BAND = 0.1;
   const xMin = Math.floor(Math.min(...buckets.map((b) => b.sr)));
-  const xMax = Math.ceil(Math.max(...buckets.map((b) => b.sr)) * 10) / 10;
+  const xMax = Math.max(...buckets.map((b) => b.sr)) + BAND;
   const x = (sr: number) =>
     ML + ((sr - xMin) / (xMax - xMin || 1)) * (W - ML - MR);
 
@@ -270,10 +275,13 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
   };
 
   const line = buckets
-    .map((b) => `${x(b.sr).toFixed(1)},${y(b.predicted).toFixed(1)}`)
+    .flatMap((b) => {
+      const yy = y(b.predicted).toFixed(1);
+      return [`${x(b.sr).toFixed(1)},${yy}`, `${x(b.sr + BAND).toFixed(1)},${yy}`];
+    })
     .join(" ");
   const area = `${x(buckets[0].sr).toFixed(1)},${plotBot} ${line} ${x(
-    buckets[buckets.length - 1].sr
+    buckets[buckets.length - 1].sr + BAND
   ).toFixed(1)},${plotBot}`;
   const yTicks = [0, 250_000, 500_000, 750_000, SPLIT];
   if (hasLog) yTicks.push(Math.round(yDataMax));
@@ -292,6 +300,14 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
         Predicted reachable score by star rating (estimate)
         {pastDay && <span className="dim"> — as of {pastDay}</span>}
       </h3>
+      <div className="curve-legend">
+        <span>
+          <i className="cl-fit" /> prediction
+        </span>
+        <span>
+          <i className="cl-raw" /> band median (below = score to grind)
+        </span>
+      </div>
       <div className="curve-chart">
         <svg viewBox={`0 0 ${W} ${H}`} onMouseLeave={() => setHover(null)}>
           <defs>
@@ -338,18 +354,21 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
             </g>
           ))}
           <polygon points={area} fill="url(#curve-fade)" />
+          {/* one flat tick per band at its own median — no connectors: with a
+              noisy history the verticals dominated the chart */}
+          {buckets.map((b) =>
+            b.raw != null && b.raw !== b.predicted ? (
+              <line
+                key={`r${b.sr}`}
+                x1={x(b.sr) + 1} x2={x(b.sr + BAND) - 1}
+                y1={y(b.raw)} y2={y(b.raw)}
+                stroke="var(--fg-dim)" strokeWidth="1.5" strokeOpacity="0.8"
+              />
+            ) : null
+          )}
           <polyline points={line} fill="none" stroke="var(--accent)" strokeWidth="2" />
-          {buckets.map((b) => (
-            <circle
-              key={`p${b.sr}`}
-              cx={x(b.sr)} cy={y(b.predicted)}
-              r={hover?.sr === b.sr ? 4 : 2}
-              fill={b.inherited ? "var(--bg2)" : "var(--accent)"}
-              stroke="var(--accent)" strokeWidth="1.2"
-            />
-          ))}
-          {/* hover by vertical band, aligned with the REAL slice [sr, sr+0.1)
-              — the point sits on the slice's lower bound */}
+          {/* hover by vertical band, aligned with the REAL slice
+              [sr, sr+BAND) — the same span its step covers */}
           {hover && (
             <rect
               x={x(hover.sr)} y={MT}
@@ -393,6 +412,17 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
             Prediction: {fmtNum(hover.predicted)}
             {hover.inherited ? " (inherited)" : ""}
             <br />
+            {hover.raw == null ? (
+              <>
+                Under 5 bests: value carried over
+                <br />
+              </>
+            ) : hover.raw !== hover.predicted ? (
+              <>
+                Band median: {fmtNum(hover.raw)}
+                <br />
+              </>
+            ) : null}
             {fmtNum(hover.played)}/{fmtNum(hover.total)}{" "}
             maps played
             <br />
@@ -418,12 +448,9 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
         )}
       </div>
       <small>
-        one point per 0.1★ band · prediction = median of your standardised
-        bests in the band (hollow point = « inherited »: fewer than 5 bests,
-        value carried over from the previous band) · missing = sum of the
-        realistic missing of the band's maps, unplayed included · cumulative
-        missing = total of all bands up to this one · linear scale up to 1M,
-        logarithmic above
+        one step per 0.1★ band · prediction = your best band median at this ★
+        or harder · missing counts unplayed maps too · linear up to 1M, log
+        above
       </small>
     </div>
   );

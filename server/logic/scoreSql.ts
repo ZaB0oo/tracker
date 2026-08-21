@@ -188,12 +188,12 @@ export function ensureMissingFresh(): void {
  * Used for the "realistic gain" = what I can still grab on a map given MY
  * level, not the theoretical max.
  */
-export const CURVE_STEPS = 100; // 0.1★ slices, capped at 10★+
-export interface CurveBucket {
-  q: number; // slice (star_rating * 10, capped)
-  value: number; // retained prediction (after carry-over + monotonicity)
-  samples: number; // number of bests in the slice
-}
+import {
+  CURVE_STEPS,
+  fitSkillCurve,
+  type CurveBucket,
+} from "./skillCurve.js";
+export { CURVE_STEPS, fitSkillCurve, type CurveBucket };
 const curveCaches = new Map<
   string,
   { until: number; caseSql: string; buckets: CurveBucket[] }
@@ -256,54 +256,4 @@ function skillCurveCase(ruleset = 0): string {
   return computeSkillCurve(ruleset).caseSql;
 }
 
-/**
- * Turns raw bests per 0.1★ slice into the retained prediction of every slice.
- * Shared by the live curve and the time machine (which re-fits it on the
- * bests of a past date) — two implementations would drift apart.
- *
- * Raw medians of the sufficiently populated slices (>= 5 bests), then
- * DECREASING isotonic regression by PAVA, weighted by the number of bests:
- * slices conflicting with the decrease are averaged together instead of being
- * crushed by the previous one — a small easy slice with old scores is pulled
- * up by its thousands of neighbors, and artificial plateaus disappear. No 1M
- * cap (modded bests). Slices without enough bests inherit from the last
- * fitted one (and from the first for those below the data).
- */
-export function fitSkillCurve(byQ: Map<number, number[]>): CurveBucket[] {
-  const sampled: { q: number; value: number; weight: number }[] = [];
-  for (let q = 0; q <= CURVE_STEPS; q++) {
-    const arr = byQ.get(q);
-    if (arr && arr.length >= 5) {
-      arr.sort((a, b) => a - b);
-      sampled.push({ q, value: arr[Math.floor(arr.length / 2)], weight: arr.length });
-    }
-  }
-  // PAVA (pool adjacent violators) for a non-increasing sequence
-  const blocks: { value: number; weight: number; count: number }[] = [];
-  for (const p of sampled) {
-    let cur = { value: p.value, weight: p.weight, count: 1 };
-    while (blocks.length && blocks[blocks.length - 1].value < cur.value) {
-      const prevB = blocks.pop()!;
-      cur = {
-        value:
-          (prevB.value * prevB.weight + cur.value * cur.weight) /
-          (prevB.weight + cur.weight),
-        weight: prevB.weight + cur.weight,
-        count: prevB.count + cur.count,
-      };
-    }
-    blocks.push(cur);
-  }
-  const fitted: number[] = [];
-  for (const b of blocks)
-    for (let k = 0; k < b.count; k++) fitted.push(b.value);
-  const fittedByQ = new Map(sampled.map((p, i) => [p.q, fitted[i]]));
 
-  let prev = fitted[0] ?? FULL_BASE;
-  const buckets: CurveBucket[] = [];
-  for (let q = 0; q <= CURVE_STEPS; q++) {
-    prev = fittedByQ.get(q) ?? prev;
-    buckets.push({ q, value: Math.round(prev), samples: byQ.get(q)?.length ?? 0 });
-  }
-  return buckets;
-}

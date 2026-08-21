@@ -366,6 +366,7 @@ statsRouter.get("/skill-curve", (req, res) => {
         return {
           sr: b.q / 10,
           predicted: b.value,
+          raw: b.raw,
           samples: b.samples,
           inherited: b.samples < 5, // not enough bests => carried-over value
           total: a.total,
@@ -1106,6 +1107,7 @@ statsRouter.get("/snapshot", (req, res) => {
       .map((b) => ({
         sr: b.q / 10,
         predicted: b.value,
+        raw: b.raw,
         samples: b.samples,
         inherited: b.samples < 5,
         total: curveTotal[b.q],

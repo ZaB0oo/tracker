@@ -182,6 +182,8 @@ export interface Bucket extends DistCounts {
 export interface SkillCurveBucket {
   sr: number;
   predicted: number;
+  /** median of the band's own bests, before the fit. null under 5 bests. */
+  raw: number | null;
   samples: number;
   inherited: boolean;
   total: number;
