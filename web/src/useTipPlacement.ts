@@ -2,21 +2,14 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 
 /**
- * Places a hover tooltip by MEASURING it: rendered fixed, put above the
- * anchor when its actual height fits the viewport, else below, clamped
- * horizontally — it can never overflow the window. Shared by the completion
- * bars, the rate histogram and the pack dots.
+ * Places a hover tooltip by MEASURING it: rendered fixed, above the anchor
+ * when its height fits the viewport, else below, clamped horizontally.
+ * Shared by the completion bars, the rate histogram and the pack dots.
  *
- * `anchor` says WHICH element is hovered, not merely whether one is: the pack
- * grid moves a single tooltip across thousands of dots, and a boolean would
- * stay truthy from dot to dot, leaving the tooltip measured against the one
- * it just left.
- *
- * The anchor is set through a callback ref rather than a RefObject: it is a
- * <div> for the bars, a <button> for the pack dots and an SVG <rect> for the
- * heatmap days, and one shared RefObject cannot be typed for all three. It is
- * an `Element` and not an HTML one for that same reason — getBoundingClientRect
- * is defined there, which is all this needs.
+ * `anchor` says WHICH element is hovered (the pack grid moves one tooltip
+ * across thousands of dots, a boolean would go stale from dot to dot); it is
+ * a callback ref typed as `Element` because the anchors are a div, a button
+ * and an SVG rect alike.
  */
 export function useTipPlacement(anchor: unknown) {
   const wrapRef = useRef<Element | null>(null);

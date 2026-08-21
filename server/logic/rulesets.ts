@@ -154,14 +154,6 @@ export function keysWhere(ruleset: number, keys: string | undefined): string {
 export type PoolMode = "all" | "specific" | "converts";
 
 /**
- * SQL map-pool condition (alias b) for a ruleset view:
- * - "all" (default): the mode's own maps AND the converts (std maps playable in
- *   it) — what official profiles count;
- * - "specific": the mode's own maps only;
- * - "converts": the converts only.
- * osu!std has no converts, so its pool is always its own maps.
- */
-/**
  * Status list for the dashboard scope (All / Ranked / Loved) — the single
  * definition of what each scope counts. Use as `b.status IN ${statusIn(scope)}`.
  */
@@ -169,6 +161,11 @@ export function statusIn(scope: string | undefined): string {
   return scope === "ranked" ? "(1, 2)" : scope === "loved" ? "(4)" : "(1, 2, 4)";
 }
 
+/**
+ * SQL map-pool condition (alias b): "all" = the mode's own maps AND the
+ * converts (what official profiles count), "specific" = own maps only,
+ * "converts" = converts only. osu!std has no converts.
+ */
 export function poolWhere(ruleset: number, pool: string | undefined): string {
   if (ruleset === 0) return "b.ruleset = 0";
   if (pool === "specific") return `b.ruleset = ${ruleset}`;
@@ -256,15 +253,11 @@ export function poolGrowth(
 }
 
 /**
- * Classic (stable-feel) score from a standardised score.
- * Source: osu.Game/Scoring/Legacy/ScoreInfoExtensions.convertStandardisedToClassic —
- * one formula per ruleset; `objectCount` = the number of BASIC judgements of
- * the map (non-tick, non-bonus max statistics).
- * NB: mania's classic score IS the standardised score (identity).
+ * Classic (stable-feel) score from a standardised score. One formula per
+ * ruleset (osu.Game ScoreInfoExtensions.convertStandardisedToClassic);
+ * `objectCount` = the map's BASIC judgement count: std circles+sliders+
+ * spinners, taiko hits (= max combo), catch fruits. mania: identity.
  */
-// objectCount = the map's BASIC judgement count (lazer's maxBasicJudgements):
-// std = circles+sliders+spinners; taiko = hits (= max_combo); catch = fruits
-// (≈ max_combo, which adds large droplets); mania: unused.
 export function classicFromStandardised(
   ruleset: number,
   standardised: number,

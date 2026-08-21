@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   fetchPackDetail,
@@ -292,7 +292,7 @@ function PackModal({
  * category. Definitions are an opt-in one-off import (~1h, resumable).
  * `at` (time machine day): the dots replay the state as of that date.
  */
-export function PacksPanel({
+export const PacksPanel = memo(function PacksPanel({
   ruleset = 0,
   at = null,
   pool = "all",
@@ -511,4 +511,4 @@ export function PacksPanel({
       )}
     </div>
   );
-}
+});

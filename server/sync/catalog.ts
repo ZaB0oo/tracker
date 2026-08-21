@@ -179,13 +179,10 @@ function modeIntOf(bm: ApiBeatmap & { mode?: string }): number {
 
 /**
  * Upsert a full set; returns the ids of the newly stored diffs.
- * Stores the ranked/approved/loved diffs of EVERY ruleset, not just the active
- * ones: nothing ever revisits a set that already has a row, so a diff dropped
- * because its mode was inactive at lookup time stayed missing forever (that is
- * how ~100 catch/mania diffs went absent while their sets looked imported).
- * A std diff also IS a convert for the other modes, so dropping it while std is
- * deactivated would hollow out their pools. Rows of non-started modes cost a
- * few bytes and no API call — every reader filters by ruleset anyway.
+ * Stores the diffs of EVERY ruleset, not just the active ones: nothing ever
+ * revisits a set that already has a row, so a diff dropped because its mode
+ * was inactive at lookup time would stay missing forever. Rows of non-started
+ * modes cost a few bytes and no API call; every reader filters by ruleset.
  */
 function upsertFullSet(set: ApiBeatmapset): number[] {
   const db = getDb();

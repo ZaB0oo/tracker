@@ -531,11 +531,10 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
 });
 
 /**
- * Completion gauge. The yellow portion (country) is overlaid on the played
- * portion: it shows the share of country #1s out of the gauge total.
+ * Selectable completion gauges (one bar layer each). The legend groups them:
+ * grades, global-top tiers (cumulative shades), country #1 — the yellow
+ * country portion is overlaid on the played portion.
  */
-/** Selectable completion gauges (one bar layer each). The legend groups them:
- * grades, global-top tiers (cumulative shades), country #1. */
 export const GAUGES = [
   { id: "fc", vis: "fc", label: "FC / PFC", cls: "bar-fill-blue", color: "#5aa8f0", group: 0 },
   { id: "nonfc", vis: "nonfc", label: "non-FC", cls: "bar-fill-nonfc", color: "#8b90a8", group: 0 },
@@ -809,6 +808,14 @@ export function Dashboard({
     tmIdx != null && timeline && tmIdx < timeline.points.length - 1
       ? timeline.points[tmIdx].day
       : null;
+  // debounced day for the packs grid: its hundreds of dots re-rendered on
+  // every slider tick for a query that is debounced anyway
+  const [tmDayDeb, setTmDayDeb] = useState<string | null>(null);
+  useEffect(() => {
+    if (tmDayDeb === tmDay) return;
+    const t = setTimeout(() => setTmDayDeb(tmDay), 200);
+    return () => clearTimeout(t);
+  }, [tmDay, tmDayDeb]);
   // Real-time snapshot fetching, "latest wins": at most ONE request in flight
   // (the endpoint answers in ~10-30 ms from an in-memory index); while it
   // runs, only the latest slider position is remembered and fired next. The
@@ -846,9 +853,8 @@ export function Dashboard({
     };
     if (inFlight.current) pendingDay.current = tmDay;
     else run(tmDay);
-    // ruleset/pool/keys/scope matter as much as the day: without them a tab
-    // switch with the time machine engaged kept showing the previous mode's
-    // snapshot (Dashboard is not remounted on ruleset change)
+    // ruleset/pool/keys/scope matter as much as the day: a tab switch must
+    // refetch (Dashboard is not remounted on ruleset change)
   }, [tmDay, curveDim, ruleset, pool, keys.join(","), scope]);
 
   // Rate histogram rows: the snapshot replays the rate of the best held at
@@ -1383,7 +1389,7 @@ export function Dashboard({
 
       <PacksPanel
         ruleset={ruleset}
-        at={tmDay}
+        at={tmDayDeb}
         pool={pool}
         keys={keys}
         scope={scope}

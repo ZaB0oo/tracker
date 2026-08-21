@@ -3,23 +3,14 @@ import type { DatabaseSync } from "node:sqlite";
 /**
  * Standardised mod multiplier of a score.
  *
- * The API gives it away for free as `total_score_without_mods` — but only on
- * lazer scores that actually carry mods. It is missing on no-mod scores
- * (nothing to divide by) and on scores converted from stable, which is most of
- * a long-time player's history: 43k of 91k bests here.
- *
- * Rather than hardcode ppy's multiplier table (which drifts, and which we would
- * have to keep in sync), the values are LEARNED from the scores that do carry
- * the field. Two levels:
- *  1. the exact mod combination — settings included, so a DT at 1.35x is not
- *     confused with a DT at 1.5x;
- *  2. failing that, the product of the individual multipliers, which the data
- *     confirms exactly (42 combinations checked, 0 mismatch).
- *
- * A combination whose observed multiplier is NOT constant is dropped from the
- * index: Difficulty Adjust is scored against how far you moved the map's own
- * values, so its multiplier depends on the beatmap, not just on the mods. Same
- * reason the product rule is only applied to mods without settings.
+ * The API exposes it as `total_score_without_mods`, but only on lazer scores
+ * that carry mods — most of a long-time player's history has nothing to
+ * divide by. Rather than hardcode ppy's multiplier table (it drifts), values
+ * are LEARNED from the scores that do carry the field: exact combination
+ * first (settings included, a DT 1.35x is not a DT 1.5x), else the product of
+ * the individual multipliers. Combinations whose observed multiplier is not
+ * constant (e.g. DA, scored against how far the map's values moved) are
+ * dropped from the index.
  */
 
 export interface MultiplierIndex {

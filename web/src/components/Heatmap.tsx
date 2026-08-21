@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { mapUrl } from "../rulesets";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -85,7 +85,7 @@ function dayStats(
  * GitHub-style clears-per-day heatmap + streak stats. When the time machine
  * selects a past day, later days are dimmed.
  */
-export function HeatmapPanel({
+export const HeatmapPanel = memo(function HeatmapPanel({
   cutoffDay = null,
   ruleset = 0,
   pool = "all",
@@ -127,6 +127,20 @@ export function HeatmapPanel({
   // is a fetch per day, and sweeping the year would fire one per square.
   const [hoverDay, setHoverDay] = useState<string | null>(null);
   const { setWrap, tipRef, tipStyle, clearTip } = useTipPlacement(hoverDay);
+  // cell geometry computed once per year: 365 Date + toISOString on every
+  // render was pure waste on each slider tick
+  const cells = useMemo(() => {
+    const startDow = new Date(Date.UTC(year, 0, 1)).getUTCDay(); // 0 = Sunday
+    const days = (Date.UTC(year + 1, 0, 1) - Date.UTC(year, 0, 1)) / 86_400_000;
+    return Array.from({ length: days }, (_, i) => {
+      const idx = startDow + i;
+      return {
+        iso: new Date(Date.UTC(year, 0, 1 + i)).toISOString().slice(0, 10),
+        x: 30 + Math.floor(idx / 7) * (CELL + GAP),
+        y: 16 + (idx % 7) * (CELL + GAP),
+      };
+    });
+  }, [year]);
   if (!data) return null;
 
   const GRADE_ORDER: Record<string, number> = {
@@ -233,19 +247,14 @@ export function HeatmapPanel({
             {d}
           </text>
         ))}
-        {Array.from({ length: daysInYear }, (_, i) => {
-          const date = new Date(Date.UTC(year, 0, 1 + i));
-          const iso = date.toISOString().slice(0, 10);
+        {cells.map(({ iso, x, y }) => {
           const c = byDay.get(iso) ?? 0;
-          const idx = startDow + i;
-          const wx = Math.floor(idx / 7);
-          const dy = idx % 7;
           const dimmed = cutoffDay != null && iso > cutoffDay;
           return (
             <rect
               key={iso}
-              x={30 + wx * (CELL + GAP)}
-              y={16 + dy * (CELL + GAP)}
+              x={x}
+              y={y}
               width={CELL}
               height={CELL}
               rx={2.5}
@@ -502,5 +511,5 @@ export function HeatmapPanel({
       )}
     </div>
   );
-}
+});
 

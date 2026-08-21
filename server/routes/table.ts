@@ -310,20 +310,11 @@ function buildFilters(
   // exactly like the Missing column. Unplayed maps carry their full prediction
   // here, so they DO match a lower bound — that is the point of the column.
   num("missingMin", missingSql, ">="); num("missingMax", missingSql, "<=");
-  // Hit counts of the best score, per ruleset (300s/100s/misses, droplets,
-  // missed slider ends…): {"miss":{"max":0},"ok":{"min":1,"max":5}}. Same
-  // expressions as the metric conditions (hitCountExpr), so "1x100" means the
-  // same thing in both places.
-  //
-  // These are properties OF A SCORE, and two different things can be absent:
-  //  - the statistic key, inside a score that exists (a play with no 50 has no
-  //    "meh" key at all) — that is what the COALESCE(…, 0) in hitCountExpr is
-  //    for, and it is right: that score really did zero 50s;
-  //  - the score itself, on a map never played — where the same COALESCE would
-  //    otherwise invent a flawless play out of nothing.
-  // Hence the explicit guard below. It is the same semantics as the accuracy
-  // filter, which excludes unplayed maps for free (NULL comparisons are never
-  // true); only the COALESCE hides it here.
+  // Hit counts of the best score ({"miss":{"max":0},"ok":{"min":1}}), same
+  // expressions as the metric conditions (hitCountExpr) so "1x100" means the
+  // same thing in both places. hitCountExpr's COALESCE rightly turns an
+  // absent key into 0 on a PLAYED map, but would invent a flawless play on an
+  // unplayed one — hence the explicit played guard below.
   if (q.hits) {
     let h: Record<string, { min?: unknown; max?: unknown }> | null = null;
     try {

@@ -1,6 +1,7 @@
 import express from "express";
 import path from "node:path";
 import fs from "node:fs";
+import { gzipSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 import { config } from "./config.js";
 import { getDb } from "./db/db.js";
@@ -24,6 +25,22 @@ process.on("uncaughtException", (e) => {
 
 const app = express();
 app.use(express.json());
+// gzip for the JSON payloads (the timeline alone is ~1MB): plain node:zlib
+// instead of a middleware dependency, applied only above a size floor
+app.use("/api", (req, res, next) => {
+  if (!/\bgzip\b/.test(String(req.headers["accept-encoding"] ?? ""))) return next();
+  const json = res.json.bind(res);
+  res.json = (body: unknown) => {
+    const buf = Buffer.from(JSON.stringify(body));
+    if (buf.length < 8192) return json(body);
+    res.setHeader("Content-Encoding", "gzip");
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.setHeader("Vary", "Accept-Encoding");
+    res.send(gzipSync(buf, { level: 6 }));
+    return res;
+  };
+  next();
+});
 app.use("/api", router);
 
 // In prod (npm run build && npm start) we serve the built frontend.

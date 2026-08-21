@@ -114,14 +114,10 @@ function witherMissingSql(): string {
 
 let missingStamp = "";
 
-// In-memory version of the scores table. The old implementation ran
-// `SELECT COUNT(*), MAX(id), TOTAL(pp) FROM scores` — a full scan of the
-// biggest table — on EVERY call, and nearly every read endpoint calls it
-// (several times per page load, per metric, per slider tick). The write path
-// is a single process, so a counter bumped by every writer (saveScores,
-// score deletes, fc repairs) is exact; the DB triplet is only computed once
-// to seed the value after a restart (it still catches offline edits AND the
-// silent pp recalcs TOTAL(pp) was there for).
+// In-memory version of the scores table: a counter bumped by every writer
+// (single-process, so exact), seeded from a DB scan once per restart — that
+// seed still catches offline edits. Nearly every read endpoint calls this,
+// several times per page load and per slider tick.
 let scoresStamp: string | null = null;
 let scoresBump = 0;
 

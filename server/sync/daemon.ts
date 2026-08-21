@@ -417,9 +417,8 @@ export async function enrichCatalog(): Promise<number> {
 
 /**
  * Backfills one diff for EVERY started ruleset that can play it (its native
- * mode, plus the converts of a std map). The delta/import/verify paths used
- * to call backfillMap without a ruleset: new taiko/catch/mania diffs were
- * fetched as osu! scores, and new std diffs never fed the convert modes.
+ * mode, plus the converts of a std map) — a single-mode fetch would miss the
+ * other modes' scores on it.
  */
 async function backfillMapAllModes(
   beatmapId: number,
@@ -559,10 +558,9 @@ let pollRunning = false;
 /** null = a pass was already running (the manual button says so instead of
  * reporting a misleading "0 new scores"). */
 export async function pollRecentScores(): Promise<number | null> {
-  // In-flight guard: a pass can outlive the poll interval (import of a
-  // brand-new set = minutes of rate-limited backfill). Without it, the next
-  // tick re-read the same recent window before the first pass wrote anything
-  // and everything doubled: Discord notifications, set imports, checks.
+  // In-flight guard: a pass can outlive the poll interval (a brand-new set
+  // means minutes of rate-limited backfill), and overlapping passes double
+  // notifications, imports and checks.
   if (pollRunning) return null;
   pollRunning = true;
   try {
@@ -976,18 +974,14 @@ export async function ensureCatalogComplete(
         )
         .get() as { c: number }
     ).c;
-  // Nothing enumerated for ANY catalog mode: leave that to the initial sync…
-  // unless the caller named the modes it wants. A per-mode "Start initial sync"
-  // IS the enumeration entry point on a fresh install where std was never
-  // started — bailing out here made that button run the repair on an empty
-  // database and finish instantly without importing anything.
+  // Nothing enumerated for ANY catalog mode: leave that to the initial sync —
+  // unless the caller named the modes it wants (a per-mode "Start initial
+  // sync" IS the enumeration entry point on a fresh install).
   if (!modes?.length && rowsOf(catalog) === 0) return 0;
-  // Another enumeration is running. A background call steps aside, but an
-  // explicit per-mode start WAITS for its turn: returning here silently dropped
-  // the second mode when two were started in a row (its catalog then waited for
-  // the next 6 h tick). Sequential on purpose — the rate limit is global, so
-  // parallel enumerations would only interleave. Everything below is decided
-  // AFTER the wait: the run we waited for has just changed the catalog.
+  // Another enumeration is running: a background call steps aside, an
+  // explicit per-mode start WAITS for its turn (the rate limit is global, so
+  // parallel runs would only interleave). Everything below is decided AFTER
+  // the wait — the run we waited for has just changed the catalog.
   if (catalogRunning || status.phase === "catalog") {
     if (!modes?.length) return 0;
     // Shown in the busy list, NOT in status.message: the running import writes
@@ -1369,15 +1363,10 @@ export async function runCountrySweep(force = false): Promise<void> {
   try {
     const db = getDb();
     // One shared queue across the active rulesets (specific maps + converts).
-    // Priority, in order:
-    //  1. maps NEVER checked — the only ones that can still teach us anything;
-    //  2. then held #1s, oldest check first (snipe detection);
-    //  3. then the rest, oldest check first.
-    // Rule 1 matters during a full re-sweep: the 48h rotation keeps putting
-    // the held #1s back in the queue, and with ~20k of them at one request
-    // every 5s they used to jump ahead of maps that had never been looked at,
-    // which could starve them for days. country_seen_at survives the re-queue,
-    // country_checked_at does not.
+    // Priority: 1. maps NEVER checked (the only ones that can still teach us
+    // anything — without this rule the 48h re-check rotation starves them);
+    // 2. held #1s, oldest first (snipe detection); 3. the rest, oldest first.
+    // country_seen_at survives the re-queue, country_checked_at does not.
     const nextBatch = db.prepare(
       `SELECT u.beatmap_id AS id, u.ruleset AS r FROM beatmap_user u
        JOIN beatmaps b ON b.id = u.beatmap_id
@@ -1708,11 +1697,9 @@ export async function importMissingKnownSets(): Promise<number> {
       1: " (old format: no diff counts, regenerate it to catch partial sets)",
       2: "",
     };
-    // No "looked up recently" filter: an earlier `checked_at` (the set was
-    // fetched once, while another mode was inactive) used to hide it for a
-    // month, which is exactly how 11 catch diffs stayed missing while the list
-    // reported "nothing missing". Re-looking up a handful of stubborn sets on
-    // each repair costs a handful of requests — cheaper than the confusion.
+    // No "looked up recently" filter: a stale `checked_at` can hide a set
+    // whose diffs of a newly started mode are still missing. Re-looking up a
+    // handful of stubborn sets per repair is cheaper than the confusion.
     const missing = entries
       .filter(([id, value]) => {
         const have = localCounts.get(id) ?? [0, 0, 0, 0];
@@ -1823,10 +1810,8 @@ export async function verifyYearAndBackfill(year: number) {
 }
 
 /** Manual repair of mega-collabs (>100 diffs) + backfill of the new ones. */
-// Shown in the sync-bar busy list while a manual maintenance action runs, so
-// the bar never reads "idle" during a long verification.
-// A Set, not one slot: two manual actions can overlap (a dump verify while a
-// repair finishes) and the first one to end used to clear the other's label.
+// Busy labels for the sync bar during manual maintenance. A Set, not one
+// slot: two overlapping actions must not clear each other's label.
 const maintenanceTasks = new Set<string>();
 let packsDeltaRunning = false;
 // Current pass ("score import (catch converts)", …) for the busy list.
@@ -1894,13 +1879,10 @@ export async function runDumpVerify(path: string, modes?: number[]): Promise<str
  */
 export async function runCatalogRepair(): Promise<string> {
   const prog = (m: string) => (status.message = `repair: ${m}`);
-  // A repair only makes sense on an enumerated catalog: its whole job is the
-  // holes the search cannot see. Running it alongside an enumeration made the
-  // seed catch-up look up, one request each, the very sets the search was about
-  // to import 50 at a time. Waited for BEFORE claiming the busy label and the
-  // pool snapshot: an hour of "catalog repair" in the bar while it does nothing
-  // reads as stuck, and the snapshot would have counted the enumeration's maps
-  // as the repair's own.
+  // A repair only makes sense on an enumerated catalog (its whole job is the
+  // holes the search cannot see), so wait out any running enumeration —
+  // BEFORE claiming the busy label and the pool snapshot, which would
+  // otherwise count the enumeration's maps as the repair's own.
   while (catalogRunning || status.phase === "catalog") {
     status.message = "repair: waiting for the catalog enumeration to finish…";
     await new Promise((r) => setTimeout(r, 5000));
@@ -1910,11 +1892,9 @@ export async function runCatalogRepair(): Promise<string> {
   try {
     // 1. known-sets seed catch-up (sets the search enumeration cannot see)
     await importMissingKnownSets();
-    // 2. re-lookup of the known DMCA sets — only useful with an OLD seed. A v2
-    // list carries the per-mode diff counts of EVERY set, DMCA or not, so the
-    // catch-up above already covers this population (and more: the hybrid sets
-    // that are not flagged DMCA at all). Skipping saves ~1 request per DMCA set
-    // on every repair, for a pass that could only re-confirm what it read.
+    // 2. re-lookup of the known DMCA sets — only useful with an OLD seed: a
+    // v2 seed carries per-mode diff counts for EVERY set, so the catch-up
+    // above already covers this population.
     if (readSeed()?.version === 2)
       logActivity(
         "repair",

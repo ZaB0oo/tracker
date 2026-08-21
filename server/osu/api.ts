@@ -471,10 +471,6 @@ export async function getRecentScores(
 }
 
 /**
- * Star rating with specific mods (POST /beatmaps/{id}/attributes).
- * null on failure — callers fall back to the nomod SR.
- */
-/**
  * Nomod attributes of a CONVERT (std map played in taiko/catch/mania):
  * per-mode star rating and max combo, cached forever in convert_attrs by the
  * caller. null on failure.
