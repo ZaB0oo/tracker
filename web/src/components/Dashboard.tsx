@@ -401,13 +401,17 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
     return plotBot - plotH * linFrac - t * plotH * (1 - linFrac);
   };
 
-  const line = buckets
-    .flatMap((b) => {
-      const yy = y(b.predicted).toFixed(1);
-      return [`${x(b.q).toFixed(1)},${yy}`, `${x(b.q + 1).toFixed(1)},${yy}`];
-    })
-    .join(" ");
-  const area = `${x(xMin).toFixed(1)},${plotBot} ${line} ${x(xMax).toFixed(1)},${plotBot}`;
+  // <path> instead of <polyline>: a path's `d` is a CSS property, so the
+  // browser can TRANSITION it — the curve glides when the time machine moves
+  // (bands appearing or vanishing still snap: the shapes are not congruent)
+  const pts = buckets.flatMap((b) => {
+    const yy = y(b.predicted).toFixed(1);
+    return [`${x(b.q).toFixed(1)} ${yy}`, `${x(b.q + 1).toFixed(1)} ${yy}`];
+  });
+  const lineD = pts.length ? `M${pts.join("L")}` : "";
+  const areaD = pts.length
+    ? `M${x(xMin).toFixed(1)} ${plotBot}L${pts.join("L")}L${x(xMax).toFixed(1)} ${plotBot}Z`
+    : "";
   const yTicks = [0, 250_000, 500_000, 750_000, SPLIT];
   if (hasLog) yTicks.push(Math.round(yDataMax));
   const xTicks: number[] = [];
@@ -473,8 +477,8 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
               </text>
             </g>
           ))}
-          <polygon points={area} fill="url(#curve-fade)" />
-          <polyline points={line} fill="none" stroke="var(--accent)" strokeWidth="2" />
+          <path className="curve-area" d={areaD} fill="url(#curve-fade)" />
+          <path className="curve-line" d={lineD} fill="none" stroke="var(--accent)" strokeWidth="2" />
           {/* hover by vertical band, aligned with the REAL band [q, q+1) */}
           {hover && (
             <rect
@@ -796,6 +800,26 @@ export function Dashboard({
     refetchInterval: 5 * 60_000,
   });
   const [tmIdx, setTmIdx] = useState<number | null>(null);
+  // A scope/pool/mode switch swaps the timeline for one with different
+  // points: keep the same DAY engaged instead of the same index (a shorter
+  // series — loved has few event days — used to clamp the slider back to
+  // live and quietly disengage the time machine)
+  const prevTlRef = useRef<typeof timeline>(undefined);
+  useEffect(() => {
+    const prev = prevTlRef.current;
+    prevTlRef.current = timeline;
+    if (!timeline || !prev || prev === timeline || tmIdx == null) return;
+    if (timeline.points.length < 2) {
+      setTmIdx(null);
+      return;
+    }
+    const day = prev.points[Math.min(tmIdx, prev.points.length - 1)]?.day;
+    if (day == null) return;
+    let j = 0;
+    for (let k = 0; k < timeline.points.length; k++)
+      if (timeline.points[k].day <= day) j = k;
+    setTmIdx(Math.min(j, timeline.points.length - 2));
+  }, [timeline, tmIdx]);
   const tmDay =
     tmIdx != null && timeline && tmIdx < timeline.points.length - 1
       ? timeline.points[tmIdx].day
@@ -814,6 +838,15 @@ export function Dashboard({
   // per-stat panels therefore track the slider with imperceptible latency,
   // without flooding the server with one request per tick.
   const [snap, setSnap] = useState<Snapshot | null>(null);
+  // Engagement id: bumped when the slider leaves live. A snapshot kept from
+  // a PREVIOUS engagement must not paint the first tick (it flashed the last
+  // selected date on every panel); until this engagement's first snapshot
+  // lands, the panels keep the live data already on screen.
+  const engageId = useRef(0);
+  const wasEngaged = useRef(false);
+  if (tmDay != null && !wasEngaged.current) engageId.current++;
+  wasEngaged.current = tmDay != null;
+  const [snapEng, setSnapEng] = useState(0);
   const inFlight = useRef(false);
   const pendingDay = useRef<string | null>(null);
   useEffect(() => {
@@ -826,10 +859,12 @@ export function Dashboard({
     }
     const run = (day: string) => {
       inFlight.current = true;
+      const eid = engageId.current;
       fetchSnapshot(day, ruleset, pool, keys, scope, curveDim)
         .then((sn) => {
           inFlight.current = false;
           setSnap(sn);
+          setSnapEng(eid);
           if (pendingDay.current && pendingDay.current !== day) {
             const next = pendingDay.current;
             pendingDay.current = null;
@@ -848,12 +883,14 @@ export function Dashboard({
     // ruleset/pool/keys/scope matter as much as the day: a tab switch must
     // refetch (Dashboard is not remounted on ruleset change)
   }, [tmDay, curveDim, ruleset, pool, keys.join(","), scope]);
+  /** the snapshot belongs to the CURRENT engagement of the slider */
+  const snapReady = snap != null && snapEng === engageId.current;
 
   // Rate histogram rows: the snapshot replays the rate of the best held at
   // that date, so the panel follows the time machine like the others.
   const rateRows = useMemo<Stats["byRate"]>(() => {
     const live = data?.byRate ?? [];
-    if (tmDay == null || snap == null) return live;
+    if (tmDay == null || snap == null || !snapReady) return live;
     return (snap.byRate ?? []).map((r) => ({
       bucket: Number(r.bucket),
       played: r.played,
@@ -875,14 +912,14 @@ export function Dashboard({
       top50: r.top50 ?? 0,
       top100: r.top100 ?? 0,
     }));
-  }, [data, snap, tmDay != null]);
+  }, [data, snap, snapReady, tmDay != null]);
 
   // Per-stat panels: memoized so they do NOT re-render on every slider tick —
   // their rows only change when the (debounced) snapshot or live stats change.
   const dists = useMemo<{ title: string; rows: DistRow[] }[]>(() => {
     if (!data) return [];
     const isPast = tmDay != null;
-    const useSnap = isPast && snap != null;
+    const useSnap = isPast && snap != null && snapReady;
     const snapDict = (rows: SnapshotBucket[] | undefined) =>
       new Map((rows ?? []).map((r) => [String(r.bucket), r]));
     const snapOf = (dim: keyof Snapshot) =>
@@ -1021,7 +1058,7 @@ export function Dashboard({
         }),
       },
     ];
-  }, [data, snap, tmDay != null, ruleset]);
+  }, [data, snap, snapReady, tmDay != null, ruleset]);
 
   // Every drill-down carries the dashboard's Ranked/Loved scope, so the Maps
   // list holds exactly what the panel counted. Wrapped in useCallback: the
@@ -1080,7 +1117,10 @@ export function Dashboard({
   // Time machine: the snapshot re-fits the skill curve on the bests of that
   // date (comparing today's level to past scores would be meaningless) and
   // replays the FC states and leaderboard positions.
-  const useSnapNow = past != null && snap != null;
+  const useSnapNow = past != null && snap != null && snapReady;
+  // the kept snapshot may belong to the PREVIOUS curve dimension right after
+  // a dim change: only hand its curve to the panel once the axes match
+  const snapCurveOk = useSnapNow && snap.curveDim === curveDim;
   const missingNow = useSnapNow ? snap.missingSums : data.scoreSums;
   const scoreNow = useSnapNow ? snap.scoreSums : data.scoreSums;
   const fcNow = useSnapNow ? snap.fc : data.fc;
@@ -1362,8 +1402,8 @@ export function Dashboard({
         scope={scope}
         dim={curveDim}
         onDim={setCurveDim}
-        pastBuckets={useSnapNow ? snap.curve : null}
-        pastDay={useSnapNow ? snap.day : null}
+        pastBuckets={snapCurveOk && snap ? snap.curve : null}
+        pastDay={snapCurveOk && snap ? snap.day : null}
         onViewMaps={onViewBucket && viewBucket}
       />
     </div>

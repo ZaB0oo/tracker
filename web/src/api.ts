@@ -288,6 +288,8 @@ export interface Snapshot {
   scoreSums: { lazer: number; classic: number; wither: number };
   /** realistic missing at that date, curve re-fitted on the bests of the day */
   missingSums: { missing: number; missingClassic: number; missingWither: number };
+  /** the dimension `curve` is bucketed on (echoes the request) */
+  curveDim: string;
   /** that day's skill curve, same shape as /skill-curve's buckets */
   curve: SkillCurveBucket[];
 }

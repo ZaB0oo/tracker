@@ -3,7 +3,7 @@ import { getDb } from "../db/db.js";
 import { srMods, srModsKey, type ModRef } from "../logic/score.js";
 import { evalMetric, previewMetric } from "../logic/metricEval.js";
 import { mapWhere, scoreWhere, type MetricParams } from "../logic/metrics.js";
-import { localStarRating } from "../osu/difficulty.js";
+import { hasOsuFile, localStarRating } from "../osu/difficulty.js";
 import { parseRulesetParam, poolWhere } from "../logic/rulesets.js";
 
 const KINDS = ["count", "ranked_score", "pp"] as const;
@@ -41,8 +41,10 @@ function queueModdedSr(
   void new Promise((r) => setImmediate(r))
     .then(() => localStarRating(beatmapId, mods, ruleset))
     .then((sr) => {
-      // null (dead download, suspicious map) is stored too: without the
-      // negative cache the 60s refetch re-downloaded the same failures forever
+      // a PERMANENT failure (file on disk but suspicious/unreadable) is
+      // stored as null so the 60s refetch stops retrying it; a failed
+      // DOWNLOAD is transient and must stay retryable
+      if (sr == null && !hasOsuFile(beatmapId)) return;
       getDb()
         .prepare(
           "INSERT OR REPLACE INTO modded_sr (beatmap_id, ruleset, mods, star_rating) VALUES (?, ?, ?, ?)"

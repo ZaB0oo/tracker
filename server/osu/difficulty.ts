@@ -39,6 +39,12 @@ function cached(beatmapId: number): Buffer | null {
   }
 }
 
+/** Is the .osu already on disk? Separates permanent failures (file present,
+ * map suspicious/unreadable) from transient ones (download failed). */
+export function hasOsuFile(beatmapId: number): boolean {
+  return fs.existsSync(path.join(filesDir, `${beatmapId}.osu`));
+}
+
 async function osuFile(beatmapId: number): Promise<Buffer | null> {
   const hit = cached(beatmapId);
   if (hit) return hit;

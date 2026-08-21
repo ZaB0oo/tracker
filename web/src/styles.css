@@ -217,6 +217,9 @@ h1 { font-size: 21px; margin: 0; }
 .curve-chart svg { display: block; width: 100%; height: auto; }
 .curve-panel small { display: block; margin-top: 8px; color: var(--fg-dim); }
 .curve-dim-select { float: right; font-size: 12px; }
+/* same morph for the score curve (d is a CSS property on <path>; shapes that
+   are not congruent fall back to an instant change) */
+.curve-line, .curve-area { transition: d 120ms ease-out; }
 /* position/anchor handled in JS (tipPos) to stay inside the chart */
 .curve-tip {
   position: absolute; pointer-events: none;
@@ -396,7 +399,12 @@ h1 { font-size: 21px; margin: 0; }
 /* grade deltas inside a tooltip: same pills as the day panel, one row */
 .hm-tip-grades { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
 .tip-dim { color: var(--fg-dim); }
-.bar-fill { position: absolute; inset: 0; width: 0; background: linear-gradient(90deg, #4a3a6a, var(--accent)); }
+.bar-fill {
+  position: absolute; inset: 0; width: 0;
+  background: linear-gradient(90deg, #4a3a6a, var(--accent));
+  /* the time machine morphs the gauges instead of snapping them */
+  transition: width 120ms ease-out;
+}
 .bar-fill-gold { background: #e8c84a; }
 .bar-fill-ss { background: #de31ae; }
 .bar-fill-t100 { background: #cfc4f3; }
@@ -1503,7 +1511,8 @@ body.overlay-body { background: transparent; }
   position: relative;
   overflow: hidden;
 }
-.rate-col-layer { position: absolute; left: 0; bottom: 0; width: 100%; }
+.rate-col-layer {
+  transition: height 120ms ease-out; position: absolute; left: 0; bottom: 0; width: 100%; }
 /* the rate is the axis of the whole chart: as readable as the counts */
 .rate-col-label {
   font-size: 13px;
