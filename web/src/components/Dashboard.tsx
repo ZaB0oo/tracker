@@ -202,41 +202,158 @@ const RateHistogram = memo(function RateHistogram({
 });
 
 /**
- * Skill curve (basis of "missing"): x-axis star rating, y-axis predicted
- * standardised score, one point per 0.1★ band, details on hover.
+ * Score curve: one step per band of the selected dimension (star rating by
+ * default), y = median of the standardised bests in the band.
  */
+const mmss = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+const monthLabel = (q: number) =>
+  `${2007 + Math.floor(q / 12)}-${String((q % 12) + 1).padStart(2, "0")}`;
+const tenthBand = (q: number) =>
+  q >= 100 ? "10" : `${(q / 10).toFixed(1)}\u2013${((q + 1) / 10).toFixed(1)}`;
+const tenthView = (q: number, minKey: keyof Filters, maxKey: keyof Filters) =>
+  ({
+    [minKey]: String(q / 10),
+    [maxKey]: q >= 100 ? "" : String(Math.round((q / 10 + 0.09999) * 100000) / 100000),
+  }) as Partial<Filters>;
+interface CurveDimCfg {
+  label: string;
+  tickEvery: number;
+  tick: (q: number) => string;
+  band: (q: number) => string;
+  /** "cumulative missing" wording; null = open-ended last bucket ("all") */
+  upTo: (q: number) => string | null;
+  view: (q: number) => Partial<Filters>;
+}
+function curveDims(ruleset: number): Record<string, CurveDimCfg> {
+  // one combo band per curve bucket; mania combos run far higher
+  const comboStep = ruleset === 3 ? 60 : ruleset === 2 ? 25 : 20;
+  const tenthDim = (label: string, minKey: keyof Filters, maxKey: keyof Filters): CurveDimCfg => ({
+    label,
+    tickEvery: 10,
+    tick: (q) => `${label} ${q / 10}`,
+    band: (q) => `${label} ${tenthBand(q)}`,
+    upTo: (q) => (q >= 100 ? null : `${label} < ${((q + 1) / 10).toFixed(1)}`),
+    view: (q) => tenthView(q, minKey, maxKey),
+  });
+  return {
+    sr: {
+      label: "Star rating",
+      tickEvery: 10,
+      tick: (q) => `${q / 10}\u2605`,
+      band: (q) => (q >= 100 ? "10\u2605+" : `${tenthBand(q)}\u2605`),
+      upTo: (q) => (q >= 100 ? null : `< ${((q + 1) / 10).toFixed(1)}\u2605`),
+      view: (q) => tenthView(q, "srMin", "srMax"),
+    },
+    ar: tenthDim("AR", "arMin", "arMax"),
+    od: tenthDim("OD", "odMin", "odMax"),
+    cs:
+      ruleset === 3
+        ? {
+            label: "Keys",
+            tickEvery: 1,
+            tick: (q) => `${q}K`,
+            band: (q) => `${q}K`,
+            upTo: (q) => `\u2264 ${q}K`,
+            view: (q) => ({ csMin: String(q), csMax: String(q) }) as Partial<Filters>,
+          }
+        : tenthDim("CS", "csMin", "csMax"),
+    hp: tenthDim("HP", "hpMin", "hpMax"),
+    length: {
+      label: "Length",
+      tickEvery: 6,
+      tick: (q) => mmss(q * 10),
+      band: (q) => (q >= 60 ? "10:00+" : `${mmss(q * 10)}\u2013${mmss((q + 1) * 10)}`),
+      upTo: (q) => (q >= 60 ? null : `< ${mmss((q + 1) * 10)}`),
+      view: (q) =>
+        ({ lenMin: String(q * 10), lenMax: q >= 60 ? "" : String((q + 1) * 10 - 1) }) as Partial<Filters>,
+    },
+    combo: {
+      label: "Max combo",
+      tickEvery: 10,
+      tick: (q) => String(q * comboStep),
+      band: (q) =>
+        q >= 100
+          ? `${100 * comboStep}x+`
+          : `${q * comboStep}\u2013${(q + 1) * comboStep}x`,
+      upTo: (q) => (q >= 100 ? null : `< ${(q + 1) * comboStep}x`),
+      view: (q) =>
+        ({
+          comboMin: String(q * comboStep),
+          comboMax: q >= 100 ? "" : String((q + 1) * comboStep - 1),
+        }) as Partial<Filters>,
+    },
+    month: {
+      label: "Ranked month",
+      tickEvery: 12,
+      tick: (q) => String(2007 + Math.floor(q / 12)),
+      band: (q) => monthLabel(q),
+      upTo: (q) => `\u2264 ${monthLabel(q)}`,
+      view: (q) =>
+        ({ rankedFrom: `${monthLabel(q)}-01`, rankedTo: `${monthLabel(q)}-31` }) as Partial<Filters>,
+    },
+  };
+}
+
 const SkillCurvePanel = memo(function SkillCurvePanel({
   ruleset = 0,
   pool = "all",
   keys = [],
   scope = "all",
+  dim = "sr",
+  onDim,
   pastBuckets = null,
   pastDay = null,
-  onViewSr,
+  onViewMaps,
 }: {
   ruleset?: number;
   pool?: PoolMode;
   keys?: string[];
   scope?: DashScope;
+  /** x-axis dimension: sr, ar, od, cs, hp, length, combo, month */
+  dim?: string;
+  onDim?: (d: string) => void;
   /** time machine: the curve RE-FITTED on the bests of that day (the live
    * curve would compare today's level against past scores) */
   pastBuckets?: SkillCurveBucket[] | null;
   pastDay?: string | null;
-  /** double-click a point: open the Maps tab on that 0.1★ slice (max null =
-   * the open-ended 10★+ bucket) */
-  onViewSr?: (min: number, max: number | null) => void;
+  /** double-click a band: open the Maps tab on it */
+  onViewMaps?: (f: Partial<Filters>) => void;
 }) {
   const prefs = useDisplayPrefs();
   const showWither = prefs.wither && ruleset === 0;
   const { data } = useQuery({
-    queryKey: ["skill-curve", ruleset, pool, keys, scope],
-    queryFn: () => fetchSkillCurve(ruleset, pool, keys, scope),
+    queryKey: ["skill-curve", ruleset, pool, keys, scope, dim],
+    queryFn: () => fetchSkillCurve(ruleset, pool, keys, scope, dim),
     refetchInterval: 60_000,
     enabled: pastBuckets == null, // the past comes from the snapshot
   });
   const [hover, setHover] = useState<SkillCurveBucket | null>(null);
+  const DIMS = curveDims(ruleset);
+  const cfg = DIMS[dim] ?? DIMS.sr;
   const buckets = pastBuckets ?? data?.buckets;
-  if (!buckets?.length) return null;
+  const title = (
+    <h3>
+      Median score by {cfg.label.toLowerCase()}
+      {pastDay && <span className="dim"> — as of {pastDay}</span>}
+      {onDim && (
+        <select
+          className="curve-dim-select"
+          value={dim}
+          onChange={(e) => {
+            setHover(null);
+            onDim(e.target.value);
+          }}
+        >
+          {Object.entries(DIMS).map(([k, d]) => (
+            <option key={k} value={k}>
+              {d.label}
+            </option>
+          ))}
+        </select>
+      )}
+    </h3>
+  );
+  if (!buckets?.length) return <div className="panel curve-panel">{title}</div>;
   // cumulative missing = sum of missing across all bands <= this one
   const cumByQ = new Map<number, { classic: number; wither: number }>();
   let accC = 0;
@@ -244,19 +361,16 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
   for (const b of buckets) {
     accC += b.missingClassic;
     accW += b.missingWither;
-    cumByQ.set(b.sr, { classic: accC, wither: accW });
+    cumByQ.set(b.q, { classic: accC, wither: accW });
   }
 
   const W = 1000, H = 300, ML = 62, MR = 16, MT = 12, MB = 28;
-  // A point is not a measure AT sr, it is the value of the whole band
-  // [sr, sr+BAND). The chart is drawn as steps for that reason: a sloped
-  // segment between two points would put the break at the left band's lower
-  // bound instead of the boundary where it actually happens.
-  const BAND = 0.1;
-  const xMin = Math.floor(Math.min(...buckets.map((b) => b.sr)));
-  const xMax = Math.max(...buckets.map((b) => b.sr)) + BAND;
-  const x = (sr: number) =>
-    ML + ((sr - xMin) / (xMax - xMin || 1)) * (W - ML - MR);
+  // A point is not a measure AT q, it is the value of the whole band
+  // [q, q+1). The chart is drawn as steps for that reason.
+  const xMin = buckets[0].q;
+  const xMax = buckets[buckets.length - 1].q + 1;
+  const x = (q: number) =>
+    ML + ((q - xMin) / (xMax - xMin || 1)) * (W - ML - MR);
 
   // Hybrid scale: linear up to 1M std, then LOGARITHMIC above (modded bests
   // > 1M) — otherwise the modded plateau crushes the rest of the curve.
@@ -277,29 +391,30 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
   const line = buckets
     .flatMap((b) => {
       const yy = y(b.predicted).toFixed(1);
-      return [`${x(b.sr).toFixed(1)},${yy}`, `${x(b.sr + BAND).toFixed(1)},${yy}`];
+      return [`${x(b.q).toFixed(1)},${yy}`, `${x(b.q + 1).toFixed(1)},${yy}`];
     })
     .join(" ");
-  const area = `${x(buckets[0].sr).toFixed(1)},${plotBot} ${line} ${x(
-    buckets[buckets.length - 1].sr + BAND
-  ).toFixed(1)},${plotBot}`;
+  const area = `${x(xMin).toFixed(1)},${plotBot} ${line} ${x(xMax).toFixed(1)},${plotBot}`;
   const yTicks = [0, 250_000, 500_000, 750_000, SPLIT];
   if (hasLog) yTicks.push(Math.round(yDataMax));
   const xTicks: number[] = [];
-  for (let sr = xMin; sr <= xMax; sr++) xTicks.push(sr);
-  // light marking of the 0.1★ bands (excluding whole-number ticks)
+  for (
+    let q = Math.ceil(xMin / cfg.tickEvery) * cfg.tickEvery;
+    q <= xMax;
+    q += cfg.tickEvery
+  )
+    xTicks.push(q);
+  const nBuckets = xMax - xMin;
+  // light marking of the bands (dropped on dense axes like months)
   const xMinor: number[] = [];
-  for (let q = Math.round(xMin * 10); q <= Math.round(xMax * 10); q++)
-    if (q % 10 !== 0) xMinor.push(q / 10);
-  // width of a 0.1★ band in px (vertical hover zone)
-  const bandW = (W - ML - MR) / ((xMax - xMin) * 10 || 1);
+  if (nBuckets <= 130)
+    for (let q = xMin; q <= xMax; q++)
+      if (q % cfg.tickEvery !== 0) xMinor.push(q);
+  const bandW = (W - ML - MR) / (nBuckets || 1);
 
   return (
     <div className="panel curve-panel">
-      <h3>
-        Best score by star rating (median per 0.1★ band)
-        {pastDay && <span className="dim"> — as of {pastDay}</span>}
-      </h3>
+      {title}
       <div className="curve-chart">
         <svg viewBox={`0 0 ${W} ${H}`} onMouseLeave={() => setHover(null)}>
           <defs>
@@ -308,10 +423,10 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
               <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
             </linearGradient>
           </defs>
-          {xMinor.map((sr) => (
+          {xMinor.map((q) => (
             <line
-              key={`m${sr}`}
-              x1={x(sr)} x2={x(sr)} y1={MT} y2={plotBot}
+              key={`m${q}`}
+              x1={x(q)} x2={x(q)} y1={MT} y2={plotBot}
               stroke="var(--border)" strokeOpacity="0.3"
             />
           ))}
@@ -331,27 +446,26 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
               </text>
             </g>
           ))}
-          {xTicks.map((sr) => (
-            <g key={`x${sr}`}>
+          {xTicks.map((q) => (
+            <g key={`x${q}`}>
               <line
-                x1={x(sr)} x2={x(sr)} y1={MT} y2={plotBot}
+                x1={x(q)} x2={x(q)} y1={MT} y2={plotBot}
                 stroke="var(--border)" strokeDasharray="3 4"
               />
               <text
-                x={x(sr)} y={H - 8} textAnchor="middle"
+                x={x(q)} y={H - 8} textAnchor="middle"
                 fill="var(--fg-dim)" fontSize="10"
               >
-                {sr}★
+                {cfg.tick(q)}
               </text>
             </g>
           ))}
           <polygon points={area} fill="url(#curve-fade)" />
           <polyline points={line} fill="none" stroke="var(--accent)" strokeWidth="2" />
-          {/* hover by vertical band, aligned with the REAL slice
-              [sr, sr+BAND) — the same span its step covers */}
+          {/* hover by vertical band, aligned with the REAL band [q, q+1) */}
           {hover && (
             <rect
-              x={x(hover.sr)} y={MT}
+              x={x(hover.q)} y={MT}
               width={bandW} height={plotBot - MT}
               fill="var(--accent)" fillOpacity="0.09"
               pointerEvents="none"
@@ -359,34 +473,22 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
           )}
           {buckets.map((b) => (
             <rect
-              key={`h${b.sr}`}
-              x={x(b.sr)} y={MT}
+              key={`h${b.q}`}
+              x={x(b.q)} y={MT}
               width={bandW} height={plotBot - MT}
               fill="transparent"
-              style={onViewSr ? { cursor: "pointer" } : undefined}
+              style={onViewMaps ? { cursor: "pointer" } : undefined}
               onMouseEnter={() => setHover(b)}
-              onDoubleClick={() =>
-                // slice [sr, sr+0.1). The table filter is inclusive, so the
-                // upper bound sits just under the next slice — and the LAST
-                // point is the "10★+" bucket: no upper bound at all there.
-                onViewSr?.(
-                  b.sr,
-                  b.sr >= 10 ? null : Math.round((b.sr + 0.09999) * 100000) / 100000
-                )
-              }
+              onDoubleClick={() => onViewMaps?.(cfg.view(b.q))}
             />
           ))}
         </svg>
         {hover && (
           <div
             className="curve-tip"
-            style={tipPos(x(hover.sr) / W, y(hover.predicted) / H)}
+            style={tipPos(x(hover.q) / W, y(hover.predicted) / H)}
           >
-            <b>
-              {hover.sr >= 10
-                ? "10★+"
-                : `${hover.sr.toFixed(1)}–${(hover.sr + 0.1).toFixed(1)}★`}
-            </b>{" "}
+            <b>{cfg.band(hover.q)}</b>{" "}
             Median: {fmtNum(hover.predicted)}
             {hover.raw == null ? " (carried over)" : ""}
             <br />
@@ -402,22 +504,21 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
               </>
             )}
             <br />
-            Cumulative missing (
-            {hover.sr >= 10 ? "all" : `< ${(hover.sr + 0.1).toFixed(1)}★`}):
+            Cumulative missing ({cfg.upTo(hover.q) ?? "all"}):
             <br />
-            - {fmtNum(cumByQ.get(hover.sr)?.classic ?? 0)} Classic Score
+            - {fmtNum(cumByQ.get(hover.q)?.classic ?? 0)} Classic Score
             {showWither && (
               <>
-                <br />- {fmtNum(cumByQ.get(hover.sr)?.wither ?? 0)} Wither Score
+                <br />- {fmtNum(cumByQ.get(hover.q)?.wither ?? 0)} Wither Score
               </>
             )}
           </div>
         )}
       </div>
       <small>
-        one step per 0.1★ band = median of your standardised bests there ·
-        missing = that median minus your best, unplayed maps count too ·
-        linear up to 1M, log above
+        one step per band = median of your standardised bests there ·
+        missing stays measured on the star-rating curve · linear up to 1M,
+        log above
       </small>
     </div>
   );
@@ -639,7 +740,6 @@ export function Dashboard({
   keys = [],
   onKeysChange,
   onViewPack,
-  onViewSr,
   onViewRate,
   onViewBucket,
 }: {
@@ -654,7 +754,6 @@ export function Dashboard({
   onViewPack?: (tag: string, scope: DashScope) => void;
   /** opens the Maps tab filtered on a star-rating range (max null = no cap),
    * carrying the dashboard's status scope so the list matches the curve */
-  onViewSr?: (min: number, max: number | null, scope: DashScope) => void;
   /** opens the Maps tab filtered on a playback-rate range */
   onViewRate?: (min: number, max: number, scope: DashScope) => void;
   /** opens the Maps tab on a completion-bar bucket (star rating, year, …) */
@@ -671,6 +770,15 @@ export function Dashboard({
     GAUGES_HIDDEN_DEFAULT,
     GAUGES.map((g) => g.vis)
   );
+  // score-curve panel dimension, persisted; drives both the live fetch and
+  // the snapshot reconstruction so the time machine follows the same axis
+  const [curveDim, setCurveDimState] = useState<string>(
+    () => localStorage.getItem("curve-dim") ?? "sr"
+  );
+  const setCurveDim = useCallback((d: string) => {
+    setCurveDimState(d);
+    localStorage.setItem("curve-dim", d);
+  }, []);
   // "Ranked only" scope: the WHOLE dashboard drops loved maps (stats,
   // distributions, snapshot, skill curve) — persisted like the gauges
   const [scope, setScope] = useState<DashScope>(() => {
@@ -715,7 +823,7 @@ export function Dashboard({
     }
     const run = (day: string) => {
       inFlight.current = true;
-      fetchSnapshot(day, ruleset, pool, keys, scope)
+      fetchSnapshot(day, ruleset, pool, keys, scope, curveDim)
         .then((sn) => {
           inFlight.current = false;
           setSnap(sn);
@@ -734,7 +842,7 @@ export function Dashboard({
     };
     if (inFlight.current) pendingDay.current = tmDay;
     else run(tmDay);
-  }, [tmDay]);
+  }, [tmDay, curveDim]);
 
   // Rate histogram rows: the snapshot replays the rate of the best held at
   // that date, so the panel follows the time machine like the others.
@@ -938,10 +1046,6 @@ export function Dashboard({
   // list holds exactly what the panel counted. Wrapped in useCallback: the
   // panels below are memoized and a fresh arrow would re-render them all on
   // every slider tick.
-  const viewSr = useCallback(
-    (min: number, max: number | null) => onViewSr?.(min, max, scope),
-    [onViewSr, scope]
-  );
   const viewRate = useCallback(
     (min: number, max: number) => onViewRate?.(min, max, scope),
     [onViewRate, scope]
@@ -1279,9 +1383,11 @@ export function Dashboard({
         pool={pool}
         keys={keys}
         scope={scope}
+        dim={curveDim}
+        onDim={setCurveDim}
         pastBuckets={useSnapNow ? snap.curve : null}
         pastDay={useSnapNow ? snap.day : null}
-        onViewSr={onViewSr && viewSr}
+        onViewMaps={onViewBucket && viewBucket}
       />
     </div>
   );

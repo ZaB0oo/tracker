@@ -328,10 +328,50 @@ statsRouter.get("/stats", (req, res) => {
   res.json(payload);
 });
 
+/** Combo width of one score-curve band; mania combos run far higher. */
+function comboCurveStep(R: number): number {
+  return R === 3 ? 60 : R === 2 ? 25 : 20;
+}
+
+/** Bucket SQL of the score-curve x-axis dimensions (q = bucket index). */
+function curveDimSql(
+  R: number,
+  dim: string
+): { expr: string; notNull: string; steps: number } {
+  const SRX = R === 0 ? "b.star_rating" : "COALESCE(ca.star_rating, b.star_rating)";
+  const COMBO = R === 0 ? "b.max_combo" : "COALESCE(ca.max_combo, b.max_combo)";
+  const tenth = (col: string) => ({
+    expr: `MIN(CAST(${col} * 10 AS INTEGER), 100)`,
+    notNull: `${col} IS NOT NULL`,
+    steps: 100,
+  });
+  switch (dim) {
+    case "ar": return tenth("b.ar");
+    case "od": return tenth("b.od");
+    case "hp": return tenth("b.hp");
+    case "cs":
+      return R === 3
+        ? { expr: `MIN(CAST(${maniaKeysSql()} AS INTEGER), 18)`, notNull: "b.cs IS NOT NULL", steps: 18 }
+        : tenth("b.cs");
+    case "length":
+      return { expr: "MIN(CAST(b.total_length / 10 AS INTEGER), 60)", notNull: "b.total_length IS NOT NULL", steps: 60 };
+    case "combo":
+      return { expr: `MIN(CAST(${COMBO} / ${comboCurveStep(R)} AS INTEGER), 100)`, notNull: `${COMBO} IS NOT NULL`, steps: 100 };
+    case "month":
+      return {
+        expr: "(CAST(strftime('%Y', st.ranked_date) AS INTEGER) - 2007) * 12 + CAST(strftime('%m', st.ranked_date) AS INTEGER) - 1",
+        notNull: "st.ranked_date IS NOT NULL",
+        steps: (new Date().getUTCFullYear() - 2007) * 12 + new Date().getUTCMonth(),
+      };
+    default:
+      return { expr: `MIN(CAST(${SRX} * 10 AS INTEGER), ${CURVE_STEPS})`, notNull: `${SRX} IS NOT NULL`, steps: CURVE_STEPS };
+  }
+}
+
 /**
- * GET /api/skill-curve — skill curve detail per 0.1★ slice: retained
- * prediction, number of bests backing it (inherited slice if < 5), maps in the
- * slice and cumulative realistic missing (standardised).
+ * GET /api/skill-curve — score-curve detail per band of the requested
+ * dimension (?dim=sr|ar|od|cs|hp|length|combo|month): median of the bests,
+ * number of bests backing it, maps in the band and its realistic missing.
  */
 statsRouter.get("/skill-curve", (req, res) => {
   ensureMissingFresh();
@@ -339,25 +379,26 @@ statsRouter.get("/skill-curve", (req, res) => {
   const R = parseRulesetParam(req.query.ruleset);
   const POOL = withKeys(R, req, poolWhere(R, String(req.query.pool ?? "")));
   const STATUSES = statusIn(String(req.query.scope ?? ""));
-  const SRX = R === 0 ? "b.star_rating" : "COALESCE(ca.star_rating, b.star_rating)";
   const caJoin =
     R === 0
       ? ""
       : `LEFT JOIN convert_attrs ca ON ca.beatmap_id = b.id AND ca.ruleset = ${R} AND b.ruleset != ${R}`;
-  // the curve line follows the very same view as the sums: pool, keys, scope
-  const { buckets } = computeSkillCurve(R, STATUSES, POOL);
+  const dim = String(req.query.dim ?? "sr");
+  const D = curveDimSql(R, dim);
+  // per-band aggregates, along whatever axis the panel is looking at. The
+  // curve follows the very same view as the sums: pool, keys, scope.
   const aggs = db
     .prepare(
-      `SELECT MIN(CAST(${SRX} * 10 AS INTEGER), ${CURVE_STEPS}) AS q,
+      `SELECT ${D.expr} AS q,
         COUNT(*) total,
         SUM(COALESCE(u.played, 0)) played,
         SUM(u.missing_classic) missing_classic,
         SUM(u.missing_wither) missing_wither
        FROM beatmaps b
+       JOIN beatmapsets st ON st.id = b.beatmapset_id
        LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}
        ${caJoin}
-       LEFT JOIN scores s ON s.id = u.best_lazer_score_id
-       WHERE ${POOL} AND b.status IN ${STATUSES} AND ${SRX} IS NOT NULL
+       WHERE ${POOL} AND b.status IN ${STATUSES} AND ${D.notNull}
        GROUP BY q ORDER BY q`
     )
     .all() as {
@@ -367,14 +408,38 @@ statsRouter.get("/skill-curve", (req, res) => {
     missing_classic: number | null;
     missing_wither: number | null;
   }[];
+  let curveBuckets: ReturnType<typeof fitSkillCurve>;
+  if (dim === "sr") {
+    curveBuckets = computeSkillCurve(R, STATUSES, POOL).buckets;
+  } else {
+    const rows = db
+      .prepare(
+        `SELECT ${D.expr} AS q, s.total_score AS ts
+         FROM beatmap_user u
+         JOIN scores s ON s.id = u.best_lazer_score_id
+         JOIN beatmaps b ON b.id = u.beatmap_id
+         JOIN beatmapsets st ON st.id = b.beatmapset_id
+         ${caJoin}
+         WHERE u.ruleset = ${R} AND ${POOL} AND b.status IN ${STATUSES} AND ${D.notNull}`
+      )
+      .all() as { q: number; ts: number }[];
+    const samples = new Map<number, number[]>();
+    for (const r of rows) {
+      const arr = samples.get(r.q) ?? [];
+      arr.push(r.ts);
+      samples.set(r.q, arr);
+    }
+    curveBuckets = fitSkillCurve(samples, D.steps);
+  }
   const byQ = new Map(aggs.map((a) => [a.q, a]));
   res.json({
-    buckets: buckets
+    dim,
+    buckets: curveBuckets
       .filter((b) => (byQ.get(b.q)?.total ?? 0) > 0)
       .map((b) => {
         const a = byQ.get(b.q)!;
         return {
-          sr: b.q / 10,
+          q: b.q,
           predicted: b.value,
           raw: b.raw,
           samples: b.samples,
@@ -774,6 +839,14 @@ interface SnapMap {
   od: number;
   cs: number;
   hp: number;
+  /** fine buckets for the score-curve panel (index in its dimension, -1 unknown) */
+  arQ: number;
+  odQ: number;
+  csQ: number;
+  hpQ: number;
+  len10: number;
+  comboQ: number;
+  month: number;
 }
 interface SnapIndex {
   version: string;
@@ -845,6 +918,8 @@ function buildSnapshotIndex(
   }[];
   const cap = (v: number | null, c: number) =>
     v == null ? -1 : Math.min(Math.floor(v), c);
+  const tenthQ = (v: number | null) =>
+    v == null ? -1 : Math.min(Math.round(v * 10), 100);
   const maps: SnapMap[] = [];
   const mapIds: number[] = [];
   for (const a of attrs) {
@@ -862,6 +937,19 @@ function buildSnapshotIndex(
       combo: a.combo == null ? -1 : Math.min(Math.floor(a.combo / 250), 10),
       ar: cap(a.ar, 10), od: cap(a.od, 10), hp: cap(a.hp, 10),
       cs: cap(a.cs, R === 3 ? 18 : 10), // mania: key count, dual stage reaches 18
+      arQ: tenthQ(a.ar),
+      odQ: tenthQ(a.od),
+      csQ: R === 3 ? cap(a.cs, 18) : tenthQ(a.cs),
+      hpQ: tenthQ(a.hp),
+      len10: a.len == null ? -1 : Math.min(Math.floor(a.len / 10), 60),
+      comboQ:
+        a.combo == null ? -1 : Math.min(Math.floor(a.combo / comboCurveStep(R)), 100),
+      month:
+        a.ranked_day == null
+          ? -1
+          : (Number(a.ranked_day.slice(0, 4)) - 2007) * 12 +
+            Number(a.ranked_day.slice(5, 7)) -
+            1,
     });
   }
 
@@ -1064,9 +1152,32 @@ statsRouter.get("/snapshot", (req, res) => {
   const rateAt = new Int8Array(n); // rate*10 of that best, 0 = not played
   const rankAt = new Int32Array(n);
   const c1At = new Uint8Array(n);
+  // score-curve panel dimension (default sr). The SR fit is ALWAYS computed —
+  // the missing estimates are defined against it — a second, display-only fit
+  // is added when the panel looks along another axis.
+  const curveDimSel = String(req.query.curveDim ?? "sr");
+  const dimIdxOf =
+    curveDimSel === "ar"
+      ? (m: SnapMap) => m.arQ
+      : curveDimSel === "od"
+        ? (m: SnapMap) => m.odQ
+        : curveDimSel === "cs"
+          ? (m: SnapMap) => m.csQ
+          : curveDimSel === "hp"
+            ? (m: SnapMap) => m.hpQ
+            : curveDimSel === "length"
+              ? (m: SnapMap) => m.len10
+              : curveDimSel === "combo"
+                ? (m: SnapMap) => m.comboQ
+                : curveDimSel === "month"
+                  ? (m: SnapMap) => m.month
+                  : null;
+  const dimSteps = dimIdxOf ? curveDimSql(R, curveDimSel).steps : CURVE_STEPS;
   // curve samples per 0.1★ slice, reused arrays (no Map, no per-request alloc)
   const qs: number[][] = [];
   for (let q = 0; q <= CURVE_STEPS; q++) qs.push([]);
+  const qs2: number[][] = [];
+  if (dimIdxOf) for (let q = 0; q <= dimSteps; q++) qs2.push([]);
   for (let i = 0; i < n; i++) {
     const m = maps[i];
     if (m.clear != null && m.clear <= day) {
@@ -1082,6 +1193,10 @@ statsRouter.get("/snapshot", (req, res) => {
           rateAt[i] = t[5];
         }
       if (m.q >= 0 && bestStd[i] > 0) qs[m.q].push(bestStd[i]);
+      if (dimIdxOf && bestStd[i] > 0) {
+        const dq = dimIdxOf(m);
+        if (dq >= 0 && dq <= dimSteps) qs2[dq].push(bestStd[i]);
+      }
       const ct = country[i];
       if (ct)
         for (let k = 0; k < ct.length; k++) {
@@ -1101,6 +1216,10 @@ statsRouter.get("/snapshot", (req, res) => {
   const byQ = new Map<number, number[]>();
   for (let q = 0; q <= CURVE_STEPS; q++) if (qs[q].length) byQ.set(q, qs[q]);
   const curve = fitSkillCurve(byQ);
+  const byQ2 = new Map<number, number[]>();
+  if (dimIdxOf)
+    for (let q = 0; q <= dimSteps; q++) if (qs2[q].length) byQ2.set(q, qs2[q]);
+  const dispCurve = dimIdxOf ? fitSkillCurve(byQ2, dimSteps) : curve;
 
   // Buckets are small integers: plain arrays instead of Map.get() 1.2M times
   const AGG_LEN = 19; // mania "CS" (key count) reaches 18
@@ -1113,11 +1232,12 @@ statsRouter.get("/snapshot", (req, res) => {
   const byYear = new Map<string, Agg>(); // the only non-numeric dimension
   // hero rows (All / Ranked / Loved) need the same gauges as the dists
   const byStatus = { ranked: mkAgg(), loved: mkAgg() };
-  // per-slice aggregates for the historical curve panel
-  const curveTotal = new Int32Array(CURVE_STEPS + 1);
-  const curvePlayed = new Int32Array(CURVE_STEPS + 1);
-  const curveMissC = new Float64Array(CURVE_STEPS + 1);
-  const curveMissW = new Float64Array(CURVE_STEPS + 1);
+  // per-band aggregates for the historical curve panel, indexed by the
+  // dimension it is looking at (SR by default)
+  const curveTotal = new Int32Array(dimSteps + 1);
+  const curvePlayed = new Int32Array(dimSteps + 1);
+  const curveMissC = new Float64Array(dimSteps + 1);
+  const curveMissW = new Float64Array(dimSteps + 1);
   let missing = 0;
   let missingClassic = 0;
   let missingWither = 0;
@@ -1144,13 +1264,19 @@ statsRouter.get("/snapshot", (req, res) => {
       const mc = Math.max(0, classicFromStandardised(R, pred, m.n) - bestClassic[i]);
       missing += Math.max(0, pred - bestStd[i]);
       missingClassic += mc;
-      curveTotal[m.q]++;
-      if (cleared) curvePlayed[m.q]++;
-      curveMissC[m.q] += mc;
+      // the panel aggregates follow the SELECTED dimension; the missing
+      // itself stays defined against the SR curve
+      const dq = dimIdxOf ? dimIdxOf(m) : m.q;
+      const inBand = dq >= 0 && dq <= dimSteps;
+      if (inBand) {
+        curveTotal[dq]++;
+        if (cleared) curvePlayed[dq]++;
+        curveMissC[dq] += mc;
+      }
       if (R === 0 && m.n > 0) {
         const mw = Math.max(0, witherScore(pred, m.n) - witherScore(bestStd[i], m.n));
         missingWither += mw;
-        curveMissW[m.q] += mw;
+        if (inBand) curveMissW[dq] += mw;
       }
     }
     if (inCat && cleared) {
@@ -1226,10 +1352,11 @@ statsRouter.get("/snapshot", (req, res) => {
       missingWither: Math.round(missingWither),
     },
     // same shape as /skill-curve, so the panel just swaps its source
-    curve: curve
+    curveDim: curveDimSel,
+    curve: dispCurve
       .filter((b) => curveTotal[b.q] > 0)
       .map((b) => ({
-        sr: b.q / 10,
+        q: b.q,
         predicted: b.value,
         raw: b.raw,
         samples: b.samples,

@@ -192,22 +192,6 @@ export default function App() {
             });
             setView("table");
           }}
-          onViewSr={(min, max, scope) => {
-            // Maps tab on that star-rating slice (the curve's own bucket),
-            // with the dashboard's Ranked/Loved scope carried over so the
-            // list contains exactly the maps the curve counted
-            setFilters({
-              ...DEFAULT_FILTERS,
-              mode: filters.mode,
-              pool: filters.pool,
-              keys: filters.keys,
-              ruleset,
-              srMin: String(min),
-              srMax: max == null ? "" : String(max),
-              statuses: scopeStatuses(scope),
-            });
-            setView("table");
-          }}
           onViewRate={(min, max, scope) => {
             // Maps tab on that playback-rate bucket
             setFilters({

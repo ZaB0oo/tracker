@@ -74,10 +74,11 @@ export async function fetchSkillCurve(
   ruleset = 0,
   pool: PoolMode = "all",
   keys: string[] = [],
-  scope: DashScope = "all"
-): Promise<{ buckets: SkillCurveBucket[] }> {
+  scope: DashScope = "all",
+  dim = "sr"
+): Promise<{ dim: string; buckets: SkillCurveBucket[] }> {
   const res = await fetch(
-    `/api/skill-curve?ruleset=${ruleset}&pool=${pool}${keysQ(keys)}&scope=${scope}`
+    `/api/skill-curve?ruleset=${ruleset}&pool=${pool}${keysQ(keys)}&scope=${scope}&dim=${dim}`
   );
   if (!res.ok) throw new Error(`skill-curve: HTTP ${res.status}`);
   return res.json();
@@ -308,10 +309,11 @@ export async function fetchSnapshot(
   ruleset = 0,
   pool: PoolMode = "all",
   keys: string[] = [],
-  scope: DashScope = "all"
+  scope: DashScope = "all",
+  curveDim = "sr"
 ): Promise<Snapshot> {
   const res = await fetch(
-    `/api/snapshot?day=${day}&ruleset=${ruleset}&pool=${pool}${keysQ(keys)}&scope=${scope}`
+    `/api/snapshot?day=${day}&ruleset=${ruleset}&pool=${pool}${keysQ(keys)}&scope=${scope}&curveDim=${curveDim}`
   );
   if (!res.ok) throw new Error(`snapshot: HTTP ${res.status}`);
   return res.json();

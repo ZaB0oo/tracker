@@ -25,9 +25,12 @@ export interface CurveBucket {
  * inherit from the last one that has a median (and from the first for those
  * below the data).
  */
-export function fitSkillCurve(byQ: Map<number, number[]>): CurveBucket[] {
+export function fitSkillCurve(
+  byQ: Map<number, number[]>,
+  steps = CURVE_STEPS
+): CurveBucket[] {
   const sampled: { q: number; value: number }[] = [];
-  for (let q = 0; q <= CURVE_STEPS; q++) {
+  for (let q = 0; q <= steps; q++) {
     const arr = byQ.get(q);
     if (arr && arr.length >= 5) {
       arr.sort((a, b) => a - b);
@@ -38,7 +41,7 @@ export function fitSkillCurve(byQ: Map<number, number[]>): CurveBucket[] {
 
   let prev = sampled.length ? sampled[0].value : FULL_BASE;
   const buckets: CurveBucket[] = [];
-  for (let q = 0; q <= CURVE_STEPS; q++) {
+  for (let q = 0; q <= steps; q++) {
     prev = rawByQ.get(q) ?? prev;
     buckets.push({
       q,

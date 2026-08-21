@@ -216,6 +216,7 @@ h1 { font-size: 21px; margin: 0; }
 .curve-chart { position: relative; overflow-x: clip; }
 .curve-chart svg { display: block; width: 100%; height: auto; }
 .curve-panel small { display: block; margin-top: 8px; color: var(--fg-dim); }
+.curve-dim-select { float: right; font-size: 12px; }
 /* position/anchor handled in JS (tipPos) to stay inside the chart */
 .curve-tip {
   position: absolute; pointer-events: none;
