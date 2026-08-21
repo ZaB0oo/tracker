@@ -226,6 +226,13 @@ export interface TimelinePoint {
   countryLoved: number;
   /** counts per tier, ordered D, C, B, A, S, SH, X, XH */
   grades: number[];
+  gradesRanked: number[];
+  gradesLoved: number[];
+  /** cumulative global-top counts, ordered top 1, 8, 15, 25, 50, 100 */
+  topsRanked: number[];
+  topsLoved: number[];
+  onemRanked: number;
+  onemLoved: number;
 }
 
 export async function fetchTimeline(
@@ -251,8 +258,13 @@ export interface SnapshotBucket {
   fc: number;
   country: number;
   pfc?: number;
+  nonfc?: number;
   ss?: number;
-  splus?: number;
+  gradeS?: number;
+  gradeA?: number;
+  gradeB?: number;
+  gradeC?: number;
+  gradeD?: number;
   onem?: number;
   /** global leaderboard tiers held at that date (replayed from the events) */
   top1?: number;
@@ -265,6 +277,8 @@ export interface SnapshotBucket {
 
 export interface Snapshot {
   day: string;
+  /** per-status aggregates for the hero rows (bucket: "ranked" | "loved") */
+  byStatus: SnapshotBucket[];
   bySr: SnapshotBucket[];
   byYear: SnapshotBucket[];
   byLen: SnapshotBucket[];

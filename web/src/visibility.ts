@@ -8,12 +8,25 @@ import { useCallback, useMemo, useState } from "react";
  * passed to memoized panels, and fresh closures on every render defeated
  * those memos — every dashboard bar re-rendered on each time-machine tick.
  */
-export function useHidden(key: string, defaultHidden: string[] = []) {
+export function useHidden(key: string, defaultHidden: string[] = [], knownIds?: string[]) {
   const storeKey = `hidden:${key}`;
+  const knownKey = `hidden-known:${key}`;
   const [hidden, setHidden] = useState<Set<string>>(() => {
     try {
       const stored = localStorage.getItem(storeKey);
-      return new Set(stored ? JSON.parse(stored) : defaultHidden);
+      const set = new Set<string>(stored ? JSON.parse(stored) : defaultHidden);
+      // An id added by an update is absent from a stored preference, which
+      // would surface it for everyone: hide the newcomers that default to
+      // hidden, and remember which ids have been offered.
+      if (stored && knownIds) {
+        const seen = new Set<string>(
+          JSON.parse(localStorage.getItem(knownKey) ?? "[]")
+        );
+        for (const id of defaultHidden) if (!seen.has(id)) set.add(id);
+        localStorage.setItem(storeKey, JSON.stringify([...set]));
+      }
+      if (knownIds) localStorage.setItem(knownKey, JSON.stringify(knownIds));
+      return set;
     } catch {
       return new Set(defaultHidden);
     }

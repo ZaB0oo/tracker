@@ -140,8 +140,9 @@ export interface Stats {
   };
   /** playback-rate histogram of the bests (bucket = rate*10, 5..19) */
   byRate: {
-    bucket: number; played: number; fc: number; pfc: number; ss: number;
-    splus: number; country: number; onem: number;
+    bucket: number; played: number; fc: number; pfc: number; nonfc: number;
+    ss: number; gradeS: number; gradeA: number; gradeB: number;
+    gradeC: number; gradeD: number; country: number; onem: number;
     top1: number; top8: number; top15: number;
     top25: number; top50: number; top100: number;
   }[];
@@ -164,8 +165,13 @@ export interface DistCounts {
   country: number | null;
   fc: number | null;
   pfc?: number | null;
+  nonfc?: number | null;
   ss?: number | null;
-  splus?: number | null;
+  gradeS?: number | null;
+  gradeA?: number | null;
+  gradeB?: number | null;
+  gradeC?: number | null;
+  gradeD?: number | null;
   onem?: number | null;
   top1?: number | null;
   top8?: number | null;

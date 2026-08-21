@@ -402,20 +402,27 @@ h1 { font-size: 21px; margin: 0; }
 .bar-fill { position: absolute; inset: 0; width: 0; background: linear-gradient(90deg, #4a3a6a, var(--accent)); }
 .bar-fill-gold { background: #e8c84a; }
 .bar-fill-pfc { background: #a06ee8; }
-.bar-fill-splus { background: #3fbf9f; }
-.bar-fill-ss { background: #d8d8e8; }
-.bar-fill-t100 { background: #f0a45a; }
-.bar-fill-t50 { background: #e88a3e; }
-.bar-fill-t25 { background: #dd6e2c; }
-.bar-fill-t15 { background: #d0541f; }
-.bar-fill-t8 { background: #c23a18; }
-.bar-fill-t1 { background: #ff4d4d; }
+.bar-fill-ss { background: #de31ae; }
+.bar-fill-t100 { background: #cfc4f3; }
+.bar-fill-t50 { background: #b8a5ee; }
+.bar-fill-t25 { background: #a186e8; }
+.bar-fill-t15 { background: #8a67e2; }
+.bar-fill-t8 { background: #7348dc; }
+.bar-fill-t1 { background: #9612e8; }
 .bar-fill-onem { background: #f06ec8; }
 .bar-fill-blue { background: #5aa8f0; }
+.bar-fill-nonfc { background: #8b90a8; }
+.bar-fill-gd { background: #ff5a5a; }
+.bar-fill-gc { background: #ff8e5d; }
+.bar-fill-gb { background: #e3b130; }
+.bar-fill-ga { background: #88da20; }
+.bar-fill-gs { background: #02b5c3; }
 .bar-count { font-weight: 700; color: #fff; white-space: nowrap; }
 .bar-count .gauge-dot { width: 8px; height: 8px; vertical-align: baseline; }
-.gauge-legend { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin-left: auto; }
-.gauge-group { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+.gauge-legend { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-left: auto; }
+.gauge-group { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.gauge-group + .gauge-group { padding-left: 10px; border-left: 1px solid var(--border); }
+.gauge-chip.chip { padding: 2px 8px; font-size: 11px; }
 /* a gauge toggle IS a chip: only the colour dot and the off state are its own */
 .gauge-chip { display: inline-flex; align-items: center; gap: 5px; }
 .gauge-chip.off { opacity: 0.42; }

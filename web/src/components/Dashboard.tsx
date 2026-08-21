@@ -155,7 +155,8 @@ const RateHistogram = memo(function RateHistogram({
   const HI = 20;
   const byBucket = new Map(rows.map((r) => [r.bucket, r]));
   const empty = {
-    played: 0, fc: 0, pfc: 0, ss: 0, splus: 0, country: 0,
+    played: 0, fc: 0, pfc: 0, nonfc: 0, ss: 0, gradeS: 0,
+    gradeA: 0, gradeB: 0, gradeC: 0, gradeD: 0, country: 0,
     top1: 0, top8: 0, top15: 0, top25: 0, top50: 0, top100: 0, onem: 0,
   };
   const buckets: Stats["byRate"] = [];
@@ -430,23 +431,31 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
  * grades, global-top tiers (cumulative shades), country #1. */
 export const GAUGES = [
   { id: "fc", vis: "fc", label: "FC / PFC", cls: "bar-fill-blue", color: "#5aa8f0", group: 0 },
-  { id: "splus", vis: "splus", label: "S+", cls: "bar-fill-splus", color: "#4fd0b0", group: 0 },
-  { id: "ss", vis: "ss", label: "SS", cls: "bar-fill-ss", color: "#e8e8f5", group: 0 },
-  { id: "onem", vis: "onem", label: "1M", cls: "bar-fill-onem", color: "#f06ec8", group: 0, maniaOnly: true },
-  { id: "top100", vis: "top100", label: "Top 100", cls: "bar-fill-t100", color: "#f0a45a", group: 1 },
-  { id: "top50", vis: "top50", label: "Top 50", cls: "bar-fill-t50", color: "#e88a3e", group: 1 },
-  { id: "top25", vis: "top25", label: "Top 25", cls: "bar-fill-t25", color: "#dd6e2c", group: 1 },
-  { id: "top15", vis: "top15", label: "Top 15", cls: "bar-fill-t15", color: "#d0541f", group: 1 },
-  { id: "top8", vis: "top8", label: "Top 8", cls: "bar-fill-t8", color: "#c23a18", group: 1 },
-  { id: "top1", vis: "top1", label: "Top 1", cls: "bar-fill-t1", color: "#ff4d4d", group: 1 },
-  { id: "country", vis: "country", label: "#1", cls: "bar-fill-gold", color: "#e8c84a", group: 2 },
+  { id: "nonfc", vis: "nonfc", label: "non-FC", cls: "bar-fill-nonfc", color: "#8b90a8", group: 0 },
+  // lazer's own grade colours (OsuColour.ForRank), best first
+  { id: "ss", vis: "ss", label: "SS", cls: "bar-fill-ss", color: "#de31ae", group: 1 },
+  { id: "gradeS", vis: "gradeS", label: "S", cls: "bar-fill-gs", color: "#02b5c3", group: 1 },
+  { id: "gradeA", vis: "gradeA", label: "A", cls: "bar-fill-ga", color: "#88da20", group: 1 },
+  { id: "gradeB", vis: "gradeB", label: "B", cls: "bar-fill-gb", color: "#e3b130", group: 1 },
+  { id: "gradeC", vis: "gradeC", label: "C", cls: "bar-fill-gc", color: "#ff8e5d", group: 1 },
+  { id: "gradeD", vis: "gradeD", label: "D", cls: "bar-fill-gd", color: "#ff5a5a", group: 1 },
+  { id: "onem", vis: "onem", label: "1M", cls: "bar-fill-onem", color: "#f06ec8", group: 1, maniaOnly: true },
+  // violet ramp: the old orange-to-red one collided with the B/C/D grades
+  { id: "top1", vis: "top1", label: "Top 1", cls: "bar-fill-t1", color: "#9612e8", group: 2 },
+  { id: "top8", vis: "top8", label: "Top 8", cls: "bar-fill-t8", color: "#7348dc", group: 2 },
+  { id: "top15", vis: "top15", label: "Top 15", cls: "bar-fill-t15", color: "#8a67e2", group: 2 },
+  { id: "top25", vis: "top25", label: "Top 25", cls: "bar-fill-t25", color: "#a186e8", group: 2 },
+  { id: "top50", vis: "top50", label: "Top 50", cls: "bar-fill-t50", color: "#b8a5ee", group: 2 },
+  { id: "top100", vis: "top100", label: "Top 100", cls: "bar-fill-t100", color: "#cfc4f3", group: 2 },
+  { id: "country", vis: "country", label: "#1", cls: "bar-fill-gold", color: "#e8c84a", group: 3 },
 ] as const satisfies readonly {
   id: string; vis: string; label: string; cls: string; color: string;
   group: number; maniaOnly?: boolean;
 }[];
 export type GaugeId = (typeof GAUGES)[number]["id"];
 export const GAUGES_HIDDEN_DEFAULT = [
-  "splus", "ss", "top1", "top8", "top15", "top25", "top50", "top100",
+  "nonfc", "gradeD", "gradeC", "gradeB", "gradeA", "gradeS", "ss",
+  "top1", "top8", "top15", "top25", "top50", "top100",
 ];
 
 function Bar({
@@ -537,17 +546,15 @@ function GaugeLegend({
   ruleset?: number;
   countryLabel?: string;
 }) {
-  const groups = [0, 1, 2].map((gr) =>
+  const groups = [0, 1, 2, 3].map((gr) =>
     GAUGES.filter(
       (g) => g.group === gr && (!("maniaOnly" in g) || ruleset === 3)
     )
   );
-  const titles = ["Grades", "Global tops", "Country"];
   return (
     <div className="gauge-legend">
       {groups.map((gs, i) => (
         <div key={i} className="gauge-group">
-          <span className="gauge-group-title">{titles[i]}</span>
           {gs.map((g) => (
             <button
               key={g.vis}
@@ -574,8 +581,13 @@ interface DistRow {
   country?: number | null;
   fc?: number | null;
   pfc?: number | null;
+  nonfc?: number | null;
   ss?: number | null;
-  splus?: number | null;
+  gradeS?: number | null;
+  gradeA?: number | null;
+  gradeB?: number | null;
+  gradeC?: number | null;
+  gradeD?: number | null;
   onem?: number | null;
   top1?: number | null;
   top8?: number | null;
@@ -654,7 +666,11 @@ export function Dashboard({
   const country = useCountryCode();
   const prefs = useDisplayPrefs();
   const distHidden = useHidden("dashboard-dist");
-  const gaugeHidden = useHidden("dashboard-gauges", GAUGES_HIDDEN_DEFAULT);
+  const gaugeHidden = useHidden(
+    "dashboard-gauges",
+    GAUGES_HIDDEN_DEFAULT,
+    GAUGES.map((g) => g.vis)
+  );
   // "Ranked only" scope: the WHOLE dashboard drops loved maps (stats,
   // distributions, snapshot, skill curve) — persisted like the gauges
   const [scope, setScope] = useState<DashScope>(() => {
@@ -691,7 +707,9 @@ export function Dashboard({
   const pendingDay = useRef<string | null>(null);
   useEffect(() => {
     if (tmDay == null) {
-      setSnap(null);
+      // keep the last snapshot: every consumer is gated on tmDay anyway, and
+      // clearing it made each re-engage flash today's live data until the
+      // first fetch of the new day landed
       pendingDay.current = null;
       return;
     }
@@ -728,8 +746,13 @@ export function Dashboard({
       played: r.played,
       fc: r.fc,
       pfc: r.pfc ?? 0,
+      nonfc: r.nonfc ?? 0,
       ss: r.ss ?? 0,
-      splus: r.splus ?? 0,
+      gradeS: r.gradeS ?? 0,
+      gradeA: r.gradeA ?? 0,
+      gradeB: r.gradeB ?? 0,
+      gradeC: r.gradeC ?? 0,
+      gradeD: r.gradeD ?? 0,
       country: r.country,
       onem: r.onem ?? 0,
       top1: r.top1 ?? 0,
@@ -764,8 +787,13 @@ export function Dashboard({
         fc: sv?.fc ?? 0,
         country: sv?.country ?? 0,
         pfc: sv?.pfc ?? 0,
+        nonfc: sv?.nonfc ?? 0,
         ss: sv?.ss ?? 0,
-        splus: sv?.splus ?? 0,
+        gradeS: sv?.gradeS ?? 0,
+        gradeA: sv?.gradeA ?? 0,
+        gradeB: sv?.gradeB ?? 0,
+        gradeC: sv?.gradeC ?? 0,
+        gradeD: sv?.gradeD ?? 0,
         onem: sv?.onem ?? 0,
         // replayed from the global events (a position with no event is dated
         // at the best score that earned it)
@@ -779,7 +807,9 @@ export function Dashboard({
     };
     const liveOf = (b: DistCounts): Omit<DistRow, "label"> => ({
       total: b.total, played: b.played, country: b.country, fc: b.fc,
-      pfc: b.pfc, ss: b.ss, splus: b.splus, onem: b.onem,
+      pfc: b.pfc, nonfc: b.nonfc, ss: b.ss, gradeS: b.gradeS,
+      gradeA: b.gradeA, gradeB: b.gradeB, gradeC: b.gradeC,
+      gradeD: b.gradeD, onem: b.onem,
       top1: b.top1, top8: b.top8, top15: b.top15,
       top25: b.top25, top50: b.top50, top100: b.top100,
     });
@@ -970,23 +1000,54 @@ export function Dashboard({
   const scoreNow = useSnapNow ? snap.scoreSums : data.scoreSums;
   const fcNow = useSnapNow ? snap.fc : data.fc;
   const topsNow = useSnapNow ? snap.globalTops : data.globalTops;
-  // hero gauge rows: live per-status aggregates; in the past only the
-  // reconstructed ones exist (handled by the dists, the hero keeps FC/#1)
-  const stRanked = data.byStatus?.find((b) => b.bucket === "ranked");
-  const stLoved = data.byStatus?.find((b) => b.bucket === "loved");
+  // hero gauge rows. In the past everything comes from the timeline point,
+  // so the whole hero moves with the slider, no fetch involved: exact grades
+  // from the per-status tier counts (silvers folded in), non-FC derived from
+  // clears - FC, tops replayed from the rank events.
+  const pastSt = (
+    g: number[] | undefined,
+    tops: number[] | undefined,
+    clearsN: number,
+    fcN: number,
+    onem: number
+  ) => ({
+    nonfc: clearsN - fcN,
+    ss: (g?.[6] ?? 0) + (g?.[7] ?? 0),
+    gradeS: (g?.[4] ?? 0) + (g?.[5] ?? 0),
+    gradeA: g?.[3] ?? 0,
+    gradeB: g?.[2] ?? 0,
+    gradeC: g?.[1] ?? 0,
+    gradeD: g?.[0] ?? 0,
+    onem,
+    top1: tops?.[0] ?? 0,
+    top8: tops?.[1] ?? 0,
+    top15: tops?.[2] ?? 0,
+    top25: tops?.[3] ?? 0,
+    top50: tops?.[4] ?? 0,
+    top100: tops?.[5] ?? 0,
+  });
+  const stRanked = past
+    ? pastSt(past.gradesRanked, past.topsRanked, past.clearsRanked, past.fcRanked, past.onemRanked ?? 0)
+    : data.byStatus?.find((b) => b.bucket === "ranked");
+  const stLoved = past
+    ? pastSt(past.gradesLoved, past.topsLoved, past.clearsLoved, past.fcLoved, past.onemLoved ?? 0)
+    : data.byStatus?.find((b) => b.bucket === "loved");
   const sumSt = (k: keyof DistCounts) =>
-    ((stRanked?.[k] as number) ?? 0) + ((stLoved?.[k] as number) ?? 0);
+    (((stRanked as unknown as Record<string, number | null>)?.[k]) ?? 0) +
+    (((stLoved as unknown as Record<string, number | null>)?.[k]) ?? 0);
   const heroRow = (
     played: number, country: number, fc: number,
     st: typeof stRanked | { [k: string]: number } | undefined
-  ) =>
-    past
-      ? { played, country, fc }
-      : {
+  ) => ({
           played, country, fc,
           pfc: (st as DistCounts | undefined)?.pfc,
+          nonfc: (st as DistCounts | undefined)?.nonfc,
           ss: (st as DistCounts | undefined)?.ss,
-          splus: (st as DistCounts | undefined)?.splus,
+          gradeS: (st as DistCounts | undefined)?.gradeS,
+          gradeA: (st as DistCounts | undefined)?.gradeA,
+          gradeB: (st as DistCounts | undefined)?.gradeB,
+          gradeC: (st as DistCounts | undefined)?.gradeC,
+          gradeD: (st as DistCounts | undefined)?.gradeD,
           onem: (st as DistCounts | undefined)?.onem,
           top1: (st as DistCounts | undefined)?.top1,
           top8: (st as DistCounts | undefined)?.top8,
@@ -994,9 +1055,11 @@ export function Dashboard({
           top25: (st as DistCounts | undefined)?.top25,
           top50: (st as DistCounts | undefined)?.top50,
           top100: (st as DistCounts | undefined)?.top100,
-        };
+        });
   const heroGlobal = heroRow(eff.played, eff.country, eff.fc, {
-    pfc: sumSt("pfc"), ss: sumSt("ss"), splus: sumSt("splus"), onem: sumSt("onem"),
+    pfc: sumSt("pfc"), nonfc: sumSt("nonfc"), ss: sumSt("ss"),
+    gradeS: sumSt("gradeS"), gradeA: sumSt("gradeA"), gradeB: sumSt("gradeB"),
+    gradeC: sumSt("gradeC"), gradeD: sumSt("gradeD"), onem: sumSt("onem"),
     top1: sumSt("top1"), top8: sumSt("top8"), top15: sumSt("top15"),
     top25: sumSt("top25"), top50: sumSt("top50"), top100: sumSt("top100"),
   });

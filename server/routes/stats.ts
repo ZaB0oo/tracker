@@ -192,7 +192,12 @@ statsRouter.get("/stats", (req, res) => {
   const GAUGE_COLS = `,
     SUM(CASE WHEN bs.fc_state = 0 THEN 1 ELSE 0 END) pfc,
     SUM(CASE WHEN bs.rank IN ('X','XH') THEN 1 ELSE 0 END) ss,
-    SUM(CASE WHEN bs.rank IN ('S','SH','X','XH') THEN 1 ELSE 0 END) splus,
+    SUM(CASE WHEN bs.rank IN ('S','SH') THEN 1 ELSE 0 END) gradeS,
+    SUM(CASE WHEN bs.rank = 'A' THEN 1 ELSE 0 END) gradeA,
+    SUM(CASE WHEN bs.rank = 'B' THEN 1 ELSE 0 END) gradeB,
+    SUM(CASE WHEN bs.rank = 'C' THEN 1 ELSE 0 END) gradeC,
+    SUM(CASE WHEN bs.rank = 'D' THEN 1 ELSE 0 END) gradeD,
+    SUM(CASE WHEN u.played = 1 AND COALESCE(u.best_fc, 0) = 0 THEN 1 ELSE 0 END) nonfc,
     SUM(CASE WHEN u.global_rank = 1 THEN 1 ELSE 0 END) top1,
     SUM(CASE WHEN u.global_rank <= 8 THEN 1 ELSE 0 END) top8,
     SUM(CASE WHEN u.global_rank <= 15 THEN 1 ELSE 0 END) top15,
@@ -281,7 +286,12 @@ statsRouter.get("/stats", (req, res) => {
         SUM(COALESCE(u.best_fc, 0)) fc,
         SUM(CASE WHEN s.fc_state = 0 THEN 1 ELSE 0 END) pfc,
         SUM(CASE WHEN s.rank IN ('X','XH') THEN 1 ELSE 0 END) ss,
-        SUM(CASE WHEN s.rank IN ('S','SH','X','XH') THEN 1 ELSE 0 END) splus,
+        SUM(CASE WHEN s.rank IN ('S','SH') THEN 1 ELSE 0 END) gradeS,
+        SUM(CASE WHEN s.rank = 'A' THEN 1 ELSE 0 END) gradeA,
+        SUM(CASE WHEN s.rank = 'B' THEN 1 ELSE 0 END) gradeB,
+        SUM(CASE WHEN s.rank = 'C' THEN 1 ELSE 0 END) gradeC,
+        SUM(CASE WHEN s.rank = 'D' THEN 1 ELSE 0 END) gradeD,
+        SUM(CASE WHEN COALESCE(u.best_fc, 0) = 0 THEN 1 ELSE 0 END) nonfc,
         SUM(CASE WHEN u.global_rank = 1 THEN 1 ELSE 0 END) top1,
         SUM(CASE WHEN u.global_rank <= 8 THEN 1 ELSE 0 END) top8,
         SUM(CASE WHEN u.global_rank <= 15 THEN 1 ELSE 0 END) top15,
@@ -515,7 +525,7 @@ statsRouter.get("/timeline", (req, res) => {
   const best = new Map<number, number>();
   const mapTier = new Map<number, number>();
   const mapFc = new Set<number>();
-  const gradeEvents: { at: string; to: number | null; from: number | null }[] = [];
+  const gradeEvents: { at: string; to: number | null; from: number | null; status: number }[] = [];
   const fcEvents: { at: string; delta: number; status: number }[] = [];
   let rankedTotal = 0;
   const rankedPts: { at: string; total: number }[] = [];
@@ -528,7 +538,7 @@ statsRouter.get("/timeline", (req, res) => {
     const to = tierOf.get(r.rank) ?? null;
     const from = mapTier.get(r.bid) ?? null;
     if (to !== from) {
-      gradeEvents.push({ at: r.at, to, from });
+      gradeEvents.push({ at: r.at, to, from, status: r.status });
       if (to == null) mapTier.delete(r.bid);
       else mapTier.set(r.bid, to);
     }
@@ -578,6 +588,58 @@ statsRouter.get("/timeline", (req, res) => {
   }
   deltas.sort((a, b) => a.at.localeCompare(b.at));
 
+  // Global-top tiers over time: rank transitions from the events, initial
+  // takes (recorded by the sweep without an event) dated at the best score
+  // that earned them — the same approximation the snapshot uses.
+  const gEvents = db
+    .prepare(
+      `SELECT e.beatmap_id AS bid, e.at, e.new_rank AS rank, b.status AS status
+       FROM global_events e JOIN beatmaps b ON b.id = e.beatmap_id
+       WHERE e.ruleset = ${R} AND ${POOL} AND b.status IN ${STATUSES}
+       ORDER BY e.at`
+    )
+    .all() as { bid: number; at: string; rank: number | null; status: number }[];
+  const gSeen = new Set(gEvents.map((e) => e.bid));
+  const gHeld = db
+    .prepare(
+      `SELECT u.beatmap_id AS bid, u.global_rank AS rank, s.ended_at AS at,
+         b.status AS status
+       FROM beatmap_user u
+       JOIN beatmaps b ON b.id = u.beatmap_id AND u.ruleset = ${R}
+       JOIN scores s ON s.id = u.best_lazer_score_id
+       WHERE u.global_rank IS NOT NULL AND ${POOL} AND b.status IN ${STATUSES}`
+    )
+    .all() as { bid: number; rank: number; at: string; status: number }[];
+  const topEvts: { at: string; old: number; nw: number; status: number }[] = [];
+  {
+    const lastRank = new Map<number, number>();
+    for (const r of gHeld)
+      if (!gSeen.has(r.bid))
+        topEvts.push({ at: r.at, old: 0, nw: r.rank, status: r.status });
+    for (const e of gEvents) {
+      const old = lastRank.get(e.bid) ?? 0;
+      const nw = e.rank ?? 0;
+      topEvts.push({ at: e.at, old, nw, status: e.status });
+      lastRank.set(e.bid, nw);
+    }
+    topEvts.sort((a, b) => a.at.localeCompare(b.at));
+  }
+  // mania 1M club: monotone first-1M dates (same rule as the dashboard gauge)
+  const onemRanked =
+    R === 3
+      ? firstDates(
+          `b.status IN (1, 2) AND s.passed = 1
+             AND COALESCE(json_extract(s.raw,'$.total_score_without_mods'), s.total_score) = 1000000`
+        )
+      : [];
+  const onemLoved =
+    R === 3
+      ? firstDates(
+          `b.status = 4 AND s.passed = 1
+             AND COALESCE(json_extract(s.raw,'$.total_score_without_mods'), s.total_score) = 1000000`
+        )
+      : [];
+
   // catalog growth: how many maps existed (were ranked/loved) at each date
   const hist = db
     .prepare(
@@ -600,16 +662,24 @@ statsRouter.get("/timeline", (req, res) => {
       ...fcEvents.map((e) => dayOf(e.at)),
       ...rankedPts.map((p) => dayOf(p.at)),
       ...deltas.map((d) => dayOf(d.at)),
+      ...topEvts.map((e) => dayOf(e.at)),
+      ...onemRanked.map(dayOf),
+      ...onemLoved.map(dayOf),
     ]),
   ].sort();
 
-  const idx = { c: 0, cr: 0, cl: 0, g: 0, f: 0, r: 0, d: 0, h: 0 };
+  const idx = { c: 0, cr: 0, cl: 0, g: 0, f: 0, r: 0, d: 0, h: 0, t: 0, o1: 0, o2: 0 };
   let ranked = 0;
   const catalog = { total: 0, ranked: 0, loved: 0 };
   const country = { all: 0, ranked: 0, loved: 0 };
   const fc = { all: 0, ranked: 0, loved: 0 };
   const grades = new Array(TIERS.length).fill(0) as number[];
-  const advance = (arr: string[], key: "c" | "cr" | "cl", day: string) => {
+  const gradesRanked = new Array(TIERS.length).fill(0) as number[];
+  const gradesLoved = new Array(TIERS.length).fill(0) as number[];
+  const TOP_TIERS = [1, 8, 15, 25, 50, 100];
+  const topsRanked = new Array(TOP_TIERS.length).fill(0) as number[];
+  const topsLoved = new Array(TOP_TIERS.length).fill(0) as number[];
+  const advance = (arr: string[], key: "c" | "cr" | "cl" | "o1" | "o2", day: string) => {
     while (idx[key] < arr.length && dayOf(arr[idx[key]]) <= day) idx[key]++;
     return idx[key];
   };
@@ -625,9 +695,26 @@ statsRouter.get("/timeline", (req, res) => {
     }
     while (idx.g < gradeEvents.length && dayOf(gradeEvents[idx.g].at) <= day) {
       const e = gradeEvents[idx.g++];
-      if (e.to != null) grades[e.to]++;
-      if (e.from != null) grades[e.from]--;
+      const st = e.status === 4 ? gradesLoved : gradesRanked;
+      if (e.to != null) {
+        grades[e.to]++;
+        st[e.to]++;
+      }
+      if (e.from != null) {
+        grades[e.from]--;
+        st[e.from]--;
+      }
     }
+    while (idx.t < topEvts.length && dayOf(topEvts[idx.t].at) <= day) {
+      const e = topEvts[idx.t++];
+      const st = e.status === 4 ? topsLoved : topsRanked;
+      for (let k = 0; k < TOP_TIERS.length; k++) {
+        const T = TOP_TIERS[k];
+        st[k] += (e.nw > 0 && e.nw <= T ? 1 : 0) - (e.old > 0 && e.old <= T ? 1 : 0);
+      }
+    }
+    const o1 = advance(onemRanked, "o1", day);
+    const o2 = advance(onemLoved, "o2", day);
     while (idx.r < rankedPts.length && dayOf(rankedPts[idx.r].at) <= day)
       ranked = rankedPts[idx.r++].total;
     while (idx.d < deltas.length && dayOf(deltas[idx.d].at) <= day) {
@@ -650,6 +737,12 @@ statsRouter.get("/timeline", (req, res) => {
       ranked,
       country: country.all, countryRanked: country.ranked, countryLoved: country.loved,
       grades: [...grades], // D,C,B,A,S,SH,X,XH
+      gradesRanked: [...gradesRanked],
+      gradesLoved: [...gradesLoved],
+      topsRanked: [...topsRanked], // top 1, 8, 15, 25, 50, 100
+      topsLoved: [...topsLoved],
+      onemRanked: o1,
+      onemLoved: o2,
     };
   });
   const payload = { tiers: TIERS, points };
@@ -668,6 +761,7 @@ interface SnapMap {
   clear: string | null; // first clear day
   onem: string | null; // mania: first 1,000,000 day (null elsewhere)
   rankedDay: string | null; // day the map entered the catalog
+  loved: boolean; // status 4 (vs ranked/approved)
   sr: number;
   /** 0.1★ slice (star_rating * 10, capped) — the skill curve's own bucket */
   q: number;
@@ -727,7 +821,8 @@ function buildSnapshotIndex(
   const attrs = db
     .prepare(
       `SELECT b.id, ${SR} sr, ${N_SQL} n, b.total_length len, ${COMBO} combo,
-         b.ar, b.od, ${CS} cs, b.hp, strftime('%Y', st.ranked_date) year,
+         b.ar, b.od, ${CS} cs, b.hp, b.status status,
+         strftime('%Y', st.ranked_date) year,
          date(st.ranked_date) ranked_day,
          MIN(CASE WHEN s.passed = 1 THEN s.ended_at END) clear,
          ${R === 3
@@ -745,7 +840,7 @@ function buildSnapshotIndex(
     .all() as {
     id: number; sr: number | null; n: number | null; len: number | null; combo: number | null;
     ar: number | null; od: number | null; cs: number | null; hp: number | null;
-    year: string | null; ranked_day: string | null;
+    year: string | null; ranked_day: string | null; status: number;
     clear: string | null; onem: string | null;
   }[];
   const cap = (v: number | null, c: number) =>
@@ -758,6 +853,7 @@ function buildSnapshotIndex(
       clear: a.clear ? a.clear.slice(0, 10) : null,
       onem: a.onem ? a.onem.slice(0, 10) : null,
       rankedDay: a.ranked_day,
+      loved: a.status === 4,
       sr: cap(a.sr, 10),
       q: a.sr == null ? -1 : Math.min(Math.floor(a.sr * 10), CURVE_STEPS),
       n: a.n ?? 0,
@@ -829,14 +925,20 @@ function buildSnapshotIndex(
     if (i == null) continue; // score on a map outside this pool/scope
     if ((bestTotal.get(sc.bid) ?? -1) >= sc.total) continue;
     bestTotal.set(sc.bid, sc.total);
-    // grade as a code (2 = SS, 1 = S+, 0 = below): string compares per map
-    // per slider tick added up
+    // grade as a code (5 = SS, 4 = S+, 3 = A, 2 = B, 1 = C, 0 = D): string
+    // compares per map per slider tick added up
     const g =
       sc.rank === "X" || sc.rank === "XH"
-        ? 2
+        ? 5
         : sc.rank === "S" || sc.rank === "SH"
-          ? 1
-          : 0;
+          ? 4
+          : sc.rank === "A"
+            ? 3
+            : sc.rank === "B"
+              ? 2
+              : sc.rank === "C"
+                ? 1
+                : 0;
     // same bucket as the live histogram: CAST(rate * 10 AS INTEGER) truncates,
     // clamped to lazer's 0.5x-2.0x range
     const rb = Math.min(Math.max(Math.floor((sc.rate ?? 1) * 10), 5), 20);
@@ -903,19 +1005,24 @@ statsRouter.get("/snapshot", (req, res) => {
 
   type Agg = {
     total: number; played: number; fc: number; country: number;
-    pfc: number; ss: number; splus: number; onem: number;
+    pfc: number; nonfc: number; ss: number; gradeS: number;
+    gradeA: number; gradeB: number; gradeC: number; gradeD: number;
+    onem: number;
     top1: number; top8: number; top15: number;
     top25: number; top50: number; top100: number;
   };
   /** what one map contributed at that date (an object beats 14 booleans) */
   type Hit = {
     inCat: boolean; played: boolean; fc: boolean; country: boolean;
-    pfc: boolean; ss: boolean; splus: boolean; onem: boolean;
+    pfc: boolean; nonfc: boolean; ss: boolean; gradeS: boolean;
+    gradeA: boolean; gradeB: boolean; gradeC: boolean; gradeD: boolean;
+    onem: boolean;
     /** global position, 0 = none */
     rank: number;
   };
   const mkAgg = (): Agg => ({
-    total: 0, played: 0, fc: 0, country: 0, pfc: 0, ss: 0, splus: 0, onem: 0,
+    total: 0, played: 0, fc: 0, country: 0, pfc: 0, nonfc: 0, ss: 0,
+    gradeS: 0, gradeA: 0, gradeB: 0, gradeC: 0, gradeD: 0, onem: 0,
     top1: 0, top8: 0, top15: 0, top25: 0, top50: 0, top100: 0,
   });
   const addHit = (a: Agg, h: Hit) => {
@@ -924,8 +1031,13 @@ statsRouter.get("/snapshot", (req, res) => {
     if (h.fc) a.fc++;
     if (h.country) a.country++;
     if (h.pfc) a.pfc++;
+    if (h.nonfc) a.nonfc++;
     if (h.ss) a.ss++;
-    if (h.splus) a.splus++;
+    if (h.gradeS) a.gradeS++;
+    if (h.gradeA) a.gradeA++;
+    if (h.gradeB) a.gradeB++;
+    if (h.gradeC) a.gradeC++;
+    if (h.gradeD) a.gradeD++;
     if (h.onem) a.onem++;
     const r = h.rank;
     if (r > 0) {
@@ -948,7 +1060,7 @@ statsRouter.get("/snapshot", (req, res) => {
   const bestStd = new Float64Array(n);
   const bestClassic = new Float64Array(n);
   const fcStateAt = new Int8Array(n).fill(-1); // -1 = not played that day
-  const gradeAt = new Int8Array(n); // 2 = SS, 1 = S+, 0 = below
+  const gradeAt = new Int8Array(n); // 5 = SS, 4 = S+, 3 = A, 2 = B, 1 = C, 0 = D
   const rateAt = new Int8Array(n); // rate*10 of that best, 0 = not played
   const rankAt = new Int32Array(n);
   const c1At = new Uint8Array(n);
@@ -999,6 +1111,8 @@ statsRouter.get("/snapshot", (req, res) => {
     byRate: arr(21), // rate*10, 0.5x-2.0x
   };
   const byYear = new Map<string, Agg>(); // the only non-numeric dimension
+  // hero rows (All / Ranked / Loved) need the same gauges as the dists
+  const byStatus = { ranked: mkAgg(), loved: mkAgg() };
   // per-slice aggregates for the historical curve panel
   const curveTotal = new Int32Array(CURVE_STEPS + 1);
   const curvePlayed = new Int32Array(CURVE_STEPS + 1);
@@ -1061,11 +1175,17 @@ statsRouter.get("/snapshot", (req, res) => {
     const h: Hit = {
       inCat, played: cleared, fc: fced, country: c1,
       pfc: cleared && fcStateAt[i] === 0,
-      ss: gradeAt[i] === 2,
-      splus: gradeAt[i] >= 1,
+      nonfc: cleared && !fced,
+      ss: gradeAt[i] === 5,
+      gradeS: gradeAt[i] === 4,
+      gradeA: gradeAt[i] === 3,
+      gradeB: gradeAt[i] === 2,
+      gradeC: gradeAt[i] === 1,
+      gradeD: cleared && gradeAt[i] === 0,
       onem: onemd,
       rank,
     };
+    addHit(m.loved ? byStatus.loved : byStatus.ranked, h);
     bumpArr(dims.bySr, m.sr, h);
     bumpArr(dims.byLen, m.len, h);
     bumpArr(dims.byCombo, m.combo, h);
@@ -1089,6 +1209,10 @@ statsRouter.get("/snapshot", (req, res) => {
     bySr: out(dims.bySr), byYear: outYear(), byLen: out(dims.byLen),
     byCombo: out(dims.byCombo), byAr: out(dims.byAr), byOd: out(dims.byOd),
     byCs: out(dims.byCs), byHp: out(dims.byHp), byRate: out(dims.byRate),
+    byStatus: [
+      { bucket: "ranked", ...byStatus.ranked },
+      { bucket: "loved", ...byStatus.loved },
+    ],
     fc: fcCounts.map((c, fc_state) => ({ fc_state, c })).filter((f) => f.c > 0),
     globalTops: tops,
     scoreSums: {
