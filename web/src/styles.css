@@ -216,9 +216,6 @@ h1 { font-size: 21px; margin: 0; }
 .curve-chart { position: relative; overflow-x: clip; }
 .curve-chart svg { display: block; width: 100%; height: auto; }
 .curve-panel small { display: block; margin-top: 8px; color: var(--fg-dim); }
-.curve-legend { display: flex; justify-content: flex-end; gap: 16px; font-size: 11px; color: var(--fg-dim); margin: -2px 0 6px; }
-.curve-legend i { display: inline-block; width: 18px; border-top: 2px solid var(--accent); vertical-align: middle; margin-right: 6px; }
-.curve-legend i.cl-raw { width: 10px; border-top: 2px solid var(--fg-dim); }
 /* position/anchor handled in JS (tipPos) to stay inside the chart */
 .curve-tip {
   position: absolute; pointer-events: none;

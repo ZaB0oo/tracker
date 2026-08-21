@@ -5,19 +5,7 @@ import { fitSkillCurve } from "../logic/skillCurve.js";
 const band = (n: number, v: number) => Array.from({ length: n }, () => v);
 
 describe("fitSkillCurve", () => {
-  it("keeps a band's own median when nothing harder beats it", () => {
-    const b = fitSkillCurve(
-      new Map([
-        [10, band(9, 900_000)],
-        [20, band(9, 700_000)],
-      ])
-    );
-    expect(b[10].value).toBe(900_000);
-    expect(b[20].value).toBe(700_000);
-    expect(b[10].raw).toBe(900_000);
-  });
-
-  it("lifts an easy band to the best harder median, never touches the hard one", () => {
+  it("every sampled band keeps its own median, rises included", () => {
     const b = fitSkillCurve(
       new Map([
         [10, band(9, 800_000)], // easy maps, old unmodded scores
@@ -25,34 +13,39 @@ describe("fitSkillCurve", () => {
         [30, band(9, 1_000_000)],
       ])
     );
-    expect(b[10].value).toBe(1_400_000);
-    expect(b[10].raw).toBe(800_000); // the gap = score to grind
+    expect(b[10].value).toBe(800_000);
     expect(b[20].value).toBe(1_400_000);
-    expect(b[30].value).toBe(1_000_000); // never pulled down
+    expect(b[30].value).toBe(1_000_000);
+    expect(b[20].raw).toBe(1_400_000);
   });
 
-  it("never predicts below the band's own median", () => {
-    const b = fitSkillCurve(
-      new Map([
-        [10, band(9, 1_500_000)],
-        [15, band(101, 1_200_000)],
-        [20, band(9, 1_100_000)],
-      ])
-    );
-    for (const q of [10, 15, 20])
-      expect(b[q].value).toBeGreaterThanOrEqual(b[q].raw!);
-  });
-
-  it("stays non-increasing and carries values across empty bands", () => {
+  it("carries the last median across empty bands and below the data", () => {
     const b = fitSkillCurve(
       new Map([
         [10, band(9, 1_000_000)],
         [40, band(9, 600_000)],
       ])
     );
-    for (let q = 1; q < b.length; q++)
-      expect(b[q].value).toBeLessThanOrEqual(b[q - 1].value);
-    expect(b[25].value).toBe(1_000_000); // inherited from the left
+    expect(b[5].value).toBe(1_000_000); // below the data: first median
+    expect(b[25].value).toBe(1_000_000); // between: carried from the left
     expect(b[25].raw).toBeNull();
+    expect(b[60].value).toBe(600_000); // above: last median
+  });
+
+  it("under 5 bests a band has no median of its own", () => {
+    const b = fitSkillCurve(
+      new Map([
+        [10, band(4, 900_000)],
+        [20, band(5, 700_000)],
+      ])
+    );
+    expect(b[10].raw).toBeNull();
+    expect(b[10].value).toBe(700_000); // only sampled median in the data
+    expect(b[20].raw).toBe(700_000);
+  });
+
+  it("takes the middle best of a band, not an average", () => {
+    const b = fitSkillCurve(new Map([[10, [100, 200, 900_000, 300, 400]]]));
+    expect(b[10].value).toBe(300); // sorted: 100 200 300 400 900000
   });
 });

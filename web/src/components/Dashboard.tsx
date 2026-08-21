@@ -82,7 +82,6 @@ function RateColumn({
         clearTip();
       }}
       onDoubleClick={onView}
-      title="Double-click: show these maps"
     >
       <span className="rate-col-value">{b.played ? fmtNum(b.played) : ""}</span>
       <div className="rate-col-bar-wrap">
@@ -297,17 +296,9 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
   return (
     <div className="panel curve-panel">
       <h3>
-        Predicted reachable score by star rating (estimate)
+        Best score by star rating (median per 0.1★ band)
         {pastDay && <span className="dim"> — as of {pastDay}</span>}
       </h3>
-      <div className="curve-legend">
-        <span>
-          <i className="cl-fit" /> prediction
-        </span>
-        <span>
-          <i className="cl-raw" /> band median (below = score to grind)
-        </span>
-      </div>
       <div className="curve-chart">
         <svg viewBox={`0 0 ${W} ${H}`} onMouseLeave={() => setHover(null)}>
           <defs>
@@ -354,18 +345,6 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
             </g>
           ))}
           <polygon points={area} fill="url(#curve-fade)" />
-          {/* one flat tick per band at its own median — no connectors: with a
-              noisy history the verticals dominated the chart */}
-          {buckets.map((b) =>
-            b.raw != null && b.raw !== b.predicted ? (
-              <line
-                key={`r${b.sr}`}
-                x1={x(b.sr) + 1} x2={x(b.sr + BAND) - 1}
-                y1={y(b.raw)} y2={y(b.raw)}
-                stroke="var(--fg-dim)" strokeWidth="1.5" strokeOpacity="0.8"
-              />
-            ) : null
-          )}
           <polyline points={line} fill="none" stroke="var(--accent)" strokeWidth="2" />
           {/* hover by vertical band, aligned with the REAL slice
               [sr, sr+BAND) — the same span its step covers */}
@@ -394,9 +373,7 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
                   b.sr >= 10 ? null : Math.round((b.sr + 0.09999) * 100000) / 100000
                 )
               }
-            >
-              {onViewSr && <title>Double-click: show these maps in the Maps tab</title>}
-            </rect>
+            />
           ))}
         </svg>
         {hover && (
@@ -409,20 +386,9 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
                 ? "10★+"
                 : `${hover.sr.toFixed(1)}–${(hover.sr + 0.1).toFixed(1)}★`}
             </b>{" "}
-            Prediction: {fmtNum(hover.predicted)}
-            {hover.inherited ? " (inherited)" : ""}
+            Median: {fmtNum(hover.predicted)}
+            {hover.raw == null ? " (carried over)" : ""}
             <br />
-            {hover.raw == null ? (
-              <>
-                Under 5 bests: value carried over
-                <br />
-              </>
-            ) : hover.raw !== hover.predicted ? (
-              <>
-                Band median: {fmtNum(hover.raw)}
-                <br />
-              </>
-            ) : null}
             {fmtNum(hover.played)}/{fmtNum(hover.total)}{" "}
             maps played
             <br />
@@ -448,9 +414,9 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
         )}
       </div>
       <small>
-        one step per 0.1★ band · prediction = your best band median at this ★
-        or harder · missing counts unplayed maps too · linear up to 1M, log
-        above
+        one step per 0.1★ band = median of your standardised bests there ·
+        missing = that median minus your best, unplayed maps count too ·
+        linear up to 1M, log above
       </small>
     </div>
   );
@@ -641,7 +607,6 @@ const DistPanel = memo(function DistPanel({
           key={r.label}
           className={`dist-row${r.view && onView ? " dist-row-view" : ""}`}
           onDoubleClick={r.view && onView ? () => onView(r.view!) : undefined}
-          title={r.view && onView ? "Double-click: show these maps" : undefined}
         >
           <span className="dist-label">{r.label}</span>
           <Bar row={r} total={r.total} gaugeHidden={gaugeHidden} label={`${title} ${r.label}`} countryLabel={countryLabel} />
@@ -1035,7 +1000,6 @@ export function Dashboard({
     top1: sumSt("top1"), top8: sumSt("top8"), top15: sumSt("top15"),
     top25: sumSt("top25"), top50: sumSt("top50"), top100: sumSt("top100"),
   });
-  const drillTitle = onViewBucket ? "Double-click: show these maps" : undefined;
   const hero = (which: DashScope) =>
     onViewBucket
       ? () =>
@@ -1102,19 +1066,19 @@ export function Dashboard({
         <div className="hero-bars">
           <h3>Completion</h3>
           {scope === "all" && (
-            <div className={`dist-row${onViewBucket ? " dist-row-view" : ""}`} onDoubleClick={hero("all")} title={drillTitle}>
+            <div className={`dist-row${onViewBucket ? " dist-row-view" : ""}`} onDoubleClick={hero("all")}>
               <span className="dist-label">Global</span>
               <Bar row={heroGlobal} total={eff.total} gaugeHidden={gaugeHidden.isHidden} countryLabel={firstPlaceLabel(country)} label="Global" />
             </div>
           )}
           {scope !== "loved" && (
-            <div className={`dist-row${onViewBucket ? " dist-row-view" : ""}`} onDoubleClick={hero("ranked")} title={drillTitle}>
+            <div className={`dist-row${onViewBucket ? " dist-row-view" : ""}`} onDoubleClick={hero("ranked")}>
               <span className="dist-label">Ranked</span>
               <Bar row={heroRanked} total={eff.totalRanked} gaugeHidden={gaugeHidden.isHidden} countryLabel={firstPlaceLabel(country)} label="Ranked" />
             </div>
           )}
           {scope !== "ranked" && (
-            <div className={`dist-row${onViewBucket ? " dist-row-view" : ""}`} onDoubleClick={hero("loved")} title={drillTitle}>
+            <div className={`dist-row${onViewBucket ? " dist-row-view" : ""}`} onDoubleClick={hero("loved")}>
               <span className="dist-label">Loved</span>
               <Bar row={heroLoved} total={eff.totalLoved} gaugeHidden={gaugeHidden.isHidden} countryLabel={firstPlaceLabel(country)} label="Loved" />
             </div>
