@@ -1,7 +1,14 @@
 import { Router } from "express";
 import { getDb } from "../db/db.js";
 import { keysWhere, maniaKeysSql, parseRulesetParam, poolWhere, statusIn } from "../logic/rulesets.js";
-import { classicFromStandardised } from "../logic/rulesets.js";
+import {
+  replaySnapshot,
+  SNAP_DIM_INDEX,
+  type BestTransition,
+  type CountryTransition,
+  type GlobalTransition,
+  type SnapMap,
+} from "../logic/snapshot.js";
 import {
   CURVE_STEPS,
   N_OBJ,
@@ -10,7 +17,6 @@ import {
   fitSkillCurve,
   N_BASIC,
   scoresVersion,
-  witherScore,
   witherSql,
 } from "../logic/scoreSql.js";
 
@@ -868,37 +874,11 @@ statsRouter.get("/timeline", (req, res) => {
  * bucket attributes) is cached by scores version; each request is then a pure
  * in-memory aggregation (~10 ms over 150k maps).
  */
-interface SnapMap {
-  clear: string | null; // first clear day
-  onem: string | null; // mania: first 1,000,000 day (null elsewhere)
-  rankedDay: string | null; // day the map entered the catalog
-  loved: boolean; // status 4 (vs ranked/approved)
-  sr: number;
-  /** 0.1★ slice (star_rating * 10, capped) — the skill curve's own bucket */
-  q: number;
-  /** basic object count, to convert a predicted standardised score to classic */
-  n: number;
-  year: string | null;
-  len: number;
-  combo: number;
-  ar: number;
-  od: number;
-  cs: number;
-  hp: number;
-  /** fine buckets for the score-curve panel (index in its dimension, -1 unknown) */
-  arQ: number;
-  odQ: number;
-  csQ: number;
-  hpQ: number;
-  len10: number;
-  comboQ: number;
-  month: number;
-}
 interface SnapIndex {
   version: string;
   maps: SnapMap[];
-  /** country #1 transitions, aligned with maps[]: [day, held 0|1] */
-  country: ([string, number][] | undefined)[];
+  /** country #1 transitions, aligned with maps[] */
+  country: (CountryTransition[] | undefined)[];
   /** transitions of the BEST score, ALIGNED WITH maps[] (not keyed by id: the
    * snapshot walks all 150k maps per slider tick and hash lookups dominated
    * the cost): [day, gradeCode, fc_state, standardised, classic, rateBucket].
@@ -907,9 +887,9 @@ interface SnapIndex {
    * semantics (grade OF the best), which is not monotone: an SS beaten later
    * by a higher non-SS play disappears. rateBucket is rate*10 clamped to
    * 5..20, exactly like the live histogram. */
-  bests: ([string, number, number, number, number, number][] | undefined)[];
-  /** global leaderboard position transitions, aligned: [day, rank | 0] */
-  global: ([string, number][] | undefined)[];
+  bests: (BestTransition[] | undefined)[];
+  /** global leaderboard position transitions, aligned */
+  global: (GlobalTransition[] | undefined)[];
   mapIds: number[];
   /** Date.now() at build time, for the sync-churn throttle */
   builtAt: number;
@@ -1182,285 +1162,12 @@ statsRouter.get("/snapshot", (req, res) => {
   while (snapCaches.size > 2)
     snapCaches.delete(snapCaches.keys().next().value!);
 
-  type Agg = {
-    total: number; played: number; fc: number; country: number;
-    pfc: number; nonfc: number; ss: number; gradeS: number;
-    gradeA: number; gradeB: number; gradeC: number; gradeD: number;
-    onem: number;
-    top1: number; top8: number; top15: number;
-    top25: number; top50: number; top100: number;
-  };
-  /** what one map contributed at that date (an object beats 14 booleans) */
-  type Hit = {
-    inCat: boolean; played: boolean; fc: boolean; country: boolean;
-    pfc: boolean; nonfc: boolean; ss: boolean; gradeS: boolean;
-    gradeA: boolean; gradeB: boolean; gradeC: boolean; gradeD: boolean;
-    onem: boolean;
-    /** global position, 0 = none */
-    rank: number;
-  };
-  const mkAgg = (): Agg => ({
-    total: 0, played: 0, fc: 0, country: 0, pfc: 0, nonfc: 0, ss: 0,
-    gradeS: 0, gradeA: 0, gradeB: 0, gradeC: 0, gradeD: 0, onem: 0,
-    top1: 0, top8: 0, top15: 0, top25: 0, top50: 0, top100: 0,
-  });
-  const addHit = (a: Agg, h: Hit) => {
-    if (h.inCat) a.total++;
-    if (h.played) a.played++;
-    if (h.fc) a.fc++;
-    if (h.country) a.country++;
-    if (h.pfc) a.pfc++;
-    if (h.nonfc) a.nonfc++;
-    if (h.ss) a.ss++;
-    if (h.gradeS) a.gradeS++;
-    if (h.gradeA) a.gradeA++;
-    if (h.gradeB) a.gradeB++;
-    if (h.gradeC) a.gradeC++;
-    if (h.gradeD) a.gradeD++;
-    if (h.onem) a.onem++;
-    const r = h.rank;
-    if (r > 0) {
-      if (r === 1) a.top1++;
-      if (r <= 8) a.top8++;
-      if (r <= 15) a.top15++;
-      if (r <= 25) a.top25++;
-      if (r <= 50) a.top50++;
-      if (r <= 100) a.top100++;
-    }
-  };
-  const bumpArr = (a: Agg[], key: number, h: Hit) => {
-    if (key >= 0 && key < a.length) addHit(a[key], h);
-  };
-  const { maps, country, bests, global } = snapCache;
-  const n = maps.length;
-  // ONE walk of the transitions per map, reused by every consumer below (the
-  // gauges used to re-walk them a second time). Typed arrays: no allocation
-  // churn on a request that fires per slider tick.
-  const bestStd = new Float64Array(n);
-  const bestClassic = new Float64Array(n);
-  const fcStateAt = new Int8Array(n).fill(-1); // -1 = not played that day
-  const gradeAt = new Int8Array(n); // 5 = SS, 4 = S+, 3 = A, 2 = B, 1 = C, 0 = D
-  const rateAt = new Int8Array(n); // rate*10 of that best, 0 = not played
-  const rankAt = new Int32Array(n);
-  const c1At = new Uint8Array(n);
-  // score-curve panel dimension (default sr). The SR fit is ALWAYS computed —
-  // the missing estimates are defined against it — a second, display-only fit
-  // is added when the panel looks along another axis.
   const curveDimSel = String(req.query.curveDim ?? "sr");
-  const dimIdxOf =
-    curveDimSel === "ar"
-      ? (m: SnapMap) => m.arQ
-      : curveDimSel === "od"
-        ? (m: SnapMap) => m.odQ
-        : curveDimSel === "cs"
-          ? (m: SnapMap) => m.csQ
-          : curveDimSel === "hp"
-            ? (m: SnapMap) => m.hpQ
-            : curveDimSel === "length"
-              ? (m: SnapMap) => m.len10
-              : curveDimSel === "combo"
-                ? (m: SnapMap) => m.comboQ
-                : curveDimSel === "month"
-                  ? (m: SnapMap) => m.month
-                  : null;
-  const dimSteps = dimIdxOf ? curveDimSql(R, curveDimSel).steps : CURVE_STEPS;
-  // curve samples per 0.1★ slice, reused arrays (no Map, no per-request alloc)
-  const qs: number[][] = [];
-  for (let q = 0; q <= CURVE_STEPS; q++) qs.push([]);
-  const qs2: number[][] = [];
-  if (dimIdxOf) for (let q = 0; q <= dimSteps; q++) qs2.push([]);
-  for (let i = 0; i < n; i++) {
-    const m = maps[i];
-    if (m.clear != null && m.clear <= day) {
-      const tr = bests[i];
-      if (tr)
-        for (let k = 0; k < tr.length; k++) {
-          const t = tr[k];
-          if (t[0] > day) break;
-          gradeAt[i] = t[1];
-          fcStateAt[i] = t[2];
-          bestStd[i] = t[3];
-          bestClassic[i] = t[4];
-          rateAt[i] = t[5];
-        }
-      if (m.q >= 0 && bestStd[i] > 0) qs[m.q].push(bestStd[i]);
-      if (dimIdxOf && bestStd[i] > 0) {
-        const dq = dimIdxOf(m);
-        if (dq >= 0 && dq <= dimSteps) qs2[dq].push(bestStd[i]);
-      }
-      const ct = country[i];
-      if (ct)
-        for (let k = 0; k < ct.length; k++) {
-          if (ct[k][0] > day) break;
-          c1At[i] = ct[k][1] as 0 | 1;
-        }
-    }
-    const gt = global[i];
-    if (gt)
-      for (let k = 0; k < gt.length; k++) {
-        if (gt[k][0] > day) break;
-        rankAt[i] = gt[k][1];
-      }
-  }
-  // The curve is RE-FITTED on those bests: comparing today's level against
-  // past scores would make the historical missing meaningless.
-  const byQ = new Map<number, number[]>();
-  for (let q = 0; q <= CURVE_STEPS; q++) if (qs[q].length) byQ.set(q, qs[q]);
-  const curve = fitSkillCurve(byQ);
-  const byQ2 = new Map<number, number[]>();
-  if (dimIdxOf)
-    for (let q = 0; q <= dimSteps; q++) if (qs2[q].length) byQ2.set(q, qs2[q]);
-  const dispCurve = dimIdxOf ? fitSkillCurve(byQ2, dimSteps) : curve;
-
-  // Buckets are small integers: plain arrays instead of Map.get() 1.2M times
-  const AGG_LEN = 19; // mania "CS" (key count) reaches 18
-  const arr = (len = AGG_LEN) => Array.from({ length: len }, mkAgg);
-  const dims = {
-    bySr: arr(), byLen: arr(), byCombo: arr(),
-    byAr: arr(), byOd: arr(), byCs: arr(), byHp: arr(),
-    byRate: arr(21), // rate*10, 0.5x-2.0x
-  };
-  const byYear = new Map<string, Agg>(); // the only non-numeric dimension
-  // hero rows (All / Ranked / Loved) need the same gauges as the dists
-  const byStatus = { ranked: mkAgg(), loved: mkAgg() };
-  // per-band aggregates for the historical curve panel, indexed by the
-  // dimension it is looking at (SR by default)
-  const curveTotal = new Int32Array(dimSteps + 1);
-  const curvePlayed = new Int32Array(dimSteps + 1);
-  const curveMissC = new Float64Array(dimSteps + 1);
-  const curveMissW = new Float64Array(dimSteps + 1);
-  let missing = 0;
-  let missingClassic = 0;
-  let missingWither = 0;
-  // ranked score at that date, in the three units the hero shows (the card
-  // only had its classic value historised, from the timeline)
-  let rankedStd = 0;
-  let rankedClassic = 0;
-  let rankedWither = 0;
-  const tops = { top1: 0, top8: 0, top15: 0, top25: 0, top50: 0, top100: 0, checked: 0 };
-  const fcCounts = [0, 0, 0];
-
-  for (let i = 0; i < n; i++) {
-    const m = maps[i];
-    const inCat = m.rankedDay != null && m.rankedDay <= day;
-    const cleared = fcStateAt[i] >= 0;
-    // best AT THAT DATE, replayed above: a higher non-FC score set LATER is
-    // not in fcStateAt[i] yet, so it cannot take this FC away retroactively
-    const fced = cleared && fcStateAt[i] <= 1;
-    const onemd = m.onem != null && m.onem <= day;
-    const rank = inCat ? rankAt[i] : 0;
-
-    if (inCat) {
-      // the panel aggregates follow the SELECTED dimension (a map with an
-      // unknown SR still lands in its AR/length/... band, like the live
-      // curve); the missing itself stays defined against the SR curve
-      const dq = dimIdxOf ? dimIdxOf(m) : m.q;
-      const inBand = dq >= 0 && dq <= dimSteps;
-      if (inBand) {
-        curveTotal[dq]++;
-        if (cleared) curvePlayed[dq]++;
-      }
-      if (m.q >= 0) {
-        const pred = curve[m.q].value;
-        const mc = Math.max(0, classicFromStandardised(R, pred, m.n) - bestClassic[i]);
-        missing += Math.max(0, pred - bestStd[i]);
-        missingClassic += mc;
-        if (inBand) curveMissC[dq] += mc;
-        if (R === 0 && m.n > 0) {
-          const mw = Math.max(0, witherScore(pred, m.n) - witherScore(bestStd[i], m.n));
-          missingWither += mw;
-          if (inBand) curveMissW[dq] += mw;
-        }
-      }
-    }
-    if (inCat && cleared) {
-      fcCounts[fcStateAt[i]]++;
-      rankedStd += bestStd[i];
-      rankedClassic += bestClassic[i];
-      if (R === 0 && m.n > 0) rankedWither += witherScore(bestStd[i], m.n);
-    }
-    if (rank > 0) {
-      tops.checked++;
-      if (rank === 1) tops.top1++;
-      if (rank <= 8) tops.top8++;
-      if (rank <= 15) tops.top15++;
-      if (rank <= 25) tops.top25++;
-      if (rank <= 50) tops.top50++;
-      if (rank <= 100) tops.top100++;
-    }
-
-    const c1 = cleared && c1At[i] === 1;
-    // (!fced is implied by !cleared now that it derives from the best)
-    if (!inCat && !cleared && !c1 && rank === 0) continue;
-    const h: Hit = {
-      inCat, played: cleared, fc: fced, country: c1,
-      pfc: cleared && fcStateAt[i] === 0,
-      nonfc: cleared && !fced,
-      ss: gradeAt[i] === 5,
-      gradeS: gradeAt[i] === 4,
-      gradeA: gradeAt[i] === 3,
-      gradeB: gradeAt[i] === 2,
-      gradeC: gradeAt[i] === 1,
-      gradeD: cleared && gradeAt[i] === 0,
-      onem: onemd,
-      rank,
-    };
-    addHit(m.loved ? byStatus.loved : byStatus.ranked, h);
-    bumpArr(dims.bySr, m.sr, h);
-    bumpArr(dims.byLen, m.len, h);
-    bumpArr(dims.byCombo, m.combo, h);
-    bumpArr(dims.byAr, m.ar, h);
-    bumpArr(dims.byOd, m.od, h);
-    bumpArr(dims.byCs, m.cs, h);
-    bumpArr(dims.byHp, m.hp, h);
-    // a rate belongs to the SCORE: only a map WITH a best that day has one
-    if (cleared && rateAt[i] > 0) bumpArr(dims.byRate, rateAt[i], h);
-    if (m.year != null) {
-      let a = byYear.get(m.year);
-      if (!a) byYear.set(m.year, (a = mkAgg()));
-      addHit(a, h);
-    }
-  }
-  const out = (a: Agg[]) =>
-    a.map((agg, bucket) => ({ bucket, ...agg })).filter((r) => r.total || r.played || r.country || r.fc);
-  const outYear = () => [...byYear.entries()].map(([bucket, a]) => ({ bucket, ...a }));
-  res.json({
-    day,
-    bySr: out(dims.bySr), byYear: outYear(), byLen: out(dims.byLen),
-    byCombo: out(dims.byCombo), byAr: out(dims.byAr), byOd: out(dims.byOd),
-    byCs: out(dims.byCs), byHp: out(dims.byHp), byRate: out(dims.byRate),
-    byStatus: [
-      { bucket: "ranked", ...byStatus.ranked },
-      { bucket: "loved", ...byStatus.loved },
-    ],
-    fc: fcCounts.map((c, fc_state) => ({ fc_state, c })).filter((f) => f.c > 0),
-    globalTops: tops,
-    scoreSums: {
-      lazer: Math.round(rankedStd),
-      classic: Math.round(rankedClassic),
-      wither: Math.round(rankedWither),
-    },
-    missingSums: {
-      missing: Math.round(missing),
-      missingClassic: Math.round(missingClassic),
-      missingWither: Math.round(missingWither),
-    },
-    // same shape as /skill-curve, so the panel just swaps its source
-    curveDim: curveDimSel,
-    curve: dispCurve
-      .filter((b) => curveTotal[b.q] > 0)
-      .map((b) => ({
-        q: b.q,
-        predicted: b.value,
-        raw: b.raw,
-        samples: b.samples,
-        inherited: b.samples < 5,
-        total: curveTotal[b.q],
-        played: curvePlayed[b.q],
-        missingClassic: Math.round(curveMissC[b.q]),
-        missingWither: Math.round(curveMissW[b.q]),
-      })),
-  });
+  const dimSteps =
+    curveDimSel in SNAP_DIM_INDEX
+      ? curveDimSql(R, curveDimSel).steps
+      : CURVE_STEPS;
+  res.json(replaySnapshot(R, snapCache, day, curveDimSel, dimSteps));
 });
 
 // Compact stats for the stream overlay (?overlay=1) — polled every 5s,

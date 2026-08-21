@@ -16,7 +16,9 @@ import { MedalIcon } from "./Icons";
 import { VisibilityMenu } from "./VisibilityMenu";
 import { displayGrade, fmtNum } from "../format";
 import {
+  EXTRA_GAUGE_KEYS,
   FC_LABELS,
+  type ExtraGaugeKey,
   type Stats,
   GRADE_ORDER,
   type PoolMode,
@@ -28,6 +30,15 @@ import {
 
 const fmtK = (n: number) =>
   n >= 1_000_000 ? `${(n / 1_000_000).toFixed(2)}M` : `${Math.round(n / 1000)}k`;
+
+/** every extra gauge at zero (see EXTRA_GAUGE_KEYS: ONE list, no hand copies) */
+const zeroGauges = () =>
+  Object.fromEntries(EXTRA_GAUGE_KEYS.map((k) => [k, 0])) as Record<ExtraGaugeKey, number>;
+/** the extra gauges of a bucket that may omit some (absent = 0) */
+const gaugesOf = (b: Partial<Record<ExtraGaugeKey, number | null>> | undefined) =>
+  Object.fromEntries(
+    EXTRA_GAUGE_KEYS.map((k) => [k, b?.[k] ?? 0])
+  ) as Record<ExtraGaugeKey, number>;
 
 /**
  * Position of a chart tooltip (fractions 0..1 of the container): anchored to the
@@ -154,11 +165,7 @@ const RateHistogram = memo(function RateHistogram({
   const LO = 5;
   const HI = 20;
   const byBucket = new Map(rows.map((r) => [r.bucket, r]));
-  const empty = {
-    played: 0, fc: 0, pfc: 0, nonfc: 0, ss: 0, gradeS: 0,
-    gradeA: 0, gradeB: 0, gradeC: 0, gradeD: 0, country: 0,
-    top1: 0, top8: 0, top15: 0, top25: 0, top50: 0, top100: 0, onem: 0,
-  };
+  const empty = { played: 0, fc: 0, country: 0, ...zeroGauges() };
   const buckets: Stats["byRate"] = [];
   for (let b = LO; b <= HI; b++)
     buckets.push(byBucket.get(b) ?? { bucket: b, ...empty });
@@ -678,7 +685,7 @@ function GaugeLegend({
   );
 }
 
-interface DistRow {
+interface DistRow extends Partial<Record<ExtraGaugeKey, number | null>> {
   label: string;
   /** double-click: the Maps filters that select exactly this bucket */
   view?: Partial<Filters>;
@@ -686,21 +693,6 @@ interface DistRow {
   played: number | null;
   country?: number | null;
   fc?: number | null;
-  pfc?: number | null;
-  nonfc?: number | null;
-  ss?: number | null;
-  gradeS?: number | null;
-  gradeA?: number | null;
-  gradeB?: number | null;
-  gradeC?: number | null;
-  gradeD?: number | null;
-  onem?: number | null;
-  top1?: number | null;
-  top8?: number | null;
-  top15?: number | null;
-  top25?: number | null;
-  top50?: number | null;
-  top100?: number | null;
 }
 
 const DistPanel = memo(function DistPanel({
@@ -907,32 +899,12 @@ export function Dashboard({
         played: sv?.played ?? 0,
         fc: sv?.fc ?? 0,
         country: sv?.country ?? 0,
-        pfc: sv?.pfc ?? 0,
-        nonfc: sv?.nonfc ?? 0,
-        ss: sv?.ss ?? 0,
-        gradeS: sv?.gradeS ?? 0,
-        gradeA: sv?.gradeA ?? 0,
-        gradeB: sv?.gradeB ?? 0,
-        gradeC: sv?.gradeC ?? 0,
-        gradeD: sv?.gradeD ?? 0,
-        onem: sv?.onem ?? 0,
-        // replayed from the global events (a position with no event is dated
-        // at the best score that earned it)
-        top1: sv?.top1 ?? 0,
-        top8: sv?.top8 ?? 0,
-        top15: sv?.top15 ?? 0,
-        top25: sv?.top25 ?? 0,
-        top50: sv?.top50 ?? 0,
-        top100: sv?.top100 ?? 0,
+        ...gaugesOf(sv),
       };
     };
     const liveOf = (b: DistCounts): Omit<DistRow, "label"> => ({
       total: b.total, played: b.played, country: b.country, fc: b.fc,
-      pfc: b.pfc, nonfc: b.nonfc, ss: b.ss, gradeS: b.gradeS,
-      gradeA: b.gradeA, gradeB: b.gradeB, gradeC: b.gradeC,
-      gradeD: b.gradeD, onem: b.onem,
-      top1: b.top1, top8: b.top8, top15: b.top15,
-      top25: b.top25, top50: b.top50, top100: b.top100,
+      ...gaugesOf(b),
     });
     const bucketRows = (
       buckets: Bucket[],
@@ -1145,37 +1117,24 @@ export function Dashboard({
   const stLoved = past
     ? pastSt(past.gradesLoved, past.topsLoved, past.clearsLoved, past.fcLoved, past.onemLoved ?? 0)
     : data.byStatus?.find((b) => b.bucket === "loved");
-  const sumSt = (k: keyof DistCounts) =>
-    (((stRanked as unknown as Record<string, number | null>)?.[k]) ?? 0) +
-    (((stLoved as unknown as Record<string, number | null>)?.[k]) ?? 0);
+  const sumSt = (k: ExtraGaugeKey) =>
+    ((stRanked as Partial<Record<ExtraGaugeKey, number | null>> | undefined)?.[k] ?? 0) +
+    ((stLoved as Partial<Record<ExtraGaugeKey, number | null>> | undefined)?.[k] ?? 0);
   const heroRow = (
     played: number, country: number, fc: number,
-    st: typeof stRanked | { [k: string]: number } | undefined
+    st: Partial<Record<ExtraGaugeKey, number | null>> | undefined
   ) => ({
-          played, country, fc,
-          pfc: (st as DistCounts | undefined)?.pfc,
-          nonfc: (st as DistCounts | undefined)?.nonfc,
-          ss: (st as DistCounts | undefined)?.ss,
-          gradeS: (st as DistCounts | undefined)?.gradeS,
-          gradeA: (st as DistCounts | undefined)?.gradeA,
-          gradeB: (st as DistCounts | undefined)?.gradeB,
-          gradeC: (st as DistCounts | undefined)?.gradeC,
-          gradeD: (st as DistCounts | undefined)?.gradeD,
-          onem: (st as DistCounts | undefined)?.onem,
-          top1: (st as DistCounts | undefined)?.top1,
-          top8: (st as DistCounts | undefined)?.top8,
-          top15: (st as DistCounts | undefined)?.top15,
-          top25: (st as DistCounts | undefined)?.top25,
-          top50: (st as DistCounts | undefined)?.top50,
-          top100: (st as DistCounts | undefined)?.top100,
-        });
-  const heroGlobal = heroRow(eff.played, eff.country, eff.fc, {
-    pfc: sumSt("pfc"), nonfc: sumSt("nonfc"), ss: sumSt("ss"),
-    gradeS: sumSt("gradeS"), gradeA: sumSt("gradeA"), gradeB: sumSt("gradeB"),
-    gradeC: sumSt("gradeC"), gradeD: sumSt("gradeD"), onem: sumSt("onem"),
-    top1: sumSt("top1"), top8: sumSt("top8"), top15: sumSt("top15"),
-    top25: sumSt("top25"), top50: sumSt("top50"), top100: sumSt("top100"),
+    played, country, fc,
+    ...(Object.fromEntries(
+      EXTRA_GAUGE_KEYS.map((k) => [k, st?.[k]])
+    ) as Partial<Record<ExtraGaugeKey, number | null>>),
   });
+  const heroGlobal = heroRow(
+    eff.played, eff.country, eff.fc,
+    Object.fromEntries(
+      EXTRA_GAUGE_KEYS.map((k) => [k, sumSt(k)])
+    ) as Record<ExtraGaugeKey, number>
+  );
   const hero = (which: DashScope) =>
     onViewBucket
       ? () =>

@@ -8,6 +8,7 @@ import {
   fitSkillCurve,
   type CurveBucket,
 } from "./skillCurve.js";
+import { witherSql as witherSqlRaw } from "./wither.js";
 
 // ---------- Shared SQL expressions (required aliases: b = beatmaps, s = best) ----------
 
@@ -55,23 +56,11 @@ function classicFromStdRuleset(ruleset: number, stdExpr: string): string {
   }
 }
 
-// Witherscore (proposal ppy/osu#38224):
-//   scaled = min(std/1M, (std/1M)^1.62)
-//   wither = scaled × (n_objects² × 36.49 + n_objects × 2095) + std × 0.1
-// Monotone in standardised on a given map => same best as lazer.
-/** JS twin of witherSql, for the time machine's replay (std only). */
-export function witherScore(standardised: number, nObjects: number): number {
-  const x = standardised / FULL_BASE;
-  return Math.round(
-    Math.min(x, Math.pow(x, 1.62)) *
-      (36.49 * nObjects * nObjects + 2095 * nObjects) +
-      standardised * 0.1
-  );
-}
-
+// Witherscore lives in wither.ts (pure, testable); only the default map
+// expression for n is bound here, where N_OBJ is defined.
+export { witherScore } from "./wither.js";
 export function witherSql(stdExpr: string, nExpr: string = N_OBJ): string {
-  const x = `(CAST(${stdExpr} AS REAL) / ${FULL_BASE}.0)`;
-  return `CAST(ROUND(MIN(${x}, pow(${x}, 1.62)) * (36.49 * ${nExpr} * ${nExpr} + 2095.0 * ${nExpr}) + ${stdExpr} * 0.1) AS INTEGER)`;
+  return witherSqlRaw(stdExpr, nExpr);
 }
 
 /**

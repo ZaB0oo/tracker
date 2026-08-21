@@ -1,4 +1,5 @@
 import type {
+  ExtraGaugeKey,
   Filters,
   PoolMode,
   MapDetail,
@@ -252,28 +253,15 @@ export async function fetchTimeline(
   return res.json();
 }
 
-export interface SnapshotBucket {
+/** the extra gauges follow EXTRA_GAUGE_KEYS; the tops are replayed from the
+ * global events (a position with no event is dated at the best score) */
+export interface SnapshotBucket
+  extends Partial<Record<ExtraGaugeKey, number>> {
   bucket: string | number;
   total: number;
   played: number;
   fc: number;
   country: number;
-  pfc?: number;
-  nonfc?: number;
-  ss?: number;
-  gradeS?: number;
-  gradeA?: number;
-  gradeB?: number;
-  gradeC?: number;
-  gradeD?: number;
-  onem?: number;
-  /** global leaderboard tiers held at that date (replayed from the events) */
-  top1?: number;
-  top8?: number;
-  top15?: number;
-  top25?: number;
-  top50?: number;
-  top100?: number;
 }
 
 export interface Snapshot {

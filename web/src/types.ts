@@ -158,27 +158,24 @@ export interface Stats {
   byStatus: ({ bucket: string } & DistCounts)[];
 }
 
+/**
+ * The optional per-bucket gauges every completion surface carries on top of
+ * total/played/fc/country. ONE list — the dist rows, the snapshot buckets and
+ * the widgets all iterate it instead of copying the fields by hand.
+ */
+export const EXTRA_GAUGE_KEYS = [
+  "pfc", "nonfc", "ss", "gradeS", "gradeA", "gradeB", "gradeC", "gradeD",
+  "onem", "top1", "top8", "top15", "top25", "top50", "top100",
+] as const;
+export type ExtraGaugeKey = (typeof EXTRA_GAUGE_KEYS)[number];
+
 /** shared per-bucket completion counts (extra gauges may be absent) */
-export interface DistCounts {
+export interface DistCounts
+  extends Partial<Record<ExtraGaugeKey, number | null>> {
   total: number;
   played: number;
   country: number | null;
   fc: number | null;
-  pfc?: number | null;
-  nonfc?: number | null;
-  ss?: number | null;
-  gradeS?: number | null;
-  gradeA?: number | null;
-  gradeB?: number | null;
-  gradeC?: number | null;
-  gradeD?: number | null;
-  onem?: number | null;
-  top1?: number | null;
-  top8?: number | null;
-  top15?: number | null;
-  top25?: number | null;
-  top50?: number | null;
-  top100?: number | null;
 }
 
 export interface Bucket extends DistCounts {
