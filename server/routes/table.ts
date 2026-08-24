@@ -1,10 +1,13 @@
 import { Router } from "express";
 import { getDb } from "../db/db.js";
 import { hitCountExpr, mapWhere, scoreWhere, type MetricParams } from "../logic/metrics.js";
-import { ensureMissingFresh } from "../logic/scoreSql.js";
+import { PP_SQL, ensureMissingFresh } from "../logic/scoreSql.js";
 import { keysWhere, maniaKeysSql, parseRulesetParam, poolWhere } from "../logic/rulesets.js";
 import { parseLengthSeconds, parseSearch, parseStatus } from "../logic/searchQuery.js";
+import { srMods, srModsKey } from "../logic/score.js";
 import { getBeatmapsByIds } from "../osu/api.js";
+import { queueLocalPp } from "../osu/ppFill.js";
+import { queueModdedSr } from "./metrics.js";
 
 export const tableRouter = Router();
 
@@ -29,7 +32,7 @@ const SORT_COLUMNS: Record<string, string> = {
   grade: "grade_order",
   fc_state: "s.fc_state",
   accuracy: "s.accuracy",
-  pp: "s.pp",
+  pp: PP_SQL,
   mod_multiplier: "s.mod_multiplier",
   rate: "s.rate",
   artist: "st.artist COLLATE NOCASE",
@@ -405,7 +408,9 @@ tableRouter.get("/table", (req, res) => {
         st.artist, st.title, st.creator, st.ranked_date,
         st.download_disabled AS dmca,
         s.id AS score_id, s.ended_at, s.rank AS grade, s.accuracy,
-        s.max_combo AS score_max_combo, s.pp, s.mods, s.fc_state,
+        s.max_combo AS score_max_combo, ${PP_SQL} AS pp,
+        (s.pp IS NULL AND s.pp_local >= 0) AS pp_estimated,
+        s.mods, s.fc_state,
         s.mod_multiplier,
         s.rate AS rate,
         s.total_score, s.classic_total_score,
@@ -458,10 +463,41 @@ tableRouter.get("/map/:id", (req, res) => {
   const scores = db
     .prepare(
       `SELECT id, ended_at, rank, accuracy, max_combo, total_score,
-         classic_total_score, pp, mods, fc_state, passed, rate, mod_multiplier
+         classic_total_score, pp, pp_local, mods, fc_state, passed, rate,
+         mod_multiplier, statistics, maximum_statistics
        FROM scores WHERE beatmap_id = ? AND ruleset = ? ORDER BY ended_at DESC`
     )
-    .all(id, parseRulesetParam(req.query.ruleset));
+    .all(id, parseRulesetParam(req.query.ruleset)) as (Record<string, unknown> & {
+    mods: string;
+  })[];
+  // rating of the mods played, for the score card (cache misses fill in the
+  // background and show on the next open) — same idiom as the metric preview
+  const cachedSr = db.prepare(
+    "SELECT star_rating FROM modded_sr WHERE beatmap_id = ? AND ruleset = ? AND mods = ?"
+  );
+  for (const s of scores) {
+    const played = srMods(s.mods);
+    let sr: number | null = null;
+    if (played.length > 0) {
+      const key = srModsKey(played);
+      const hit = cachedSr.get(id, R, key) as
+        | { star_rating: number | null }
+        | undefined;
+      if (hit) sr = hit.star_rating;
+      else queueModdedSr(id, played, key, R);
+    }
+    s.sr_mods = sr;
+    // pp the API left empty and the backfill has not reached yet: compute
+    // this one now, the modal is being looked at — ranked/approved maps
+    // only, the game grants no pp elsewhere (loved included)
+    const st = (map as { status: number }).status;
+    if (s.pp == null && s.pp_local == null && s.passed && (st === 1 || st === 2))
+      queueLocalPp({
+        id: s.id as number, mapId: id, ruleset: R, mods: s.mods,
+        statistics: s.statistics as string, accuracy: s.accuracy as number,
+        maxCombo: s.max_combo as number,
+      });
+  }
   const user =
     db
       .prepare(

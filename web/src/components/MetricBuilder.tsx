@@ -327,7 +327,15 @@ export function MetricBuilder({
             onChange={(e) => {
               const kind = e.target.value as MetricParams["kind"];
               const step =
-                kind === "ranked_score" ? 10_000_000_000 : kind === "pp" ? 500 : 1000;
+                kind === "ranked_score"
+                  ? 10_000_000_000
+                  : kind === "std_score"
+                    ? 1_000_000_000
+                    : kind === "pp"
+                      ? 500
+                      : kind === "total_pp"
+                        ? 100_000
+                        : 1000;
               setStepStr(String(step));
               setP((s) => ({
                 ...s,
@@ -338,8 +346,10 @@ export function MetricBuilder({
             }}
           >
             <option value="count">Count maps</option>
-            <option value="ranked_score">Ranked score</option>
+            <option value="ranked_score">Score (Classic)</option>
+            <option value="std_score">Score (Standardised)</option>
             <option value="pp">Weighted pp</option>
+            <option value="total_pp">Total pp</option>
           </select>
         </div>
 
@@ -348,9 +358,9 @@ export function MetricBuilder({
             <div className="mb-title">
               {isCount
                 ? "A map counts when I have a score that is…"
-                : p.kind === "ranked_score"
-                  ? "Only sum scores that are… (best matching score per map)"
-                  : "Only weigh scores that are…"}
+                : p.kind === "pp"
+                  ? "Only weigh scores that are…"
+                  : "Only sum scores that are… (best matching score per map)"}
             </div>
             <div className="mb-inline">
               <label>
@@ -593,7 +603,7 @@ export function MetricBuilder({
             <label>
               every
               <input
-                type="number" min={1}
+                type="number" min={1} className="mb-step"
                 value={stepStr}
                 onChange={(e) => {
                   const v = e.target.value;
@@ -679,7 +689,11 @@ export function MetricBuilder({
                 : "Maps matching now: "
               : p.kind === "pp"
                 ? "Weighted pp now: "
-                : "Ranked score now: "}
+                : p.kind === "total_pp"
+                  ? "Total pp now: "
+                  : p.kind === "std_score"
+                    ? "Standardised score now: "
+                    : "Classic score now: "}
             <b>{preview ? fmtNum(preview.count) : "…"}</b>
           </div>
           {preview && preview.byBucket.length > 0 && (

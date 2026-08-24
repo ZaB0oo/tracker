@@ -22,6 +22,8 @@ export interface TableRow {
   accuracy: number | null;
   score_max_combo: number | null;
   pp: number | null;
+  /** 1: pp is the local estimate, not an official value (shown with a ~) */
+  pp_estimated: number | null;
   mods: string | null;
   mod_multiplier: number | null;
   /** playback rate of the best score (0.5x-2.0x, 1 = nomod speed) */
@@ -69,12 +71,19 @@ export interface MapDetail {
     total_score: number;
     classic_total_score: number | null;
     pp: number | null;
+    /** locally computed pp when the API has none (-1: can never have one) */
+    pp_local: number | null;
     mods: string;
     fc_state: number;
     passed: number;
     /** playback rate and mod multiplier of that score */
     rate: number | null;
     mod_multiplier: number | null;
+    /** hit counts JSON (and the map's maximums), for the score card */
+    statistics: string;
+    maximum_statistics: string | null;
+    /** rating of the mods played (null: nomod, or not computed yet) */
+    sr_mods: number | null;
   }[];
   user: {
     played: number;

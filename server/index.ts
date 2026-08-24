@@ -7,6 +7,7 @@ import { config } from "./config.js";
 import { getDb } from "./db/db.js";
 import { router } from "./routes.js";
 import { startCatalogRefresh, startPolling } from "./sync/daemon.js";
+import { startPpBackfill } from "./osu/ppFill.js";
 import { getCurrentRpm } from "./osu/api.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -105,6 +106,7 @@ const server = app.listen(config.port, HOST, () => {
   }
   startPolling();
   startCatalogRefresh();
+  startPpBackfill();
 });
 server.on("error", (e: NodeJS.ErrnoException) => {
   if (e.code === "EADDRINUSE") {

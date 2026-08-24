@@ -1,19 +1,22 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { rulesetStatFields } from "../rulesets";
+import { AccScatterPanel } from "./AccScatter";
 import { fetchSkillCurve, fetchSnapshot, fetchStats, fetchTimeline, type DashScope, type Snapshot, type SnapshotBucket } from "../api";
 import { firstPlaceLabel, useCountryCode } from "../country";
 import { useDisplayPrefs } from "../prefs";
 import { useHidden } from "../visibility";
 import { GradeBadge } from "./GradeBadge";
 import { HeatmapPanel } from "./Heatmap";
+import { HeroRecords } from "./Records";
+import { SessionsPanel } from "./SessionsPanel";
+import { StatsStrip } from "./StatsStrip";
 import { KeysChips } from "./KeysChips";
 import { PacksPanel } from "./PacksPanel";
 import { useTipPlacement } from "../useTipPlacement";
 import { PoolSeg } from "./PoolSeg";
 import { TimeMachineBar } from "./TimeMachine";
 import { MedalIcon } from "./Icons";
-import { VisibilityMenu } from "./VisibilityMenu";
 import { displayGrade, fmtNum } from "../format";
 import {
   EXTRA_GAUGE_KEYS,
@@ -30,6 +33,16 @@ import {
 
 const fmtK = (n: number) =>
   n >= 1_000_000 ? `${(n / 1_000_000).toFixed(2)}M` : `${Math.round(n / 1000)}k`;
+
+/** dashboard sub-tabs — "Charts" will also host the future graphs */
+const DASH_TABS = [
+  ["overview", "Overview"],
+  ["sessions", "Sessions"],
+  ["breakdowns", "Breakdowns"],
+  ["charts", "Charts"],
+  ["packs", "Packs"],
+] as const;
+type DashTab = (typeof DASH_TABS)[number][0];
 
 /** every extra gauge at zero (see EXTRA_GAUGE_KEYS: ONE list, no hand copies) */
 const zeroGauges = () =>
@@ -763,7 +776,6 @@ export function Dashboard({
   const isStd = ruleset === 0;
   const country = useCountryCode();
   const prefs = useDisplayPrefs();
-  const distHidden = useHidden("dashboard-dist");
   const gaugeHidden = useHidden(
     "dashboard-gauges",
     GAUGES_HIDDEN_DEFAULT,
@@ -787,6 +799,16 @@ export function Dashboard({
   const setScopePersist = (v: DashScope) => {
     localStorage.setItem("dash-scope", v);
     setScope(v);
+  };
+  // Dashboard sub-tabs. The scope bar, gauge legend and time machine above
+  // stay global: the slider keeps steering whichever tab is open.
+  const [tab, setTab] = useState<DashTab>(() => {
+    const v = localStorage.getItem("dash-tab");
+    return DASH_TABS.some(([id]) => id === v) ? (v as DashTab) : "overview";
+  });
+  const setTabPersist = (v: DashTab) => {
+    localStorage.setItem("dash-tab", v);
+    setTab(v);
   };
   const { data, isLoading, error } = useQuery({
     queryKey: ["stats", ruleset, pool, keys, scope],
@@ -1232,10 +1254,25 @@ export function Dashboard({
           countryLabel={firstPlaceLabel(country)}
         />
       </div>
-      {points.length > 1 && (
+      {/* sessions are all-time: the slider has nothing to steer there, so it
+          hides rather than sitting around only to dim the panel */}
+      {points.length > 1 && tab !== "sessions" && (
         <TimeMachineBar points={points} idx={tmIdx} onChange={setTmIdx} />
       )}
       </div>
+      <div className="dash-tabs">
+        {DASH_TABS.map(([id, label]) => (
+          <button
+            key={id}
+            className={tab === id ? "active" : ""}
+            onClick={() => setTabPersist(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === "overview" && (
+      <>
       {/* Hero: the essentials at a glance */}
       <div className="card hero">
         <div className="hero-bars">
@@ -1352,21 +1389,43 @@ export function Dashboard({
             )}
           </div>
         </div>
+        <HeroRecords
+          ruleset={ruleset}
+          pool={pool}
+          keys={keys}
+          scope={scope}
+          dimmed={past != null}
+        />
+        <StatsStrip
+          ruleset={ruleset}
+          pool={pool}
+          keys={keys}
+          scope={scope}
+          dimmed={past != null}
+          completion={
+            scope === "ranked"
+              ? { done: t.ranked_played ?? 0, total: t.ranked_total }
+              : scope === "loved"
+                ? { done: t.loved_played ?? 0, total: t.loved_total }
+                : { done: t.played, total: t.total }
+          }
+          grades={data.grades}
+          rankedClassic={data.scoreSums.classic}
+        />
       </div>
 
       <HeatmapPanel cutoffDay={past?.day ?? null} ruleset={ruleset} pool={pool} keys={keys} scope={scope} />
+      </>
+      )}
 
-      <div className="view-toolbar">
-        <VisibilityMenu
-          items={dists.map((d) => ({ id: d.title, label: `Completion by ${d.title}` }))}
-          isHidden={distHidden.isHidden}
-          onToggle={distHidden.toggle}
-          label="Completion shown"
-        />
-      </div>
+      {tab === "sessions" && (
+      <SessionsPanel ruleset={ruleset} pool={pool} keys={keys} scope={scope} />
+      )}
+
+      {tab === "breakdowns" && (
+      <>
       <div className="dist-grid">
         {dists
-          .filter((d) => !distHidden.isHidden(d.title))
           .map((d) => (
             <DistPanel
               key={d.title}
@@ -1385,16 +1444,11 @@ export function Dashboard({
         countryLabel={firstPlaceLabel(country)}
         onViewRate={onViewRate && viewRate}
       />
+      </>
+      )}
 
-      <PacksPanel
-        ruleset={ruleset}
-        at={tmDayDeb}
-        pool={pool}
-        keys={keys}
-        scope={scope}
-        onViewPack={onViewPack && viewPack}
-      />
-
+      {tab === "charts" && (
+      <>
       <SkillCurvePanel
         ruleset={ruleset}
         pool={pool}
@@ -1406,6 +1460,26 @@ export function Dashboard({
         pastDay={snapCurveOk && snap ? snap.day : null}
         onViewMaps={onViewBucket && viewBucket}
       />
+      <AccScatterPanel
+        ruleset={ruleset}
+        pool={pool}
+        keys={keys}
+        scope={scope}
+        at={tmDayDeb}
+      />
+      </>
+      )}
+
+      {tab === "packs" && (
+      <PacksPanel
+        ruleset={ruleset}
+        at={tmDayDeb}
+        pool={pool}
+        keys={keys}
+        scope={scope}
+        onViewPack={onViewPack && viewPack}
+      />
+      )}
     </div>
   );
 }

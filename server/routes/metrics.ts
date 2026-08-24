@@ -2,11 +2,12 @@ import { Router } from "express";
 import { getDb } from "../db/db.js";
 import { srMods, srModsKey, type ModRef } from "../logic/score.js";
 import { evalMetric, previewMetric } from "../logic/metricEval.js";
+import { PP_SQL } from "../logic/scoreSql.js";
 import { mapWhere, scoreWhere, type MetricParams } from "../logic/metrics.js";
 import { hasOsuFile, localStarRating } from "../osu/difficulty.js";
 import { parseRulesetParam, poolWhere } from "../logic/rulesets.js";
 
-const KINDS = ["count", "ranked_score", "pp"] as const;
+const KINDS = ["count", "ranked_score", "std_score", "pp", "total_pp"] as const;
 
 /**
  * Parses stored metric params. Guards two things at once: a corrupt row must
@@ -26,7 +27,7 @@ function loadParams(row: { id: number; params: string }): MetricParams | null {
 
 /** Lazy background fill of the modded-SR cache, in the background. */
 const srInFlight = new Set<string>();
-function queueModdedSr(
+export function queueModdedSr(
   beatmapId: number,
   mods: ModRef[],
   key: string,
@@ -258,7 +259,7 @@ metricsRouter.get("/metrics/:id/pp-top", (req, res) => {
     : "strftime('%Y-%m', s.ended_at) <= @period";
   const rows = getDb()
     .prepare(
-      `SELECT s.beatmap_id, MAX(s.pp) AS pp, s.rank, s.accuracy, s.mods,
+      `SELECT s.beatmap_id, MAX(${PP_SQL}) AS pp, s.rank, s.accuracy, s.mods,
          s.ended_at, b.version, b.star_rating, st.artist, st.title
        FROM scores s
        JOIN beatmaps b ON b.id = s.beatmap_id
@@ -266,7 +267,7 @@ metricsRouter.get("/metrics/:id/pp-top", (req, res) => {
        LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${p.ruleset ?? 0}
        WHERE s.ruleset = ${p.ruleset ?? 0}
          AND ${mapWhere(p.map, { ruleset: p.ruleset ?? 0, pool: p.pool, keys: p.keys })} AND ${scoreWhere(p.score)}
-         AND s.pp IS NOT NULL AND s.passed = 1 AND ${bound}
+         AND ${PP_SQL} IS NOT NULL AND s.passed = 1 AND ${bound}
        GROUP BY s.beatmap_id
        ORDER BY pp DESC
        LIMIT 100`

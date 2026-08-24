@@ -2,6 +2,15 @@ import type { SoloScore } from "../osu/types.js";
 import { RULESET_OSU } from "./rulesets.js";
 
 /**
+ * pp of a score, locally computed fallback included: loved maps and unranked
+ * mod combos have API pp NULL — osu/ppFill.ts fills pp_local for them in the
+ * background, and -1 there means "can never have one" (stays NULL here).
+ * Lives in this db-free module so the pure logic tests can import it too.
+ */
+export const PP_SQL =
+  "COALESCE(s.pp, CASE WHEN s.pp_local >= 0 THEN s.pp_local END)";
+
+/**
  * FC state exposed to the UI:
  *  0 = PERFECT  : perfect combo (no combo point lost, slider ends included)
  *  1 = FC       : no miss or "visual" slider break, but combo < max
@@ -75,11 +84,13 @@ export function computeRate(
  * since the 2026 reading rework). The three ramps are here because what they
  * change IS the rate, which is what the difficulty calculator reads. DA
  * overrides CS/AR/OD/HP, and the mania key mods change the convert itself —
- * rosu-pp applies both when they are passed along.
+ * rosu-pp applies both when they are passed along. The automation mods RX/AP
+ * count too: rosu-pp rates them far lower (a relax "12★" is really ~5★), and
+ * leaving them out of the key made an RX play borrow the honest rating.
  */
 export const SR_MODS = new Set([
   "DT", "NC", "HT", "DC", "HR", "EZ", "FL", "HD", "TD", "WU", "WD", "AS",
-  "DA",
+  "DA", "RX", "AP",
   "1K", "2K", "3K", "4K", "5K", "6K", "7K", "8K", "9K", "10K", "DS",
 ]);
 

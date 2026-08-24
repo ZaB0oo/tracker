@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   fetchClears,
   fetchDaily,
+  fetchSessionScores,
   fetchTimeline,
   type ClearRow,
   type TimelinePoint,
@@ -14,6 +15,7 @@ import type { PoolMode } from "../types";
 import { fmtCompact, fmtDate, fmtNum } from "../format";
 import { GradeBadge } from "./GradeBadge";
 import { MapModal } from "./MapModal";
+import { PlayScatter } from "./PlayScatter";
 import { useTipPlacement } from "../useTipPlacement";
 
 const CELL = 12;
@@ -118,6 +120,15 @@ export const HeatmapPanel = memo(function HeatmapPanel({
     queryFn: () => fetchClears(0, 500, selDay, ruleset, pool, keys, scope),
     refetchInterval: 5 * 60_000,
   });
+  // every play of that day for the intraday chart (same endpoint as the
+  // session detail: the day is just another time span)
+  const dayStart = `${selDay}T00:00:00Z`;
+  const dayEnd = `${selDay}T23:59:59Z`;
+  const { data: dayScores } = useQuery({
+    queryKey: ["session-scores", dayStart, dayEnd, ruleset, pool, keys, scope],
+    queryFn: () => fetchSessionScores(dayStart, dayEnd, ruleset, pool, keys, scope),
+    refetchInterval: 5 * 60_000,
+  });
   const [modalId, setModalId] = useState<number | null>(null);
   const [ctx, setCtx] = useState<{ x: number; y: number; row: ClearRow } | null>(null);
   const [sortKey, setSortKey] = useState<"time" | "title" | "sr" | "grade" | "acc">("time");
@@ -171,6 +182,24 @@ export const HeatmapPanel = memo(function HeatmapPanel({
       setSortDesc(key === "sr" || key === "grade" || key === "acc");
     }
   };
+
+  // active spans of the day (plays under an hour apart, like /sessions),
+  // shaded behind the intraday dots
+  const daySc = dayScores?.scores ?? [];
+  const dayBands: { from: number; to: number; kind: "session" }[] = [];
+  {
+    let from = 0;
+    let prev: number | null = null;
+    for (const s of daySc) {
+      const t = Date.parse(s.at);
+      if (prev == null || t - prev > 3_600_000) {
+        if (prev != null) dayBands.push({ from, to: prev, kind: "session" });
+        from = t - (s.len ?? 0) * 1000;
+      }
+      prev = t;
+    }
+    if (prev != null) dayBands.push({ from, to: prev, kind: "session" });
+  }
 
   const sel = tl ? dayStats(tl.points, tl.tiers, selDay) : null;
   const gradeDeltas = tl
@@ -308,7 +337,7 @@ export const HeatmapPanel = memo(function HeatmapPanel({
               {hoverGrades.map((g) => (
                 <span key={g.tier} className="hm-day-grade">
                   <GradeBadge grade={g.tier} width={22} />
-                  <b className={g.d < 0 ? "dim" : ""}>
+                  <b className={g.d < 0 ? "val-neg" : "val-pos"}>
                     {g.d > 0 ? `+${g.d}` : g.d}
                   </b>
                 </span>
@@ -363,7 +392,7 @@ export const HeatmapPanel = memo(function HeatmapPanel({
                     {gradeDeltas.map((g) => (
                       <span key={g.tier} className="hm-day-grade">
                         <GradeBadge grade={g.tier} width={26} />
-                        <b className={g.d < 0 ? "dim" : ""}>
+                        <b className={g.d < 0 ? "val-neg" : "val-pos"}>
                           {g.d > 0 ? `+${g.d}` : g.d}
                         </b>
                       </span>
@@ -447,6 +476,23 @@ export const HeatmapPanel = memo(function HeatmapPanel({
           </div>
         )}
       </div>
+      {/* the selected day unfolded over the full panel width: one dot per
+          play across 24h, the active spans shaded */}
+      {daySc.length > 1 && (
+        <div className="hm-intraday">
+          <div className="hm-intraday-head">
+            <b>{selDay === todayIso ? "Today" : fmtDate(selDay)}</b>
+            <span>day timeline</span>
+          </div>
+          <PlayScatter
+            scores={daySc}
+            bands={dayBands}
+            domain={[Date.parse(dayStart), Date.parse(dayStart) + 86_400_000]}
+            onOpen={setModalId}
+            wide
+          />
+        </div>
+      )}
       {ctx && (
         <>
           <div

@@ -6,7 +6,8 @@ import {
   type MetricParams,
 } from "./metrics.js";
 import { parseRulesetParam } from "./rulesets.js";
-import { scoresVersion } from "./scoreSql.js";
+import { PP_SQL, scoresVersion } from "./scoreSql.js";
+import { ppLocalVersion } from "../osu/ppFill.js";
 
 /**
  * Params come from the HTTP body (preview) or from persisted JSON — never
@@ -218,10 +219,13 @@ function evalCount(p: MetricParams, gran: "month" | "day"): MetricResult {
   };
 }
 
-/** Ranked-score metric: cumulative sum of best classic score per map. */
+/** Score-sum metric: cumulative best score per map — classic for
+ * "ranked_score", standardised for "std_score" (same replay, the per-map
+ * best is identical either way since classic is monotone in standardised). */
 function evalRankedScore(p: MetricParams, gran: "month" | "day"): MetricResult {
   const db = getDb();
   const R = p.ruleset ?? 0;
+  const VAL = p.kind === "std_score" ? "s.total_score" : RANKED_CLASSIC;
   // LEADERBOARD SEMANTICS, like the count metrics: a map contributes the
   // score that actually counts on it — its BEST — and only if that best
   // matches the conditions. Summing the best AMONG the matching scores
@@ -229,7 +233,7 @@ function evalRankedScore(p: MetricParams, gran: "month" | "day"): MetricResult {
   // beaten DT play is not part of your ranked score).
   const rows = db
     .prepare(
-      `SELECT s.beatmap_id AS bid, s.ended_at AS at, ${RANKED_CLASSIC} AS v,
+      `SELECT s.beatmap_id AS bid, s.ended_at AS at, ${VAL} AS v,
          (${scoreWhere(p.score, isInverted(p))}) AS matches
        FROM scores s
        JOIN beatmaps b ON b.id = s.beatmap_id
@@ -268,6 +272,57 @@ function evalRankedScore(p: MetricParams, gran: "month" | "day"): MetricResult {
 }
 
 /**
+ * Total-pp metric: the pp of each map's LEADERBOARD BEST — the classic best,
+ * the same score the ranked-score sum keeps — summed. NOT the highest pp
+ * among the map's scores: a beaten DT play's pp is not part of the total,
+ * exactly like its score is not part of the ranked score.
+ */
+function evalTotalPp(p: MetricParams, gran: "month" | "day"): MetricResult {
+  const db = getDb();
+  const R = p.ruleset ?? 0;
+  const rows = db
+    .prepare(
+      `SELECT s.beatmap_id AS bid, s.ended_at AS at, ${RANKED_CLASSIC} AS v,
+         ${PP_SQL} AS pp,
+         (${scoreWhere(p.score, isInverted(p))}) AS matches
+       FROM scores s
+       JOIN beatmaps b ON b.id = s.beatmap_id
+       JOIN beatmapsets st ON st.id = b.beatmapset_id
+       LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}
+       WHERE s.ruleset = ${R} AND s.passed = 1
+         AND ${mapWhere(p.map, { ruleset: R, pool: p.pool, keys: p.keys })}
+       ORDER BY s.ended_at`
+    )
+    .all() as { bid: number; at: string; v: number; pp: number | null; matches: number }[];
+  // Same replay as the ranked-score metric: each map contributes through its
+  // running classic best — its pp when the best matches the conditions (0
+  // when the best has no pp, e.g. a loved map), nothing otherwise. The total
+  // can go DOWN: a new best with less pp replaces the old best's pp.
+  const bestVal = new Map<number, number>();
+  const contrib = new Map<number, number>();
+  let total = 0;
+  const points: { at: string; total: number }[] = [];
+  for (const r of rows) {
+    if (r.v <= (bestVal.get(r.bid) ?? -1)) continue; // not a new best
+    bestVal.set(r.bid, r.v);
+    const now = r.matches === 1 ? (r.pp ?? 0) : 0;
+    const before = contrib.get(r.bid) ?? 0;
+    if (now === before) continue;
+    contrib.set(r.bid, now);
+    total += now - before;
+    points.push({ at: r.at, total });
+  }
+  return {
+    count: total,
+    total: 0, // "total available" not meaningful for a pp sum
+    step: p.step,
+    milestones: thresholds(points, p.step),
+    evolution: p.showEvolution ? bucketEvolution(points, gran) : null,
+    byBucket: [],
+  };
+}
+
+/**
  * Weighted-pp metric: the official profile rules applied to the matching set.
  * ONE score per map — the HIGHEST pp, regardless of the tracker's classic
  * best —, descending weights 0.95^i, plus the bonus
@@ -281,8 +336,8 @@ function evalPp(p: MetricParams, gran: "month" | "day"): MetricResult {
   const base = baseFrom(p, false);
   const rows = db
     .prepare(
-      `SELECT s.beatmap_id AS bid, s.ended_at AS at, s.pp AS pp ${base}
-         AND s.pp IS NOT NULL AND s.passed = 1
+      `SELECT s.beatmap_id AS bid, s.ended_at AS at, ${PP_SQL} AS pp ${base}
+         AND ${PP_SQL} IS NOT NULL AND s.passed = 1
        ORDER BY s.ended_at`
     )
     .all() as { bid: number; at: string; pp: number }[];
@@ -345,16 +400,19 @@ export function evalMetric(
   gran: "month" | "day"
 ): MetricResult {
   p = sanitized(p);
-  const version = scoresVersion();
+  // the pp fill version too: locally computed pp feeds the pp metrics
+  const version = `${scoresVersion()}|pp${ppLocalVersion()}`;
   const key = `${JSON.stringify(p)}|${gran}`;
   const hit = cache.get(key);
   if (hit && hit.version === version) return hit.result;
   const result =
-    p.kind === "ranked_score"
+    p.kind === "ranked_score" || p.kind === "std_score"
       ? evalRankedScore(p, gran)
       : p.kind === "pp"
         ? evalPp(p, gran)
-        : evalCount(p, gran);
+        : p.kind === "total_pp"
+          ? evalTotalPp(p, gran)
+          : evalCount(p, gran);
   cache.set(key, { version, result });
   if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value!);
   return result;
@@ -371,21 +429,35 @@ export function previewMetric(p: MetricParams): {
     return { count: Math.round(r.count), byBucket: [] };
   }
   const db = getDb();
+  if (p.kind === "total_pp") {
+    // pp of the leaderboard best per map, summed — the best-only base is
+    // exactly that state, no replay needed for the live number
+    const v = (
+      db
+        .prepare(`SELECT COALESCE(SUM(${PP_SQL}), 0) v ${baseFrom(p, true)}`)
+        .get() as { v: number }
+    ).v;
+    return { count: Math.round(v), byBucket: [] };
+  }
   // bestOnly for every kind: a ranked-score metric sums the maps' BESTS that
   // match, not the best matching score (see evalRankedScore)
   const base = baseFrom(p, true);
-  const count =
-    p.kind === "ranked_score"
-      ? (
-          db
-            .prepare(`SELECT COALESCE(SUM(${RANKED_CLASSIC}), 0) v ${base}`)
-            .get() as { v: number }
-        ).v
-      : (
-          db
-            .prepare(`SELECT COUNT(DISTINCT s.beatmap_id) c ${base}`)
-            .get() as { c: number }
-        ).c;
-  const byBucket = p.kind === "ranked_score" ? [] : countByBucket(p);
+  const isSum = p.kind === "ranked_score" || p.kind === "std_score";
+  const count = isSum
+    ? (
+        db
+          .prepare(
+            `SELECT COALESCE(SUM(${
+              p.kind === "std_score" ? "s.total_score" : RANKED_CLASSIC
+            }), 0) v ${base}`
+          )
+          .get() as { v: number }
+      ).v
+    : (
+        db
+          .prepare(`SELECT COUNT(DISTINCT s.beatmap_id) c ${base}`)
+          .get() as { c: number }
+      ).c;
+  const byBucket = isSum ? [] : countByBucket(p);
   return { count, byBucket };
 }

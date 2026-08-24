@@ -5,6 +5,7 @@
  */
 
 import { keysWhere, poolWhere, type PoolMode } from "./rulesets.js";
+import { PP_SQL } from "./score.js";
 
 export interface Range {
   min: number | null;
@@ -64,7 +65,7 @@ export type MetricBreakdown =
   | "sr" | "year" | "length" | "combo" | "ar" | "od" | "cs" | "hp";
 
 export interface MetricParams {
-  kind: "count" | "ranked_score" | "pp";
+  kind: "count" | "ranked_score" | "std_score" | "pp" | "total_pp";
   /** ruleset the metric lives in (default 0 = osu!std) */
   ruleset?: number;
   /** map pool for non-std rulesets (converts included by default) */
@@ -149,7 +150,7 @@ export function scoreWhere(c: MetricScoreConds, invert = false): string {
     w.push(`COALESCE(s.classic_total_score, s.total_score) >= ${num(c.minClassic)}`);
   range("(s.accuracy * 100)", c.acc, w);
   range("s.rate", c.rate, w);
-  range("s.pp", c.pp, w);
+  range(PP_SQL, c.pp, w);
   if (Array.isArray(c.allowedMods)) {
     const list = c.allowedMods.filter((m) => MOD_RE.test(m));
     const inList = list.length ? list.map((m) => `'${m}'`).join(",") : "''";

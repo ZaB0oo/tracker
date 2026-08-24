@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Beatmap, Difficulty, GameMode } from "rosu-pp-js";
+import { Beatmap, Difficulty, GameMode, Performance } from "rosu-pp-js";
 import { config } from "../config.js";
-import type { ModRef } from "../logic/score.js";
+import { computeRate, type ModRef } from "../logic/score.js";
 
 /**
  * Star rating for the exact mods that were played, computed here.
@@ -90,10 +90,99 @@ export async function localStarRating(
     if ((map.mode as number) !== rulesetId) map.convert(rulesetId as GameMode, mods);
     // maps built to break the calculator rather than to be played
     if (map.isSuspicious()) return null;
-    const stars = new Difficulty({ mods, lazer: true }).calculate(map).stars;
+    // rosu applies the fixed-rate mods itself but silently IGNORES the ramps
+    // (WU/WD/AS): the rate is computed like scores.rate and passed explicitly.
+    // For DT/HT it resolves to the same speed_change rosu would use, so the
+    // override never disagrees.
+    const clockRate = computeRate(mods as Parameters<typeof computeRate>[0]);
+    const stars = new Difficulty({
+      mods,
+      lazer: true,
+      ...(clockRate !== 1 ? { clockRate } : {}),
+    }).calculate(map).stars;
     return Number.isFinite(stars) ? stars : null;
   } catch (e) {
     console.error(`[difficulty] map ${beatmapId} not calculated:`, e);
+    return null;
+  } finally {
+    map?.free();
+  }
+}
+
+/**
+ * A stored score's hit counts, translated to rosu's per-ruleset fields.
+ * The slider fields are only passed when the score actually tracked them
+ * (a stable score has none — passing 0 would count every slider as dropped).
+ */
+export function perfHits(
+  rulesetId: number,
+  statistics: string
+): Record<string, number> | null {
+  let st: Record<string, number>;
+  try {
+    st = JSON.parse(statistics || "{}") as Record<string, number>;
+  } catch {
+    return null;
+  }
+  if (!st || typeof st !== "object" || Object.keys(st).length === 0) return null;
+  const n = (k: string) => st[k] ?? 0;
+  const opt = (k: string, f: string) => (st[k] != null ? { [f]: st[k] } : {});
+  switch (rulesetId) {
+    case 1:
+      return { n300: n("great"), n100: n("ok"), misses: n("miss") };
+    case 2:
+      return {
+        n300: n("great"), n100: n("large_tick_hit"), n50: n("small_tick_hit"),
+        nKatu: n("small_tick_miss"), misses: n("miss"),
+      };
+    case 3:
+      return {
+        nGeki: n("perfect"), n300: n("great"), nKatu: n("good"),
+        n100: n("ok"), n50: n("meh"), misses: n("miss"),
+      };
+    default:
+      return {
+        n300: n("great"), n100: n("ok"), n50: n("meh"), misses: n("miss"),
+        ...opt("slider_tail_hit", "sliderEndHits"),
+        ...opt("large_tick_hit", "largeTickHits"),
+        ...opt("small_tick_hit", "smallTickHits"),
+      };
+  }
+}
+
+/**
+ * pp of a play the API leaves without one (loved map, unranked mods),
+ * computed like the rating above: real mods and rate, the score's own hit
+ * counts. Null when the map cannot be read — or when the score carries no
+ * hit counts at all: generated "best case" hitresults from the accuracy
+ * alone were off by 5x on low-accuracy plays, worse than showing nothing.
+ */
+export async function localPp(
+  beatmapId: number,
+  mods: ModRef[],
+  rulesetId: number,
+  score: { statistics: string; accuracy: number; maxCombo: number }
+): Promise<number | null> {
+  const hits = perfHits(rulesetId, score.statistics);
+  if (!hits) return null;
+  const content = await osuFile(beatmapId);
+  if (!content) return null;
+  let map: Beatmap | null = null;
+  try {
+    map = new Beatmap(content);
+    if ((map.mode as number) !== rulesetId) map.convert(rulesetId as GameMode, mods);
+    if (map.isSuspicious()) return null;
+    const clockRate = computeRate(mods as Parameters<typeof computeRate>[0]);
+    const pp = new Performance({
+      mods,
+      lazer: true,
+      ...(clockRate !== 1 ? { clockRate } : {}),
+      combo: score.maxCombo,
+      ...hits,
+    }).calculate(map).pp;
+    return Number.isFinite(pp) ? pp : null;
+  } catch (e) {
+    console.error(`[difficulty] map ${beatmapId} pp not calculated:`, e);
     return null;
   } finally {
     map?.free();

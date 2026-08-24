@@ -52,7 +52,7 @@ export async function fetchOverlayStats(
 export interface OverlayMetric {
   id: number;
   name: string;
-  kind: "count" | "ranked_score" | "pp";
+  kind: "count" | "ranked_score" | "std_score" | "pp" | "total_pp";
   /** countdown metric: a DECREASE is the progress (colored accordingly) */
   descending?: boolean;
   count: number;
@@ -68,6 +68,171 @@ export async function fetchOverlayMetrics(ids: number[]): Promise<{ metrics: Ove
 export async function fetchMapDetail(id: number, ruleset = 0): Promise<MapDetail> {
   const res = await fetch(`/api/map/${id}?ruleset=${ruleset}`);
   if (!res.ok) throw new Error(`map: HTTP ${res.status}`);
+  return res.json();
+}
+
+/** one all-time record: the map it happened on, its value and its date */
+export interface RecordEntry {
+  mapId: number;
+  /** beatmapset id, for the card's cover background */
+  setId: number;
+  artist: string;
+  title: string;
+  diff: string;
+  at: string;
+  value: number | null;
+  /** star records only: acronyms of the SR-affecting mods played */
+  mods?: string[];
+  /** star records only: playback rate of that play (1 = nomod speed) */
+  rate?: number | null;
+}
+
+export interface Records {
+  topClassic: RecordEntry | null;
+  topPp: RecordEntry | null;
+  bestFcSr: RecordEntry | null;
+  bestSsSr: RecordEntry | null;
+  peakCombo: RecordEntry | null;
+  oldest: RecordEntry | null;
+  averages: {
+    acc: number | null;
+    sr: number | null;
+    len: number | null;
+    fc: number;
+    clears: number;
+    classic: number | null;
+  } | null;
+  /** pool-wide aggregates over every pass, for the stat strip */
+  stats: {
+    scores: number;
+    /** estimated seconds in-map: SUM(length / rate) over the passes */
+    playtime: number | null;
+    totalStd: number | null;
+    totalClassic: number | null;
+    totalPp: number;
+    /** official profile weighting: 0.95^i over the bests + bonus pp */
+    weightedPp: number;
+    avgPp: number | null;
+  };
+}
+
+export async function fetchRecords(
+  ruleset = 0,
+  pool: PoolMode = "all",
+  keys: string[] = [],
+  scope: DashScope = "all"
+): Promise<Records> {
+  const res = await fetch(
+    `/api/records?ruleset=${ruleset}&pool=${pool}${keysQ(keys)}&scope=${scope}`
+  );
+  if (!res.ok) throw new Error(`records: HTTP ${res.status}`);
+  return res.json();
+}
+
+/** one play session: consecutive plays less than an hour apart */
+export interface SessionEntry {
+  start: string;
+  end: string;
+  sec: number;
+  plays: number;
+  classic: number;
+  maxPp: number | null;
+}
+
+export interface Sessions {
+  gapMin: number;
+  summary: {
+    count: number;
+    longestSec: number;
+    avgSec: number;
+    avgPlays: number;
+    /** wall-clock seconds across the sessions (short pauses included) */
+    totalSec: number;
+    /** real seconds spent in maps (each pass at its rate) */
+    playSec: number;
+  };
+  /** every session, latest first (compact: sort/filter/page client-side) */
+  sessions: SessionEntry[];
+}
+
+export async function fetchSessions(
+  ruleset = 0,
+  pool: PoolMode = "all",
+  keys: string[] = [],
+  scope: DashScope = "all",
+  gapMin = 60
+): Promise<Sessions> {
+  const res = await fetch(
+    `/api/sessions?ruleset=${ruleset}&pool=${pool}${keysQ(keys)}&scope=${scope}&gap=${gapMin}`
+  );
+  if (!res.ok) throw new Error(`sessions: HTTP ${res.status}`);
+  return res.json();
+}
+
+/** one score of a session, map identity included (detail panel) */
+export interface SessionScore {
+  id: number;
+  mapId: number;
+  at: string;
+  rank: string;
+  accuracy: number;
+  std: number;
+  classic: number | null;
+  pp: number | null;
+  mods: string;
+  rate: number | null;
+  fc_state: number;
+  passed: number;
+  combo: number;
+  len: number | null;
+  sr: number | null;
+  artist: string;
+  title: string;
+  diff: string;
+}
+
+export async function fetchSessionScores(
+  start: string,
+  end: string,
+  ruleset = 0,
+  pool: PoolMode = "all",
+  keys: string[] = [],
+  scope: DashScope = "all"
+): Promise<{ scores: SessionScore[] }> {
+  const res = await fetch(
+    `/api/sessions/scores?start=${encodeURIComponent(start)}&end=${encodeURIComponent(
+      end
+    )}&ruleset=${ruleset}&pool=${pool}${keysQ(keys)}&scope=${scope}`
+  );
+  if (!res.ok) throw new Error(`session scores: HTTP ${res.status}`);
+  return res.json();
+}
+
+/** one best per map: [beatmap_id, stars, accuracy, fc_state, grade 0-7] */
+export type ScatterPoint = [number, number, number, number, number];
+
+/** names of a handful of maps (scatter tooltip), keyed by beatmap id */
+export async function fetchMapNames(
+  ids: number[]
+): Promise<{ names: Record<number, string> }> {
+  const res = await fetch(`/api/map-names?ids=${ids.join(",")}`);
+  if (!res.ok) throw new Error(`map-names: HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function fetchScatter(
+  ruleset = 0,
+  pool: PoolMode = "all",
+  keys: string[] = [],
+  scope: DashScope = "all",
+  day: string | null = null
+): Promise<{ points: ScatterPoint[] }> {
+  const res = await fetch(
+    `/api/scatter?ruleset=${ruleset}&pool=${pool}${keysQ(keys)}&scope=${scope}${
+      day ? `&day=${day}` : ""
+    }`
+  );
+  if (!res.ok) throw new Error(`scatter: HTTP ${res.status}`);
   return res.json();
 }
 
@@ -541,6 +706,17 @@ export interface ProfileStats {
   supporter: boolean;
 }
 
+/** osu!'s Daily Challenge stats, straight from the profile */
+export interface DailyChallenge {
+  playcount: number;
+  daily_current: number;
+  daily_best: number;
+  weekly_current: number;
+  weekly_best: number;
+  top10p: number;
+  top50p: number;
+}
+
 export interface AuthStatus {
   connected: boolean;
   profile: {
@@ -548,6 +724,7 @@ export interface AuthStatus {
     avatar_url: string;
     country_code?: string;
     stats?: ProfileStats;
+    daily_challenge?: DailyChallenge | null;
   } | null;
 }
 
@@ -722,7 +899,7 @@ export type MetricBreakdown =
   | "sr" | "year" | "length" | "combo" | "ar" | "od" | "cs" | "hp";
 
 export interface MetricParams {
-  kind: "count" | "ranked_score" | "pp";
+  kind: "count" | "ranked_score" | "std_score" | "pp" | "total_pp";
   /** ruleset the metric lives in (default 0 = osu!std) */
   ruleset?: number;
   /** map pool for non-std rulesets (converts included by default) */

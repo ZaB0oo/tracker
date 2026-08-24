@@ -111,7 +111,9 @@ function describeParams(p: Metric["params"]): string {
   if (m.query?.trim()) parts.push(`“${m.query.trim()}”`);
   if (m.ids?.length) parts.push(`${fmtNum(m.ids.length)}-map pool`);
 
-  if (p.kind === "ranked_score") parts.unshift("ranked score");
+  if (p.kind === "ranked_score") parts.unshift("classic score");
+  if (p.kind === "std_score") parts.unshift("standardised score");
+  if (p.kind === "total_pp") parts.unshift("total pp");
   if (p.kind === "count" && p.descending)
     parts.unshift(p.invert ? "below goal" : "to fix");
   return parts.join(" · ") || "all clears";
@@ -149,8 +151,11 @@ function MetricCard({
   onDragOverCard: () => void;
   onDrop: () => void;
 }) {
-  const isRanked = m.params.kind === "ranked_score";
-  const isPp = m.params.kind === "pp";
+  const isRanked = m.params.kind === "ranked_score" || m.params.kind === "std_score";
+  const isPp = m.params.kind === "pp" || m.params.kind === "total_pp";
+  // the top-plays list belongs to the weighted metric only: a total-pp sum
+  // has no "top 100 that count", every best counts the same
+  const isWeightedPp = m.params.kind === "pp";
   const isDesc = m.params.kind === "count" && !!m.params.descending;
   const fmtV = isRanked
     ? fmtCompact
@@ -165,7 +170,7 @@ function MetricCard({
     queryKey: ["pp-top", m.id, effPeriod],
     queryFn: () => fetchMetricPpTop(m.id, effPeriod),
     refetchInterval: 60_000,
-    enabled: isPp,
+    enabled: isWeightedPp,
   });
   const totalMode = m.params.progressMode === "total" && m.params.kind === "count";
   const achieved = [...m.milestones].reverse();
@@ -349,11 +354,11 @@ function MetricCard({
             data={m.evolution}
             fmtY={fmtV}
             bare
-            onPick={isPp ? setPpPeriod : undefined}
+            onPick={isWeightedPp ? setPpPeriod : undefined}
           />
         </div>
       )}
-      {isPp && (
+      {isWeightedPp && (
         <div className="pp-top">
           <div className="pp-top-head">
             <span className="metric-sub">
@@ -619,7 +624,7 @@ export function MetricsView({
             onDelete={(id) => del.mutate(id)}
             onEdit={(metric) => setEditing(metric)}
             picked={
-              m.params.kind === "ranked_score" || m.params.kind === "pp"
+              m.params.kind !== "count"
                 ? null
                 : picked.includes(m.id)
             }

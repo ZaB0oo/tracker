@@ -209,8 +209,9 @@ h1 { font-size: 21px; margin: 0; }
 .activity-row { font-size: 13px; line-height: 20px; }
 .activity-row .feed-src { font-size: 10px; min-width: 72px; }
 
-/* Skill curve (dashboard): SVG chart with hover tooltip */
-.curve-panel { margin-top: 14px; }
+/* Skill curve (dashboard): SVG chart with hover tooltip — no own top margin,
+ * the dashboard column's gap already spaces it under the sub-tabs */
+.curve-panel { margin-top: 0; }
 /* overflow-x only: the tooltip may overflow top/bottom, never the sides
    (a horizontal scrollbar would appear on the page) */
 .curve-chart { position: relative; overflow-x: clip; }
@@ -810,6 +811,18 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
   padding: 18px 22px; scrollbar-width: thin;
 }
+/* The set's cover art behind the title block, darkened for readability —
+   same treatment as the hero record cards. Bleeds over the modal padding. */
+.mm-banner {
+  position: relative; margin: -18px -22px 12px; padding: 16px 22px 10px;
+  background-size: cover; background-position: center;
+  border-radius: 10px 10px 0 0; overflow: hidden;
+}
+.mm-banner::before {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(23, 19, 31, 0.7), rgba(23, 19, 31, 0.92));
+}
+.mm-banner > * { position: relative; }
 .map-modal-head { display: flex; align-items: flex-start; gap: 12px; }
 .map-modal-head h2 { margin: 0 0 4px; font-size: 18px; flex: 1; }
 .mm-diff { color: var(--fg-dim); font-weight: 400; }
@@ -817,6 +830,304 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .mm-sub a { color: var(--accent2); }
 .mm-stats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .mm-stat { background: var(--bg3); border-radius: 6px; padding: 3px 8px; font-size: 12px; }
+.mm-row { cursor: pointer; }
+.mm-row:hover td { background: rgba(255, 255, 255, 0.04); }
+
+/* One score, unfolded (opens from any score row; stacks over the modal). */
+.score-card-overlay { z-index: 32; }
+.score-card {
+  position: fixed; z-index: 33; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(480px, 92vw); max-height: 90vh; overflow-y: auto;
+  background-color: var(--bg2); background-size: cover;
+  background-position: center;
+  border: 1px solid var(--border); border-radius: 16px;
+  scrollbar-width: thin;
+}
+/* a light veil only: the cover stays visible, the boxes carry readability */
+.sc-inner {
+  position: relative;
+  background: linear-gradient(
+    180deg, rgba(23, 19, 31, 0.52), rgba(23, 19, 31, 0.64) 55%, rgba(23, 19, 31, 0.8)
+  );
+  padding: 16px 18px 13px; display: flex; flex-direction: column; gap: 9px;
+}
+.sc-inner .mm-close { position: absolute; top: 10px; right: 10px; }
+.sc-map { display: flex; flex-direction: column; gap: 0; text-align: center; padding: 0 30px; }
+.sc-map b { font-size: 19px; font-weight: 800; text-shadow: 0 2px 6px rgba(0, 0, 0, 0.7); }
+.sc-map span {
+  color: #eae3f4; opacity: 0.9; font-size: 12.5px; font-weight: 600;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
+}
+/* the game's accuracy ring, grade in the middle */
+.sc-ring { display: flex; justify-content: center; margin: -4px 0 -8px; }
+.sc-diff {
+  display: flex; flex-direction: column; gap: 0; text-align: center;
+}
+.sc-diff b { font-size: 13.5px; font-weight: 800; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7); }
+.sc-diff span {
+  color: #d9d0e8; opacity: 0.85; font-size: 11px; font-weight: 600;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
+}
+/* boxed stat tiles, like the in-game score card: every row fills the card's
+ * width with equal boxes, so the rows read as one aligned grid */
+.sc-tiles { display: flex; flex-wrap: wrap; gap: 6px; }
+.sc-tile {
+  /* min-content: a tile can never be narrower than its label pill — a long
+     label (SPINNER BONUS) wraps the row instead of overflowing its box */
+  flex: 1 1 64px; min-width: min-content;
+  background: rgba(15, 12, 20, 0.82);
+  border-radius: 12px;
+  padding: 7px 6px 6px;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  text-align: center;
+}
+/* plain small-caps label (accuracy / max combo / pp row) */
+.sc-lab {
+  color: #cfc6de; text-transform: uppercase; font-size: 9.5px;
+  letter-spacing: 0.08em; font-weight: 800; white-space: nowrap;
+}
+/* judgement label: a coloured pill with dark text, like the game */
+.sc-pill {
+  text-transform: uppercase; font-size: 8px; font-weight: 900;
+  letter-spacing: 0.03em; color: #241b31; background: #cfc6de;
+  border-radius: 999px; padding: 2px 7px; white-space: nowrap;
+  max-width: 100%;
+}
+.sc-tile b {
+  font-size: 21px; font-weight: 800; line-height: 1.1;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.sc-tile i { color: #9d94b3; font-style: normal; font-weight: 600; font-size: 11px; }
+.sc-score {
+  font-size: 42px; font-weight: 700; line-height: 1.05; text-align: center;
+  letter-spacing: 0.02em; font-variant-numeric: tabular-nums;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.65);
+}
+.sc-sub {
+  color: #e0d8ee; opacity: 0.85; font-size: 12.5px; font-weight: 600;
+  text-align: center; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
+}
+.sc-chips { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px; }
+.sc-chips .mm-stat { font-weight: 700; border-radius: 999px; }
+.sc-star { background: var(--accent); border-color: var(--accent); color: #fff; }
+/* results-screen columns: the coloured judgement label above its count */
+.sc-cols {
+  display: flex; flex-wrap: wrap; justify-content: center;
+  column-gap: 26px; row-gap: 10px; padding: 4px 0;
+}
+.sc-cols-sub { border-top: 1px solid var(--border); padding-top: 10px; }
+.sc-col { display: flex; flex-direction: column; gap: 1px; text-align: center; }
+.sc-col span {
+  color: var(--fg-dim); text-transform: uppercase; font-size: 10px;
+  letter-spacing: 0.06em; font-weight: 700;
+}
+.sc-col b { font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sc-col i { color: var(--fg-dim); font-style: normal; font-weight: 400; font-size: 12px; }
+/* official lazer judgement colours (OsuColour.ForHitResult) — pill grounds
+ * on the score card, text colours in the map modal columns */
+.sc-blue-light .sc-pill { background: #99eeff; }
+.sc-blue .sc-pill { background: #66ccff; }
+.sc-green-light .sc-pill { background: #b3d944; }
+.sc-green .sc-pill { background: #88b300; }
+.sc-yellow .sc-pill { background: #ffcc22; }
+.sc-red .sc-pill { background: #ed1121; color: #fff; }
+.sc-foot {
+  color: #d9d0e8; opacity: 0.85; font-size: 11.5px; font-weight: 600;
+  text-align: center; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
+}
+.sc-foot a { color: inherit; }
+.sc-foot a:hover { color: var(--accent); }
+
+/* Dashboard sub-tabs: same full-width underline idiom as the header tabs.
+   flex-shrink 0: overflow:hidden zeroes the automatic minimum size, and the
+   dashboard column would crush the bar flat to fit the viewport. */
+.dash-tabs {
+  display: flex; width: 100%; flex-shrink: 0;
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+  overflow: hidden;
+}
+.dash-tabs button {
+  flex: 1; background: transparent; border: none; border-radius: 0;
+  padding: 11px 0; font-size: 14px; font-weight: 600; color: var(--fg-dim);
+  border-bottom: 3px solid transparent; cursor: pointer;
+}
+.dash-tabs button:hover { color: var(--fg); border-bottom-color: var(--border); }
+.dash-tabs button.active {
+  background: rgba(255, 102, 170, 0.06); color: var(--accent);
+  border-color: transparent; border-bottom-color: var(--accent);
+}
+
+/* All-time record plays: one row of cards inside the hero, each drawn on its
+   map's cover art (darkened so the text stays readable) */
+.hero-records {
+  flex-basis: 100%;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+  gap: 8px;
+}
+.rec-card {
+  position: relative; overflow: hidden;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  padding: 9px 12px; min-height: 74px;
+  background-color: var(--bg3); background-size: cover; background-position: center;
+  color: var(--fg); text-align: left;
+}
+.rec-card::before {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(23, 19, 31, 0.66), rgba(23, 19, 31, 0.92));
+  transition: opacity 0.15s;
+}
+.rec-card:hover::before { opacity: 0.82; }
+.rec-card > * { position: relative; max-width: 100%; }
+.rec-card-label {
+  text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-dim);
+  font-size: 10px; font-weight: 700; white-space: nowrap;
+}
+.rec-card-value { font-size: 17px; font-weight: 700; }
+.rec-card:hover .rec-card-value { color: var(--accent); }
+.rec-card-map, .rec-card-date {
+  color: var(--fg-dim); font-size: 11px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* Sessions: summary chips, then master list (left) + session detail (right) */
+.sess-summary {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin-bottom: 10px;
+}
+.sess-summary h3 { margin: 0 10px 0 0; }
+.sess-summary b { color: var(--fg); }
+.sess-note { margin-left: auto; color: var(--fg-dim); font-size: 11px; }
+.sess-gap {
+  margin-left: auto; display: flex; align-items: center; gap: 6px;
+  color: var(--fg-dim); font-size: 12px;
+}
+/* custom chevron: the native arrow rendered on top of the "min" text */
+.sess-gap select {
+  font-size: 12px; padding: 3px 22px 3px 8px;
+  appearance: none; -webkit-appearance: none;
+  background-color: var(--bg3);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%239d94b3'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 7px center;
+}
+/* the master list runs to the bottom of the section, scrolling on its own */
+/* the list fills the master column down to the detail's bottom edge (the
+ * columns stretch to the same height), scrolling inside; the 320px floor
+ * keeps it usable when the columns wrap on a narrow window */
+.sess-rows {
+  flex: 1 1 0; min-height: 320px; overflow-y: auto; scrollbar-width: thin;
+}
+.sess-rows .sess-head {
+  position: sticky; top: 0; background: var(--bg2) !important; z-index: 1;
+}
+.sess-layout { display: flex; gap: 14px; align-items: stretch; flex-wrap: wrap; }
+.sess-master {
+  flex: 0 1 440px; min-width: 360px;
+  display: flex; flex-direction: column; min-height: 0;
+}
+.sess-tools {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.sess-pager {
+  margin-left: auto; display: flex; align-items: center; gap: 6px;
+  color: var(--fg-dim); font-size: 12px; font-variant-numeric: tabular-nums;
+}
+.sess-row {
+  display: grid; grid-template-columns: 1fr 56px 46px 72px 56px;
+  gap: 10px; padding: 4px 8px; font-size: 13px;
+  font-variant-numeric: tabular-nums; border-radius: 4px; cursor: pointer;
+}
+.sess-row i { color: var(--fg-dim); font-style: normal; }
+.sess-row:nth-child(even) { background: rgba(42, 35, 56, 0.45); }
+.sess-row:hover { background: rgba(255, 102, 170, 0.08); }
+.sess-row.sel { background: rgba(255, 102, 170, 0.14); }
+.sess-head { cursor: default; background: none !important; padding-bottom: 2px; }
+.sess-th {
+  background: none; border: none; padding: 0; cursor: pointer; text-align: left;
+  color: var(--fg-dim); text-transform: uppercase; font-size: 10px;
+  letter-spacing: 0.04em;
+}
+.sess-th.num { text-align: right; }
+.sess-th.on { color: var(--accent2); }
+.sess-row .num { text-align: right; }
+/* the unfolded session */
+.sess-detail {
+  flex: 1 1 460px; min-width: 340px; border-left: 1px solid var(--border);
+  padding-left: 14px; display: flex; flex-direction: column; gap: 10px;
+}
+.sess-detail-empty { color: var(--fg-dim); padding: 20px; }
+.sess-detail-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sess-detail-head span { color: var(--fg-dim); }
+.sess-grades { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+.sess-grade {
+  display: flex; align-items: center; gap: 3px; font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.sess-tiles {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(122px, 1fr));
+  gap: 8px 14px; border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border); padding: 8px 0;
+}
+/* per-session scatter: one dot per play, breaks shaded */
+.sess-chart { display: flex; flex-direction: column; gap: 6px; }
+.sess-chart-seg { flex-wrap: wrap; }
+.sess-chart-seg button { padding: 4px 10px; font-size: 12px; }
+.sess-chart-wrap { position: relative; overflow-x: clip; }
+.sess-chart svg { width: 100%; height: auto; display: block; }
+.sess-dot { fill: var(--accent); opacity: 0.8; cursor: pointer; }
+.sess-dot:hover { fill: var(--accent2); opacity: 1; r: 5; }
+/* shaded spans behind the dots: breaks (session detail), active sessions
+   (heatmap day view) */
+.scat-break { fill: #ed1121; opacity: 0.12; }
+.scat-session { fill: var(--accent); opacity: 0.07; }
+/* full-width day timeline under the heatmap columns */
+.hm-intraday { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; }
+.hm-intraday-head {
+  display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px;
+}
+.hm-intraday-head span {
+  color: var(--fg-dim); text-transform: uppercase; font-size: 10px;
+  letter-spacing: 0.04em;
+}
+.sess-scores {
+  display: flex; flex-direction: column; max-height: 52vh; overflow-y: auto;
+  scrollbar-width: thin;
+}
+.sess-score {
+  display: grid;
+  grid-template-columns: 40px 34px minmax(150px, 1fr) 70px 52px 58px 92px 46px;
+  gap: 8px; align-items: center; padding: 3px 8px; font-size: 12.5px;
+  font-variant-numeric: tabular-nums; border-radius: 4px; cursor: pointer;
+}
+.sess-score:nth-child(even) { background: rgba(42, 35, 56, 0.45); }
+.sess-score:hover { background: rgba(255, 102, 170, 0.08); }
+/* sticky so the columns stay named while the score list scrolls */
+.sess-sc-head {
+  cursor: default; position: sticky; top: 0;
+  background: var(--bg2) !important;
+}
+.sess-sc-time { color: var(--fg-dim); }
+.sess-sc-map { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sess-sc-map i { color: var(--fg-dim); font-style: normal; }
+.sess-sc-mods {
+  color: var(--fg-dim); overflow: hidden; white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.sess-score .num { text-align: right; }
+
+/* the all-time figures row at the bottom of the hero */
+.hero-strip {
+  flex-basis: 100%;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px 18px; border-top: 1px solid var(--border); padding-top: 12px;
+}
+.strip-tile { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.strip-tile span {
+  text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-dim);
+  font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.strip-tile b { font-size: 15px; font-variant-numeric: tabular-nums; }
 .mm-stat b { color: var(--fg-dim); font-weight: 600; margin-right: 4px; }
 .mm-gold { color: var(--yellow); }
 .mm-green { color: var(--green); }
@@ -1142,6 +1453,45 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   border-color: var(--accent2);
 }
 .tm-dim { opacity: 0.3; filter: grayscale(0.4); transition: opacity 0.15s; }
+/* signed deltas: gains green, losses red — heatmap day panel, sessions */
+.val-pos { color: var(--green); }
+.val-neg { color: var(--red); }
+
+/* Accuracy-by-difficulty scatter (Charts): the whole catalog on a canvas */
+.scatter-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.scatter-sub { color: var(--fg-dim); font-size: 12px; }
+.scatter-legend { margin-left: auto; display: flex; gap: 6px; }
+.scatter-key {
+  display: flex; align-items: center; gap: 5px;
+  background: none; border: none; padding: 2px 6px; cursor: pointer;
+  color: var(--fg); font-size: 12px;
+}
+.scatter-key i { color: var(--fg-dim); font-style: normal; }
+.scatter-key.off { opacity: 0.35; }
+/* the seg sits right after the subtitle at a FIXED spot — with the legend
+ * between them it slid around when the legend's length changed with the mode */
+.scatter-mode { margin-left: 14px; }
+.scatter-mode button { padding: 4px 12px; font-size: 12px; }
+.scatter-legend { margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+.scatter-reset {
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--fg); font-size: 12px; padding: 3px 10px; cursor: pointer;
+}
+.scatter-reset:hover { border-color: var(--accent); }
+/* the drag-select rectangle while zooming */
+.scatter-zoombox {
+  position: absolute; pointer-events: none;
+  border: 1px solid var(--accent2); background: rgba(102, 204, 255, 0.12);
+}
+.scatter-wrap { position: relative; overflow-x: clip; margin-top: 8px; }
+.scatter-canvas { width: 100%; display: block; cursor: crosshair; }
+/* hover tooltip: one row per map under the cursor */
+.scatter-tip { font-size: 12px; line-height: 18px; max-width: 480px; }
+.scatter-tip-row { display: flex; align-items: center; gap: 6px; }
+.scatter-tip-row .gauge-dot { flex-shrink: 0; }
+.scatter-tip-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.scatter-tip-row i { color: var(--fg-dim); font-style: normal; margin-left: auto; padding-left: 8px; }
+.scatter-tip-more { color: var(--fg-dim); margin-top: 2px; }
 
 /* only the slider gets framed when a past date is active */
 .tm-slider-box {
@@ -1200,6 +1550,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .mb-inline { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
 .mb-inline label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
 .mb-inline input[type="number"] { width: 110px; }
+/* the milestone step holds 11-digit values (10,000,000,000) */
+.mb-inline input.mb-step { width: 170px; }
 .mb-check { cursor: pointer; }
 .mb-invert {
   display: flex;

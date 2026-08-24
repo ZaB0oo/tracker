@@ -221,7 +221,7 @@ export function StreamOverlay() {
             {metrics.metrics.map((m) => {
               const base = metricBaseline.current?.get(m.id) ?? m.count;
               const gain = m.count - base;
-              const f = m.kind === "ranked_score" ? fmtCompact : fmtNum;
+              const f = m.kind === "ranked_score" || m.kind === "std_score" ? fmtCompact : fmtNum;
               return (
                 <span key={m.id}>
                   {m.name} <b>{f(m.count)}</b>

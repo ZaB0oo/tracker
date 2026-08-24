@@ -219,6 +219,7 @@ export async function fetchUserProfile(mode?: string): Promise<{
   cover_url: string;
   country_code: string;
   stats: ProfileStats;
+  daily_challenge: DailyChallenge | null;
 } | null> {
   return limiter.schedule(async () => {
     const auth = await getUserToken();
@@ -253,6 +254,15 @@ export async function fetchUserProfile(mode?: string): Promise<{
       follower_count?: number;
       join_date?: string;
       is_supporter?: boolean;
+      daily_challenge_user_stats?: {
+        playcount?: number;
+        daily_streak_current?: number;
+        daily_streak_best?: number;
+        weekly_streak_current?: number;
+        weekly_streak_best?: number;
+        top_10p_placements?: number;
+        top_50p_placements?: number;
+      };
     };
     return {
       username: j.username,
@@ -275,8 +285,31 @@ export async function fetchUserProfile(mode?: string): Promise<{
         join_date: j.join_date ?? "",
         supporter: j.is_supporter ?? false,
       },
+      // account-wide (the API repeats it identically for every mode)
+      daily_challenge: j.daily_challenge_user_stats
+        ? {
+            playcount: j.daily_challenge_user_stats.playcount ?? 0,
+            daily_current: j.daily_challenge_user_stats.daily_streak_current ?? 0,
+            daily_best: j.daily_challenge_user_stats.daily_streak_best ?? 0,
+            weekly_current: j.daily_challenge_user_stats.weekly_streak_current ?? 0,
+            weekly_best: j.daily_challenge_user_stats.weekly_streak_best ?? 0,
+            top10p: j.daily_challenge_user_stats.top_10p_placements ?? 0,
+            top50p: j.daily_challenge_user_stats.top_50p_placements ?? 0,
+          }
+        : null,
     };
   }, "high");
+}
+
+/** osu!'s Daily Challenge stats, straight from the profile. */
+export interface DailyChallenge {
+  playcount: number;
+  daily_current: number;
+  daily_best: number;
+  weekly_current: number;
+  weekly_best: number;
+  top10p: number;
+  top50p: number;
 }
 
 /** Stored user_profile JSON — the fields the app reads from it. */
@@ -291,6 +324,7 @@ export interface StoredProfile {
     country_rank?: number | null;
     join_date?: string;
   };
+  daily_challenge?: DailyChallenge | null;
 }
 
 /** Profile of the connected account (null if absent or malformed). */

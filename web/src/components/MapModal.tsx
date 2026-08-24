@@ -5,9 +5,10 @@ import { fetchMapDetail } from "../api";
 import { firstPlaceLabel, useCountryCode } from "../country";
 import { GradeBadge } from "./GradeBadge";
 import { MedalIcon } from "./Icons";
-import { displayGrade, fmtDate, fmtDateTime, fmtNum } from "../format";
+import { displayGrade, effPp, fmtDate, fmtDateTime, fmtNum, ppText } from "../format";
 import { FC_LABELS, STATUS_LABELS, type MapDetail } from "../types";
 import { useEscape } from "../useEscape";
+import { ScoreCard } from "./ScoreCard";
 
 const mmss = (s: number | null) =>
   s == null ? "—" : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -41,7 +42,7 @@ const SCORE_COLS: {
   { id: "classic", label: "Classic", right: true, key: (s) => s.classic_total_score },
   { id: "combo", label: "Combo", right: true, key: (s) => s.max_combo },
   { id: "fc", label: "FC", key: (s) => -s.fc_state },
-  { id: "pp", label: "pp", right: true, key: (s) => s.pp },
+  { id: "pp", label: "pp", right: true, key: (s) => effPp(s) },
 ];
 const GRADE_RANK: Record<string, number> = {
   XH: 7, X: 6, SH: 5, S: 4, A: 3, B: 2, C: 1, D: 0,
@@ -67,6 +68,7 @@ export function MapModal({
   // all describe the BEST score, so the table has to open on it rather than
   // on the most recent play.
   const [sort, setSort] = useState({ id: "classic", desc: true });
+  const [openScore, setOpenScore] = useState<ScoreRow | null>(null);
   const bestId = data?.user?.best_lazer_score_id ?? null;
   const sortedScores = useMemo(() => {
     const col = SCORE_COLS.find((c) => c.id === sort.id) ?? SCORE_COLS[0];
@@ -88,6 +90,14 @@ export function MapModal({
           <p>Loading…</p>
         ) : (
           <>
+            {/* the set's cover art behind the title block, darkened like the
+                hero record cards; a missing cover just leaves the plain bg */}
+            <div
+              className="mm-banner"
+              style={{
+                backgroundImage: `url(https://assets.ppy.sh/beatmaps/${data.map.beatmapset_id}/covers/cover.jpg)`,
+              }}
+            >
             <div className="map-modal-head">
               <h2>
                 {data.map.artist} – {data.map.title}{" "}
@@ -154,6 +164,7 @@ export function MapModal({
                 </span>
               ) : null}
             </div>
+            </div>
 
             <h3>My scores ({data.scores.length})</h3>
             {data.scores.length === 0 ? (
@@ -183,8 +194,13 @@ export function MapModal({
                   {sortedScores.map((s) => (
                     <tr
                       key={s.id}
-                      className={s.id === bestId ? "mm-best" : ""}
-                      title={s.id === bestId ? "The score that counts on the leaderboard" : ""}
+                      className={`mm-row${s.id === bestId ? " mm-best" : ""}`}
+                      title={
+                        s.id === bestId
+                          ? "The score that counts on the leaderboard — click for details"
+                          : "Click for details"
+                      }
+                      onClick={() => setOpenScore(s)}
                     >
                       <td>{fmtDateTime(s.ended_at)}</td>
                       <td>
@@ -202,11 +218,26 @@ export function MapModal({
                       </td>
                       <td className="num">{fmtNum(s.max_combo)}x</td>
                       <td className={`fc fc-${s.fc_state}`}>{FC_LABELS[s.fc_state]}</td>
-                      <td className="num">{s.pp != null ? `${Math.round(s.pp)}pp` : ""}</td>
+                      <td
+                        className="num"
+                        title={s.pp == null && effPp(s) != null ? "Estimated locally (no official pp)" : undefined}
+                      >
+                        {ppText(s)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            )}
+
+            {openScore && (
+              <ScoreCard
+                score={openScore}
+                map={data.map}
+                ruleset={ruleset}
+                isBest={openScore.id === bestId}
+                onClose={() => setOpenScore(null)}
+              />
             )}
 
             {data.countryEvents.length > 0 && (

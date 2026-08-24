@@ -55,7 +55,8 @@ authRouter.get("/auth/status", (req, res) => {
       !profile ||
       !profile.country_code ||
       profile.cover_url == null ||
-      profile.stats?.join_date == null;
+      profile.stats?.join_date == null ||
+      profile.daily_challenge === undefined;
     if (stale && !profileFetchInFlight.has(R)) {
       profileFetchInFlight.add(R);
       void fetchUserProfile(R === 0 ? undefined : rulesetDef(R).apiName)

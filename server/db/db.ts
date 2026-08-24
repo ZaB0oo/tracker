@@ -4,6 +4,7 @@
  */
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config } from "../config.js";
@@ -339,6 +340,11 @@ function migrate(d: DatabaseSync): void {
   }
   if (!scCols.some((c) => c.name === "mod_multiplier"))
     d.exec("ALTER TABLE scores ADD COLUMN mod_multiplier REAL");
+  // locally computed pp for the scores the API leaves at NULL (loved maps,
+  // unranked mod combos) — filled in the background by osu/ppFill.ts.
+  // -1 marks a score that cannot have one (relax play, unreadable map).
+  if (!scCols.some((c) => c.name === "pp_local"))
+    d.exec("ALTER TABLE scores ADD COLUMN pp_local REAL");
   const missingMult = (
     d.prepare("SELECT COUNT(*) c FROM scores WHERE mod_multiplier IS NULL").get() as {
       c: number;
@@ -461,21 +467,24 @@ function migrate(d: DatabaseSync): void {
     console.log("[db] migration: FC now describes the best score of each map");
   }
 
-  // modded_sr changed twice: its key now carries the mod settings
-  // ("DT@s1.35"), since a row written for a bare "DT" holds the default 1.5x
-  // value and would answer for every rate, and the ratings themselves are now
-  // computed locally instead of being asked to an API that only knows the
-  // legacy mod combinations. Old rows can never match, and it is only a cache:
-  // the table is rebuilt once and refills on demand.
+  // Both local calculators (modded SR, local pp) answer for the algorithm
+  // version EMBEDDED IN rosu-pp: updating the package means new values, so
+  // the caches invalidate themselves when its version changes. The "local-rx"
+  // half tracks our own semantic changes (rate mods passed explicitly, RX/AP
+  // in the key, ...) independently of the package.
+  const rosuVersion = (
+    createRequire(import.meta.url)("rosu-pp-js/package.json") as {
+      version: string;
+    }
+  ).version;
   const SR_KEY = "modded_sr_key";
+  const SR_DONE = `local-rx@rosu-${rosuVersion}`;
   const srDone = (
     d.prepare("SELECT value FROM sync_state WHERE key = ?").get(SR_KEY) as
       | { value: string }
       | undefined
   )?.value;
-  // "local-da": DA and the mania key mods joined SR_MODS (v1.19 audit), so
-  // keys computed before that miss them and the cache must rebuild once more.
-  if (srDone !== "local-da") {
+  if (srDone !== SR_DONE) {
     d.exec("DROP TABLE IF EXISTS modded_sr");
     d.exec(`CREATE TABLE modded_sr (
       beatmap_id INTEGER NOT NULL,
@@ -485,8 +494,48 @@ function migrate(d: DatabaseSync): void {
       PRIMARY KEY (beatmap_id, ruleset, mods)
     )`);
     d.prepare(
-      "INSERT INTO sync_state (key, value) VALUES (?, 'local-da') ON CONFLICT(key) DO UPDATE SET value = 'local-da'"
-    ).run(SR_KEY);
+      "INSERT INTO sync_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+    ).run(SR_KEY, SR_DONE);
+    if (srDone != null)
+      console.log(`[db] modded SR cache reset (${srDone} -> ${SR_DONE})`);
+  }
+  // same contract for the locally computed pp, whose values live in the
+  // scores table: reset them and let the backfill recompute (the .osu files
+  // stay on disk, so a full pass is compute-only)
+  const PP_KEY = "pp_local_key";
+  const PP_DONE = `v1@rosu-${rosuVersion}`;
+  const ppDone = (
+    d.prepare("SELECT value FROM sync_state WHERE key = ?").get(PP_KEY) as
+      | { value: string }
+      | undefined
+  )?.value;
+  if (ppDone !== PP_DONE) {
+    if (ppDone != null) {
+      d.exec("UPDATE scores SET pp_local = NULL WHERE pp_local IS NOT NULL");
+      console.log(`[db] local pp reset (${ppDone} -> ${PP_DONE})`);
+    }
+    d.prepare(
+      "INSERT INTO sync_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+    ).run(PP_KEY, PP_DONE);
+  }
+  // The game never grants pp on loved maps, but local values used to be
+  // computed for them — and the loved aspire monsters carried six-figure
+  // estimates that drowned every pp total. Purge them (the -1 markers too);
+  // the backfill no longer touches non-ranked/approved maps, so they stay out.
+  const lovedPp = (
+    d
+      .prepare(
+        `SELECT COUNT(*) c FROM scores s JOIN beatmaps b ON b.id = s.beatmap_id
+         WHERE s.pp_local IS NOT NULL AND b.status NOT IN (1, 2)`
+      )
+      .get() as { c: number }
+  ).c;
+  if (lovedPp > 0) {
+    d.exec(
+      `UPDATE scores SET pp_local = NULL WHERE pp_local IS NOT NULL
+       AND beatmap_id IN (SELECT id FROM beatmaps WHERE status NOT IN (1, 2))`
+    );
+    console.log(`[db] cleared local pp on ${lovedPp} scores of non-pp maps`);
   }
 
   // osu!std is now started explicitly, like the other modes (nothing runs for a

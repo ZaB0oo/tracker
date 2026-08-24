@@ -37,3 +37,13 @@ export const fmtTime = (iso: string): string => {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 };
+
+/** pp with the locally computed fallback (null when neither exists) */
+export const effPp = (s: { pp: number | null; pp_local: number | null }) =>
+  s.pp ?? (s.pp_local != null && s.pp_local >= 0 ? s.pp_local : null);
+
+/** "226.31pp" official, "~204.87pp" when locally estimated, "" when neither */
+export const ppText = (s: { pp: number | null; pp_local: number | null }) => {
+  const v = effPp(s);
+  return v == null ? "" : `${s.pp == null ? "~" : ""}${v.toFixed(2)}pp`;
+};

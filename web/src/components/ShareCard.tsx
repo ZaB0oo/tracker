@@ -9,27 +9,7 @@ import { gradeDataUrl } from "./GradeBadge";
 import { fmtNum } from "../format";
 import { GRADE_ORDER } from "../types";
 import { useEscape } from "../useEscape";
-
-
-/**
- * "Wither level" — the level rework proposal from ppy/osu#17124 (revised):
- * XP is a composite of profile stats (SS x200, S x100, A x50, ranked
- * score /125k, total score /250k, medals x20k, playtime hours x300) and
- * Total XP Required = 5L^3 + 80L^2 + 225L - 310. Inverted exactly by binary
- * search. Top players land around level 200 on this scale.
- */
-const witherXp = (L: number) => 5 * L ** 3 + 80 * L ** 2 + 225 * L - 310;
-function witherLevel(xpTotal: number): number {
-  if (!Number.isFinite(xpTotal) || xpTotal <= 0) return 1;
-  let lo = 1;
-  let hi = 100_000;
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >> 1;
-    if (witherXp(mid) <= xpTotal) lo = mid;
-    else hi = mid - 1;
-  }
-  return lo;
-}
+import { witherLevel, witherXpTotal } from "../wither";
 
 // Layout constants (SVG units) — mirrors the reference card:
 // banner header, then 3 big stats, 5 mid stats, 4 wide stats, 8 grade badges.
@@ -178,15 +158,7 @@ export function ShareCard({
 
   // composite XP for the wither level (grade counts from the tracker's
   // per-map bests, the rest from the osu! profile)
-  const witherXpTotal = ps
-    ? (g("XH") + g("X")) * 200 +
-      (g("SH") + g("S")) * 100 +
-      g("A") * 50 +
-      ps.ranked_score / 125_000 +
-      ps.total_score / 250_000 +
-      ps.medals * 20_000 +
-      (ps.play_time / 3600) * 300
-    : 0;
+  const xpTotal = ps ? witherXpTotal(g, ps) : 0;
 
   const BIG_Y = HEADER_H + 46;
   const MID_Y = BIG_Y + 88;
@@ -376,7 +348,7 @@ export function ShareCard({
                   strokeLinejoin="round"
                 />
                 <text x="0" y="6" fontSize="17" fontWeight="700" fill="#ffffff" textAnchor="middle">
-                  {fmtNum(witherLevel(witherXpTotal))}
+                  {fmtNum(Math.floor(witherLevel(xpTotal)))}
                 </text>
                 <text x="0" y="44" fontSize="9.5" fill="#b6adc9" textAnchor="middle">
                   WitherLevel

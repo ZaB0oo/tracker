@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { getDb } from "../db/db.js";
 import { keysWhere, parseRulesetParam, poolWhere, statusIn } from "../logic/rulesets.js";
+import { PP_SQL } from "../logic/scoreSql.js";
 
 /** pool + mania keys + status scope, shared by the day/history queries */
 function clearsScope(
@@ -30,7 +31,7 @@ function paging(q: Record<string, string | undefined>): {
 }
 
 const CLEARS_SELECT = `SELECT s.id, s.ended_at, s.rank, s.accuracy, s.total_score,
-    s.classic_total_score, s.mods, s.fc_state, s.pp,
+    s.classic_total_score, s.mods, s.fc_state, ${PP_SQL} AS pp,
     s.beatmap_id, b.version, b.star_rating, st.artist, st.title
    FROM scores s
    JOIN beatmaps b ON b.id = s.beatmap_id

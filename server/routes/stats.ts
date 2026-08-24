@@ -1,6 +1,9 @@
 import { Router } from "express";
 import { getDb } from "../db/db.js";
 import { keysWhere, maniaKeysSql, parseRulesetParam, poolWhere, statusIn } from "../logic/rulesets.js";
+import { srMods, srModsKey } from "../logic/score.js";
+import { queueModdedSr } from "./metrics.js";
+import { ppLocalVersion } from "../osu/ppFill.js";
 import {
   replaySnapshot,
   SNAP_DIM_INDEX,
@@ -16,6 +19,7 @@ import {
   ensureMissingFresh,
   fitSkillCurve,
   N_BASIC,
+  PP_SQL,
   scoresVersion,
   witherSql,
 } from "../logic/scoreSql.js";
@@ -1168,6 +1172,270 @@ statsRouter.get("/snapshot", (req, res) => {
       ? curveDimSql(R, curveDimSel).steps
       : CURVE_STEPS;
   res.json(replaySnapshot(R, snapCache, day, curveDimSel, dimSteps));
+});
+
+// All-time records and averages of the pool, cached by scores version like
+// /stats. While modded-SR lookups are still filling, only the two star
+// records are recomputed per request — the heavy aggregates stay cached.
+const recordsCache = new Map<
+  string,
+  { version: string; payload: Record<string, unknown>; srPending: boolean }
+>();
+
+statsRouter.get("/records", (req, res) => {
+  const R = parseRulesetParam(req.query.ruleset);
+  const POOL = withKeys(R, req, poolWhere(R, String(req.query.pool ?? "")));
+  const STATUSES = statusIn(String(req.query.scope ?? ""));
+  const db = getDb();
+  // pp fill version too: the totals below count the locally computed pp
+  const version = `${scoresVersion()}|pp${ppLocalVersion()}`;
+  const cacheKey = `${R}|${POOL}|${STATUSES}`;
+  const hit = recordsCache.get(cacheKey);
+  if (hit && hit.version === version && !hit.srPending)
+    return res.json(hit.payload);
+
+  const SR = R === 0 ? "b.star_rating" : "COALESCE(ca.star_rating, b.star_rating)";
+  const CA =
+    R === 0
+      ? ""
+      : `LEFT JOIN convert_attrs ca ON ca.beatmap_id = b.id AND ca.ruleset = ${R} AND b.ruleset != ${R}`;
+  const MAP_COLS =
+    "b.id AS mapId, b.beatmapset_id AS setId, st.artist, st.title, b.version AS diff";
+  // star-rating records stay on ranked maps unless the scope IS loved: loved
+  // aspire maps carry broken 40★+ ratings that would own the card forever
+  const SR_STATUSES = STATUSES === "(4)" ? STATUSES : "(1, 2)";
+  // records OF THE BEST score follow leaderboard semantics, like everything
+  const BESTS = `FROM beatmap_user u
+     JOIN scores s ON s.id = u.best_lazer_score_id
+     JOIN beatmaps b ON b.id = u.beatmap_id
+     JOIN beatmapsets st ON st.id = b.beatmapset_id
+     ${CA}
+     WHERE u.ruleset = ${R} AND ${POOL} AND b.status IN ${STATUSES}`;
+  const ALL = `FROM scores s
+     JOIN beatmaps b ON b.id = s.beatmap_id
+     JOIN beatmapsets st ON st.id = b.beatmapset_id
+     ${CA}
+     WHERE s.ruleset = ${R} AND s.passed = 1 AND ${POOL} AND b.status IN ${STATUSES}`;
+  const one = (sql: string) =>
+    (db.prepare(sql).get() ?? null) as Record<string, unknown> | null;
+
+  // Star records are about PLAYS, not leaderboard state: every passed score
+  // competes (an FC later outscored by a non-FC play is still my hardest FC),
+  // and the rating is the one OF THE MODS PLAYED (a HR FC is harder than the
+  // nomod rating says). The cache only fills lazily: rank the candidates by
+  // an optimistic ceiling (nomod rating times generous mod factors — over-
+  // estimating only widens the pool), then walk down until even the ceiling
+  // cannot beat the best real value seen. Misses are queued in the
+  // background; while any is pending the payload is NOT cached, so the 60s
+  // refetch picks them up.
+  const SR_CEIL = `${SR}
+    * (CASE WHEN s.mods LIKE '%DT%' OR s.mods LIKE '%NC%' OR s.mods LIKE '%WU%'
+       THEN 1.8 ELSE 1 END)
+    * (CASE WHEN s.mods LIKE '%HR%' OR s.mods LIKE '%DA%' THEN 1.5 ELSE 1 END)`;
+  const cachedSr = db.prepare(
+    "SELECT star_rating FROM modded_sr WHERE beatmap_id = ? AND ruleset = ? AND mods = ?"
+  );
+  let srPending = false;
+  const bestBySr = (extra: string) => {
+    const cands = db
+      .prepare(
+        `SELECT ${MAP_COLS}, s.ended_at AS at, s.mods AS mods, s.rate AS rate,
+           ${SR} AS value, ${SR_CEIL} AS ceil
+         ${ALL} ${extra} AND ${SR} IS NOT NULL AND b.status IN ${SR_STATUSES}
+         ORDER BY ceil DESC LIMIT 1000`
+      )
+      .all() as (Record<string, unknown> & {
+      mapId: number;
+      mods: string;
+      value: number;
+      ceil: number;
+    })[];
+    let best: (Record<string, unknown> & { value: number }) | null = null;
+    for (const c of cands) {
+      // bound: candidates come in ceiling order, so once even the ceiling
+      // cannot beat the best real value found, none of the rest can either
+      if (best != null && c.ceil <= best.value) break;
+      const played = srMods(c.mods);
+      let sr = c.value;
+      if (played.length > 0) {
+        const hit = cachedSr.get(c.mapId, R, srModsKey(played)) as
+          | { star_rating: number | null }
+          | undefined;
+        // a stored null is a permanent failure: keep the nomod rating
+        if (hit) sr = hit.star_rating ?? c.value;
+        else {
+          srPending = true;
+          queueModdedSr(c.mapId, played, srModsKey(played), R);
+        }
+      }
+      if (best == null || sr > best.value) {
+        const { mods: _raw, ceil: _c, ...entry } = c;
+        best = { ...entry, value: sr, mods: played.map((m) => m.acronym) };
+      }
+    }
+    return best;
+  };
+
+  // a cached payload whose star records were still waiting on the modded-SR
+  // fill: refresh JUST those two (two 100-row windows) and keep the rest
+  if (hit && hit.version === version) {
+    hit.payload.bestFcSr = bestBySr("AND s.fc_state <= 1");
+    hit.payload.bestSsSr = bestBySr("AND s.rank IN ('X','XH')");
+    hit.srPending = srPending;
+    return res.json(hit.payload);
+  }
+
+  // official weighting over the pp best of each map (0.95^i + the bonus term)
+  const ppRows = db
+    .prepare(
+      `SELECT MAX(${PP_SQL}) AS pp ${ALL} AND ${PP_SQL} IS NOT NULL
+       GROUP BY s.beatmap_id ORDER BY pp DESC`
+    )
+    .all() as { pp: number }[];
+  let weightedPp = 0;
+  ppRows.forEach((r, i) => {
+    weightedPp += r.pp * 0.95 ** i;
+  });
+  weightedPp += 416.6667 * (1 - 0.995 ** Math.min(ppRows.length, 1000));
+  // the total sums the pp of each map's LEADERBOARD BEST — the same rule as
+  // the total-pp metric, so the tile and the metric can never disagree (a
+  // beaten play with more pp counts in neither)
+  const ppTotals = db
+    .prepare(
+      `SELECT COALESCE(SUM(${PP_SQL}), 0) AS t, COUNT(${PP_SQL}) AS n,
+         SUM(s.total_score) AS std ${BESTS}`
+    )
+    .get() as { t: number; n: number; std: number | null };
+  const totalPp = ppTotals.t;
+
+  const payload = {
+    topClassic: one(`SELECT ${MAP_COLS}, s.ended_at AS at,
+        COALESCE(s.classic_total_score, s.total_score) AS value
+      ${BESTS} ORDER BY value DESC LIMIT 1`),
+    // the pp best of a map can be another score than its classic best
+    topPp: one(`SELECT ${MAP_COLS}, s.ended_at AS at, ${PP_SQL} AS value
+      ${ALL} AND ${PP_SQL} IS NOT NULL ORDER BY value DESC LIMIT 1`),
+    bestFcSr: bestBySr("AND s.fc_state <= 1"),
+    bestSsSr: bestBySr("AND s.rank IN ('X','XH')"),
+    peakCombo: one(`SELECT ${MAP_COLS}, s.ended_at AS at, s.max_combo AS value
+      ${ALL} ORDER BY s.max_combo DESC LIMIT 1`),
+    oldest: one(`SELECT ${MAP_COLS}, s.ended_at AS at, NULL AS value
+      ${ALL} ORDER BY s.ended_at ASC LIMIT 1`),
+    averages: db
+      .prepare(
+        `SELECT AVG(s.accuracy) acc, AVG(${SR}) sr, AVG(b.total_length) len,
+           SUM(COALESCE(u.best_fc, 0)) fc, COUNT(*) clears,
+           SUM(COALESCE(s.classic_total_score, s.total_score)) classic
+         ${BESTS}`
+      )
+      .get(),
+    // pool-wide aggregates for the stat strip (every pass, not just bests);
+    // playtime approximates each pass by the map length at the rate played
+    stats: {
+      ...(db
+        .prepare(
+          `SELECT COUNT(*) AS scores,
+             SUM(b.total_length / COALESCE(s.rate, 1)) AS playtime,
+             SUM(COALESCE(s.classic_total_score, s.total_score)) AS totalClassic
+           ${ALL}`
+        )
+        .get() as Record<string, unknown>),
+      // the sum of the BESTS' standardised scores — the same state the hero
+      // shows, every pass summed would double-count replayed maps
+      totalStd: ppTotals.std,
+      totalPp,
+      weightedPp,
+      avgPp: ppTotals.n > 0 ? totalPp / ppTotals.n : null,
+    },
+  };
+  recordsCache.set(cacheKey, { version, payload, srPending });
+  while (recordsCache.size > 16)
+    recordsCache.delete(recordsCache.keys().next().value!);
+  res.json(payload);
+});
+
+// Accuracy vs difficulty: ONE point per map (the best score), compact tuples
+// [beatmap_id, stars, accuracy, fc_state, grade 0-7 (D..XH)] so ~100k points
+// stay a light payload. Cached by scores version like /records.
+const scatterCache = new Map<string, { version: string; payload: unknown }>();
+
+statsRouter.get("/scatter", (req, res) => {
+  const R = parseRulesetParam(req.query.ruleset);
+  const POOL = withKeys(R, req, poolWhere(R, String(req.query.pool ?? "")));
+  const STATUSES = statusIn(String(req.query.scope ?? ""));
+  // time machine: &day=YYYY-MM-DD replays the best per map from the scores
+  // up to that day (window function) instead of reading beatmap_user
+  const dayRaw = String(req.query.day ?? "");
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(dayRaw) ? dayRaw : null;
+  const version = `${scoresVersion()}|pp${ppLocalVersion()}`;
+  const cacheKey = `${R}|${POOL}|${STATUSES}|${day ?? "live"}`;
+  const hit = scatterCache.get(cacheKey);
+  if (hit && hit.version === version) return res.json(hit.payload);
+
+  const SR = R === 0 ? "b.star_rating" : "COALESCE(ca.star_rating, b.star_rating)";
+  const CA =
+    R === 0
+      ? ""
+      : `LEFT JOIN convert_attrs ca ON ca.beatmap_id = b.id AND ca.ruleset = ${R} AND b.ruleset != ${R}`;
+  const COLS = `ROUND(${SR}, 2) AS sr,
+         ROUND(s.accuracy, 4) AS acc, s.fc_state AS fc,
+         CASE s.rank WHEN 'XH' THEN 7 WHEN 'X' THEN 6 WHEN 'SH' THEN 5
+           WHEN 'S' THEN 4 WHEN 'A' THEN 3 WHEN 'B' THEN 2 WHEN 'C' THEN 1
+           ELSE 0 END AS g`;
+  const rows = (
+    day == null
+      ? getDb().prepare(
+          `SELECT u.beatmap_id AS id, ${COLS}
+           FROM beatmap_user u
+           JOIN scores s ON s.id = u.best_lazer_score_id
+           JOIN beatmaps b ON b.id = u.beatmap_id
+           ${CA}
+           WHERE u.ruleset = ${R} AND ${POOL} AND b.status IN ${STATUSES}
+             AND ${SR} IS NOT NULL`
+        )
+      : getDb().prepare(
+          `SELECT id, sr, acc, fc, g FROM (
+             SELECT s.beatmap_id AS id, ${COLS},
+               ROW_NUMBER() OVER (
+                 PARTITION BY s.beatmap_id
+                 ORDER BY COALESCE(s.classic_total_score, s.total_score) DESC,
+                   s.ended_at ASC
+               ) AS rn
+             FROM scores s
+             JOIN beatmaps b ON b.id = s.beatmap_id
+             ${CA}
+             WHERE s.ruleset = ${R} AND s.passed = 1 AND ${POOL}
+               AND b.status IN ${STATUSES} AND ${SR} IS NOT NULL
+               AND date(s.ended_at) <= '${day}'
+           ) WHERE rn = 1`
+        )
+  ).all() as { id: number; sr: number; acc: number; fc: number; g: number }[];
+  const payload = { points: rows.map((r) => [r.id, r.sr, r.acc, r.fc, r.g]) };
+  scatterCache.set(cacheKey, { version, payload });
+  while (scatterCache.size > 8)
+    scatterCache.delete(scatterCache.keys().next().value!);
+  res.json(payload);
+});
+
+// Names for a handful of maps at once (scatter hover tooltip: the payload
+// above ships ids only — 100k titles would triple it for nothing).
+statsRouter.get("/map-names", (req, res) => {
+  const ids = String(req.query.ids ?? "")
+    .split(",")
+    .map(Number)
+    .filter((n) => Number.isInteger(n) && n > 0)
+    .slice(0, 30);
+  if (ids.length === 0) return res.json({ names: {} });
+  const rows = getDb()
+    .prepare(
+      `SELECT b.id, st.artist, st.title, b.version AS diff
+       FROM beatmaps b JOIN beatmapsets st ON st.id = b.beatmapset_id
+       WHERE b.id IN (${ids.join(",")})`
+    )
+    .all() as { id: number; artist: string; title: string; diff: string }[];
+  const names: Record<number, string> = {};
+  for (const r of rows) names[r.id] = `${r.artist} – ${r.title} [${r.diff}]`;
+  res.json({ names });
 });
 
 // Compact stats for the stream overlay (?overlay=1) — polled every 5s,

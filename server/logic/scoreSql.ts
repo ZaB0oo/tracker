@@ -13,6 +13,9 @@ import { witherSql as witherSqlRaw } from "./wither.js";
 // ---------- Shared SQL expressions (required aliases: b = beatmaps, s = best) ----------
 
 const FULL_BASE = 1_000_000;
+
+export { PP_SQL } from "./score.js";
+
 export const N_OBJ =
   "(COALESCE(b.count_circles,0) + COALESCE(b.count_sliders,0) + COALESCE(b.count_spinners,0))";
 // Max classic of a map (SS NoMod): n_objects² × 32.57 + 100000 (lazer formula)

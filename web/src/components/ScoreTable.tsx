@@ -135,7 +135,9 @@ const COLUMNS: Col[] = [
     className: (r) =>
       r.global_rank != null && r.global_rank <= 100 ? "global-rank-top" : "",
   },
-  { id: "pp", label: "pp", width: 45, sortable: true, render: (r) => (r.pp == null ? "—" : Math.round(r.pp)) },
+  { id: "pp", label: "pp", width: 50, sortable: true,
+    render: (r) =>
+      r.pp == null ? "—" : `${r.pp_estimated ? "~" : ""}${Math.round(r.pp)}` },
   { id: "ended_at", label: "Played on", width: 90, sortable: true, render: (r) => fmtDate(r.ended_at) },
   {
     // sorts on the MAP's max combo: "which maps are long" is the useful
