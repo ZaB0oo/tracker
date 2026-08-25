@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchSettings,
   postDiscordTest,
+  postDiscordTestBest,
   postImportDb,
   postSettings,
   postImportAny,
@@ -78,6 +79,7 @@ export function AdvancedSettings({
   const [webhookUrl, setWebhookUrl] = useState<string | null>(null);
   const [dBests, setDBests] = useState<boolean | null>(null);
   const [wither, setWither] = useState<boolean | null>(null);
+  const [estPerf, setEstPerf] = useState<boolean | null>(null);
   const [testMsg, setTestMsg] = useState<string | null>(null);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [importerPath, setImporterPath] = useState<string | null>(null);
@@ -117,7 +119,10 @@ export function AdvancedSettings({
   const save = useMutation({
     mutationFn: async () => {
       const payload: Parameters<typeof postSettings>[0] = {
-        display: { wither: wither ?? data!.display.wither },
+        display: {
+          wither: wither ?? data!.display.wither,
+          estPerf: estPerf ?? data!.display.estPerf,
+        },
         discord: {
           ...(webhookUrl != null && webhookUrl !== "" ? { webhookUrl } : {}),
           bests: dBests ?? data!.discord.bests,
@@ -157,6 +162,15 @@ export function AdvancedSettings({
       await postDiscordTest();
     },
     onSuccess: () => setTestMsg("Test message sent ✓"),
+    onError: (e: Error) => setTestMsg(e.message),
+  });
+  const testBest = useMutation({
+    mutationFn: async () => {
+      if (webhookUrl != null && webhookUrl !== "")
+        await postSettings({ discord: { webhookUrl } });
+      await postDiscordTestBest(ruleset);
+    },
+    onSuccess: () => setTestMsg("Random best sent ✓"),
     onError: (e: Error) => setTestMsg(e.message),
   });
 
@@ -327,6 +341,16 @@ export function AdvancedSettings({
           </a>
           .
         </p>
+        <label className="adv-toggle">
+          <input
+            type="checkbox"
+            checked={estPerf ?? data.display.estPerf}
+            onChange={(e) => setEstPerf(e.target.checked)}
+          />
+          <span title="Off: the Performance tile uses official pp only">
+            Count locally estimated pp in the Performance tile.
+          </span>
+        </label>
         </div>
 
         <div className="set-col">
@@ -360,6 +384,13 @@ export function AdvancedSettings({
         <div className="adv-toggle">
           <button disabled={test.isPending} onClick={() => test.mutate()}>
             {test.isPending ? "Sending…" : "Send a test message"}
+          </button>
+          <button
+            disabled={testBest.isPending}
+            onClick={() => testBest.mutate()}
+            title="A random real best, through the exact live notification pipeline"
+          >
+            {testBest.isPending ? "Sending…" : "Post a random best"}
           </button>
           {testMsg && <span> {testMsg}</span>}
         </div>

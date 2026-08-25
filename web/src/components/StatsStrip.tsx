@@ -22,6 +22,7 @@ export const StatsStrip = memo(function StatsStrip({
   keys = [],
   scope = "all",
   dimmed = false,
+  at = null,
   completion = null,
   grades = [],
   rankedClassic = null,
@@ -31,6 +32,9 @@ export const StatsStrip = memo(function StatsStrip({
   keys?: string[];
   scope?: DashScope;
   dimmed?: boolean;
+  /** time machine day: tracker aggregates as of that evening (null = live);
+   * profile-sourced tiles have no history and hide */
+  at?: string | null;
   /** live played/total of the current scope, for the Completion tile */
   completion?: { done: number; total: number } | null;
   /** live grade counts of the bests, for the wither XP composite */
@@ -40,9 +44,10 @@ export const StatsStrip = memo(function StatsStrip({
   rankedClassic?: number | null;
 }) {
   const { data } = useQuery({
-    queryKey: ["records", ruleset, pool, keys, scope],
-    queryFn: () => fetchRecords(ruleset, pool, keys, scope),
+    queryKey: ["records", ruleset, pool, keys, scope, at],
+    queryFn: () => fetchRecords(ruleset, pool, keys, scope, at),
     refetchInterval: 60_000,
+    placeholderData: (prev) => prev,
   });
   const { data: auth } = useQuery({
     queryKey: ["auth", ruleset],
@@ -57,30 +62,36 @@ export const StatsStrip = memo(function StatsStrip({
   if (!data?.stats || !data.averages) return null;
   const st = data.stats;
   const a = data.averages;
-  const ps = auth?.profile?.stats;
-  const dc = auth?.profile?.daily_challenge;
+  // under the time machine, only the tracker's own aggregates exist: the
+  // profile figures and the sessions are today's numbers, so they hide
+  const tm = at != null;
+  const ps = tm ? undefined : auth?.profile?.stats;
+  const dc = tm ? undefined : auth?.profile?.daily_challenge;
   const gradeMap = new Map(grades.map((gr) => [gr.grade, gr.c]));
   const xp = ps
     ? witherXpTotal((k) => gradeMap.get(k) ?? 0, ps)
     : null;
+  const weighted = prefs.estPerf ? st.weightedPp : st.weightedPpOfficial;
   const tiles: [string, string | null][] = [
     ["Scores", fmtNum(st.scores)],
     ["Clears", fmtNum(a.clears)],
     ["Play count", ps ? fmtNum(ps.play_count) : null],
     ["Play time", ps ? hours(ps.play_time) : st.playtime != null ? hours(st.playtime) : null],
-    ["Sessions", sess && sess.summary.count > 0 ? fmtNum(sess.summary.count) : null],
+    ["Sessions", !tm && sess && sess.summary.count > 0 ? fmtNum(sess.summary.count) : null],
     [
       "Longest session",
-      sess && sess.summary.count > 0 ? hours(sess.summary.longestSec) : null,
+      !tm && sess && sess.summary.count > 0 ? hours(sess.summary.longestSec) : null,
     ],
     [
       "Avg session",
-      sess && sess.summary.count > 0
-        ? `${Math.round(sess.summary.avgSec / 60)}m`
+      !tm && sess && sess.summary.count > 0
+        ? sess.summary.avgSec >= 3600
+          ? hours(sess.summary.avgSec)
+          : `${Math.round(sess.summary.avgSec / 60)} min`
         : null,
     ],
     ["Total performance", `${fmtNum(Math.round(st.totalPp))}pp`],
-    ["Performance", `${fmtNum(Math.round(st.weightedPp))}pp`],
+    ["Performance", `${fmtNum(Math.round(weighted ?? st.weightedPp))}pp`],
     ["Avg performance", st.avgPp != null ? `${Math.round(st.avgPp)}pp` : null],
     ["Avg accuracy", a.acc != null ? `${(a.acc * 100).toFixed(2)}%` : null],
     ["Avg length", a.len != null ? mmss(a.len) : null],
@@ -96,7 +107,18 @@ export const StatsStrip = memo(function StatsStrip({
       "Score per clear",
       a.classic != null && a.clears > 0 ? fmtNum(Math.round(a.classic / a.clears)) : null,
     ],
-    ["Ranked score", rankedClassic != null ? fmtNum(rankedClassic) : ps ? fmtNum(ps.ranked_score) : null],
+    [
+      "Ranked score",
+      tm
+        ? a.classic != null
+          ? fmtNum(a.classic)
+          : null
+        : rankedClassic != null
+          ? fmtNum(rankedClassic)
+          : ps
+            ? fmtNum(ps.ranked_score)
+            : null,
+    ],
     ["Total score", ps ? fmtNum(ps.total_score) : null],
     ["Standardised score", st.totalStd != null ? fmtNum(st.totalStd) : null],
     ["Medals", ps ? fmtNum(ps.medals) : null],

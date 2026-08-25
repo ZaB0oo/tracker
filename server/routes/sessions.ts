@@ -3,6 +3,7 @@ import { getDb } from "../db/db.js";
 import { keysWhere, parseRulesetParam, poolWhere, statusIn } from "../logic/rulesets.js";
 import { PP_SQL, scoresVersion } from "../logic/scoreSql.js";
 import { ppLocalVersion } from "../osu/ppFill.js";
+import { fillSrMods } from "./metrics.js";
 
 export const sessionsRouter = Router();
 
@@ -164,6 +165,7 @@ sessionsRouter.get("/sessions/scores", (req, res) => {
        WHERE ${sessionWhere(req, R)} AND s.ended_at BETWEEN ? AND ?
        ORDER BY s.ended_at`
     )
-    .all(start, end);
-  res.json({ scores });
+    .all(start, end) as ({ mapId: number; mods: string } & Record<string, unknown>)[];
+  // star rating of the mods played, from the shared cache (misses queued)
+  res.json({ scores: fillSrMods(scores, R, (r) => r.mapId) });
 });

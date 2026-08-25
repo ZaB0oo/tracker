@@ -55,6 +55,32 @@ export function queueModdedSr(
     .finally(() => srInFlight.delete(inFlight));
 }
 
+/**
+ * Decorate score rows with the star rating OF THE MODS PLAYED (`sr_mods`),
+ * from the shared cache; misses are queued so the values fill within a
+ * refetch or two. Rows without SR-affecting mods get null (the map rating
+ * is already right).
+ */
+export function fillSrMods<T extends { mods: string }>(
+  rows: T[],
+  ruleset: number,
+  idOf: (r: T) => number
+): (T & { sr_mods: number | null })[] {
+  const get = getDb().prepare(
+    "SELECT star_rating FROM modded_sr WHERE beatmap_id = ? AND ruleset = ? AND mods = ?"
+  );
+  return rows.map((r) => {
+    const played = r.mods ? srMods(r.mods) : [];
+    if (played.length === 0) return { ...r, sr_mods: null };
+    const key = srModsKey(played);
+    const hit = get.get(idOf(r), ruleset, key) as
+      | { star_rating: number | null }
+      | undefined;
+    if (!hit) queueModdedSr(idOf(r), played, key, ruleset);
+    return { ...r, sr_mods: hit?.star_rating ?? null };
+  });
+}
+
 // Custom metrics (milestones + evolution)
 export const metricsRouter = Router();
 

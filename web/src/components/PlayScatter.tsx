@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { SessionScore } from "../api";
-import { fmtCompact, fmtNum, fmtTime } from "../format";
+import { fmtNum, fmtTime } from "../format";
 
 const hm = (iso: string) => fmtTime(iso).slice(0, 5);
 
@@ -15,12 +15,12 @@ const CHART_METRICS: {
   /** axis floor: "zero" anchors at 0, a number is a percentage-like floor */
   floor: number;
 }[] = [
-  { id: "pp", label: "Performance", y: (s) => s.pp, fmt: (v) => `${Math.round(v)}pp`, floor: 0 },
-  { id: "score", label: "Score", y: (s) => s.classic ?? s.std, fmt: (v) => fmtCompact(v), floor: 0 },
-  { id: "std", label: "Score (std)", y: (s) => s.std, fmt: (v) => fmtCompact(v), floor: 0 },
+  { id: "pp", label: "Performance", y: (s) => s.pp, fmt: (v) => `${v.toFixed(2)}pp`, floor: 0 },
+  { id: "score", label: "Score", y: (s) => s.classic ?? s.std, fmt: (v) => fmtNum(Math.round(v)), floor: 0 },
+  { id: "std", label: "Score (std)", y: (s) => s.std, fmt: (v) => fmtNum(Math.round(v)), floor: 0 },
   { id: "acc", label: "Accuracy", y: (s) => s.accuracy * 100, fmt: (v) => `${v.toFixed(1)}%`, floor: 95 },
   { id: "combo", label: "Combo", y: (s) => s.combo, fmt: (v) => `${fmtNum(Math.round(v))}x`, floor: 0 },
-  { id: "stars", label: "Stars", y: (s) => s.sr, fmt: (v) => `${v.toFixed(2)}★`, floor: 0 },
+  { id: "stars", label: "Stars", y: (s) => s.sr_mods ?? s.sr, fmt: (v) => `${v.toFixed(2)}★`, floor: 0 },
   {
     id: "len", label: "Length", y: (s) => s.len,
     fmt: (v) => `${Math.floor(v / 60)}:${String(Math.round(v % 60)).padStart(2, "0")}`,

@@ -165,7 +165,7 @@ export const HeatmapPanel = memo(function HeatmapPanel({
         cmp = `${a.artist} ${a.title} ${a.version}`.localeCompare(
           `${b.artist} ${b.title} ${b.version}`, undefined, { sensitivity: "base" });
         break;
-      case "sr": cmp = (a.star_rating ?? -1) - (b.star_rating ?? -1); break;
+      case "sr": cmp = ((a.sr_mods ?? a.star_rating) ?? -1) - ((b.sr_mods ?? b.star_rating) ?? -1); break;
       case "grade":
         cmp = (GRADE_ORDER[a.rank] ?? -1) - (GRADE_ORDER[b.rank] ?? -1)
           || (a.accuracy - b.accuracy);
@@ -450,16 +450,23 @@ export const HeatmapPanel = memo(function HeatmapPanel({
                             <span className="hm-day-map-title">
                               {r.artist} - {r.title} <i>[{r.version}]</i>
                             </span>
-                            {modsLabel(r.mods) && (
-                              <span className="hm-day-map-mods">+{modsLabel(r.mods)}</span>
+                            {(modsLabel(r.mods) || (r.rate != null && r.rate !== 1)) && (
+                              <span className="hm-day-map-mods">
+                                {modsLabel(r.mods) ? `+${modsLabel(r.mods)}` : ""}
+                                {r.rate != null && r.rate !== 1
+                                  ? `${modsLabel(r.mods) ? " " : ""}${r.rate}x`
+                                  : ""}
+                              </span>
                             )}
                           </div>
                         </td>
                         <td className="hm-day-map-acc">
                           {(r.accuracy * 100).toFixed(2)}%
                         </td>
-                        <td className="hm-day-map-sr">
-                          {r.star_rating != null ? r.star_rating.toFixed(1) : "—"}
+                        <td className={`hm-day-map-sr${r.sr_mods != null ? " sr-mod" : ""}`}>
+                          {(r.sr_mods ?? r.star_rating) != null
+                            ? (r.sr_mods ?? r.star_rating)!.toFixed(2)
+                            : "—"}
                         </td>
                         <td className="hm-day-map-time">
                           {new Date(r.ended_at).toLocaleTimeString([], {

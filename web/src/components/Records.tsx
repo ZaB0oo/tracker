@@ -13,8 +13,8 @@ const cover = (setId: number) =>
 /**
  * All-time record plays as cards inside the hero, each on its map's cover.
  * The star records carry the rating of the mods played. Right-click opens the
- * same context menu as the table rows; dimmed under the time machine
- * (records are not historised).
+ * same context menu as the table rows; the time machine replays them as
+ * they stood on the selected day.
  */
 export const HeroRecords = memo(function HeroRecords({
   ruleset = 0,
@@ -22,17 +22,21 @@ export const HeroRecords = memo(function HeroRecords({
   keys = [],
   scope = "all",
   dimmed = false,
+  at = null,
 }: {
   ruleset?: number;
   pool?: PoolMode;
   keys?: string[];
   scope?: DashScope;
   dimmed?: boolean;
+  /** time machine day: the records as of that evening (null = live) */
+  at?: string | null;
 }) {
   const { data } = useQuery({
-    queryKey: ["records", ruleset, pool, keys, scope],
-    queryFn: () => fetchRecords(ruleset, pool, keys, scope),
+    queryKey: ["records", ruleset, pool, keys, scope, at],
+    queryFn: () => fetchRecords(ruleset, pool, keys, scope, at),
     refetchInterval: 60_000,
+    placeholderData: (prev) => prev,
   });
   const [modalId, setModalId] = useState<number | null>(null);
   const [ctx, setCtx] = useState<{ x: number; y: number; rec: RecordEntry } | null>(null);

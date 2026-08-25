@@ -52,7 +52,7 @@ const SC_COLS: {
   { id: "grade", label: "Grade", key: (s) => GRADE_RANK[s.rank] ?? -1 },
   { id: "map", label: "Map", key: (s) => `${s.artist} ${s.title}` },
   { id: "mods", label: "Mods", key: (s) => modsText(s.mods) },
-  { id: "sr", label: "Stars", num: true, key: (s) => s.sr },
+  { id: "sr", label: "Stars", num: true, key: (s) => s.sr_mods ?? s.sr },
   { id: "acc", label: "Acc", num: true, key: (s) => s.accuracy },
   { id: "score", label: "Score", num: true, key: (s) => s.classic ?? s.std },
   { id: "pp", label: "pp", num: true, key: (s) => s.pp },
@@ -149,9 +149,9 @@ function SessionDetail({
   const tiles: [string, string][] = [
     ["Duration", dur(session.sec)],
     ["Scores", fmtNum(sc.length)],
-    ["Classic gained", fmtCompact(classicTotal)],
-    ["Avg classic", passes.length ? fmtCompact(classicTotal / passes.length) : "—"],
-    ["Standardised gained", fmtCompact(stdTotal)],
+    ["Classic gained", fmtNum(classicTotal)],
+    ["Avg classic", passes.length ? fmtNum(Math.round(classicTotal / passes.length)) : "—"],
+    ["Standardised gained", fmtNum(stdTotal)],
     ["Total pp", ppCount ? `${fmtNum(Math.round(ppTotal))}pp` : "—"],
     ["Avg pp", ppCount ? `${Math.round(ppTotal / ppCount)}pp` : "—"],
     ["Best pp", ppMax != null ? `${ppMax.toFixed(2)}pp` : "—"],
@@ -228,7 +228,9 @@ function SessionDetail({
               {modsText(s.mods)}
               {s.rate != null && s.rate !== 1 ? ` ${s.rate}x` : ""}
             </span>
-            <span className="num">{s.sr != null ? `${s.sr.toFixed(2)}★` : ""}</span>
+            <span className={`num${s.sr_mods != null ? " sr-mod" : ""}`}>
+              {(s.sr_mods ?? s.sr) != null ? `${(s.sr_mods ?? s.sr)!.toFixed(2)}★` : ""}
+            </span>
             <span className="num">{(s.accuracy * 100).toFixed(2)}%</span>
             <span className="num">{fmtNum(s.classic ?? s.std)}</span>
             <span className="num">{s.pp != null ? `${s.pp.toFixed(2)}pp` : ""}</span>

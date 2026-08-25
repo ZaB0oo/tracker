@@ -10,6 +10,8 @@ export interface TableRow {
   od: number | null;
   hp: number | null;
   star_rating: number | null;
+  /** star rating of the best's mods (null: nomod best, or not computed yet) */
+  sr_mods: number | null;
   map_max_combo: number | null;
   artist: string;
   title: string;

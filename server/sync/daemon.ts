@@ -718,6 +718,7 @@ async function pollRecentScoresForMode(mode: number): Promise<number> {
       if (s)
         bestEvents.push({
           beatmapId,
+          ruleset: mode,
           firstClear: !(pre?.played === 1),
           grade: s.rank,
           accuracy: s.accuracy,

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { getDb } from "../db/db.js";
 import { keysWhere, parseRulesetParam, poolWhere, statusIn } from "../logic/rulesets.js";
 import { PP_SQL } from "../logic/scoreSql.js";
+import { fillSrMods } from "./metrics.js";
 
 /** pool + mania keys + status scope, shared by the day/history queries */
 function clearsScope(
@@ -31,7 +32,7 @@ function paging(q: Record<string, string | undefined>): {
 }
 
 const CLEARS_SELECT = `SELECT s.id, s.ended_at, s.rank, s.accuracy, s.total_score,
-    s.classic_total_score, s.mods, s.fc_state, ${PP_SQL} AS pp,
+    s.classic_total_score, s.mods, s.rate, s.fc_state, ${PP_SQL} AS pp,
     s.beatmap_id, b.version, b.star_rating, st.artist, st.title
    FROM scores s
    JOIN beatmaps b ON b.id = s.beatmap_id
@@ -62,7 +63,8 @@ historyRouter.get("/clears", (req, res) => {
            LIMIT 1)
          ORDER BY s.ended_at`
       )
-      .all({ day });
+      .all({ day }) as ({ beatmap_id: number; mods: string } & Record<string, unknown>)[];
+    const withSr = fillSrMods(rows, R, (r) => r.beatmap_id);
     const total = (
       db
         .prepare(
@@ -72,7 +74,7 @@ historyRouter.get("/clears", (req, res) => {
         )
         .get(day) as { c: number }
     ).c;
-    return res.json({ rows, total });
+    return res.json({ rows: withSr, total });
   }
 
   const rows = db

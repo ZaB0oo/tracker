@@ -1186,10 +1186,15 @@ statsRouter.get("/records", (req, res) => {
   const R = parseRulesetParam(req.query.ruleset);
   const POOL = withKeys(R, req, poolWhere(R, String(req.query.pool ?? "")));
   const STATUSES = statusIn(String(req.query.scope ?? ""));
+  // time machine: &day=YYYY-MM-DD computes everything from the scores up to
+  // that day — records over the plays so far, aggregates over the best per
+  // map AS OF that day (window replay, like the scatter)
+  const dayRaw = String(req.query.day ?? "");
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(dayRaw) ? dayRaw : null;
   const db = getDb();
   // pp fill version too: the totals below count the locally computed pp
   const version = `${scoresVersion()}|pp${ppLocalVersion()}`;
-  const cacheKey = `${R}|${POOL}|${STATUSES}`;
+  const cacheKey = `${R}|${POOL}|${STATUSES}|${day ?? "live"}`;
   const hit = recordsCache.get(cacheKey);
   if (hit && hit.version === version && !hit.srPending)
     return res.json(hit.payload);
@@ -1204,18 +1209,37 @@ statsRouter.get("/records", (req, res) => {
   // star-rating records stay on ranked maps unless the scope IS loved: loved
   // aspire maps carry broken 40★+ ratings that would own the card forever
   const SR_STATUSES = STATUSES === "(4)" ? STATUSES : "(1, 2)";
-  // records OF THE BEST score follow leaderboard semantics, like everything
-  const BESTS = `FROM beatmap_user u
+  const TIME = day ? ` AND date(s.ended_at) <= '${day}'` : "";
+  // records OF THE BEST score follow leaderboard semantics, like everything.
+  // Live: beatmap_user points at the best. Time machine: the best AS OF the
+  // day is replayed with a window function over the scores until then.
+  const BESTS = day
+    ? `FROM (SELECT s2.*, ROW_NUMBER() OVER (
+           PARTITION BY s2.beatmap_id
+           ORDER BY COALESCE(s2.classic_total_score, s2.total_score) DESC,
+             s2.ended_at ASC
+         ) AS rn
+         FROM scores s2
+         WHERE s2.ruleset = ${R} AND s2.passed = 1
+           AND date(s2.ended_at) <= '${day}') s
+     JOIN beatmaps b ON b.id = s.beatmap_id
+     JOIN beatmapsets st ON st.id = b.beatmapset_id
+     LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${R}
+     ${CA}
+     WHERE s.rn = 1 AND ${POOL} AND b.status IN ${STATUSES}`
+    : `FROM beatmap_user u
      JOIN scores s ON s.id = u.best_lazer_score_id
      JOIN beatmaps b ON b.id = u.beatmap_id
      JOIN beatmapsets st ON st.id = b.beatmapset_id
      ${CA}
      WHERE u.ruleset = ${R} AND ${POOL} AND b.status IN ${STATUSES}`;
+  // the historical FC state lives on the day's best score, not on today's
+  const FC_EXPR = day ? "SUM(s.fc_state <= 1)" : "SUM(COALESCE(u.best_fc, 0))";
   const ALL = `FROM scores s
      JOIN beatmaps b ON b.id = s.beatmap_id
      JOIN beatmapsets st ON st.id = b.beatmapset_id
      ${CA}
-     WHERE s.ruleset = ${R} AND s.passed = 1 AND ${POOL} AND b.status IN ${STATUSES}`;
+     WHERE s.ruleset = ${R} AND s.passed = 1 AND ${POOL} AND b.status IN ${STATUSES}${TIME}`;
   const one = (sql: string) =>
     (db.prepare(sql).get() ?? null) as Record<string, unknown> | null;
 
@@ -1286,17 +1310,30 @@ statsRouter.get("/records", (req, res) => {
   }
 
   // official weighting over the pp best of each map (0.95^i + the bonus term)
+  const weighAll = (rows: { pp: number }[]): number => {
+    let t = 0;
+    rows.forEach((r, i) => {
+      t += r.pp * 0.95 ** i;
+    });
+    return t + 416.6667 * (1 - 0.995 ** Math.min(rows.length, 1000));
+  };
   const ppRows = db
     .prepare(
       `SELECT MAX(${PP_SQL}) AS pp ${ALL} AND ${PP_SQL} IS NOT NULL
        GROUP BY s.beatmap_id ORDER BY pp DESC`
     )
     .all() as { pp: number }[];
-  let weightedPp = 0;
-  ppRows.forEach((r, i) => {
-    weightedPp += r.pp * 0.95 ** i;
-  });
-  weightedPp += 416.6667 * (1 - 0.995 ** Math.min(ppRows.length, 1000));
+  const weightedPp = weighAll(ppRows);
+  // the same figure from OFFICIAL pp only — what the profile would say if
+  // the locally estimated scores (unranked mod combos) did not exist
+  const weightedPpOfficial = weighAll(
+    db
+      .prepare(
+        `SELECT MAX(s.pp) AS pp ${ALL} AND s.pp IS NOT NULL
+         GROUP BY s.beatmap_id ORDER BY pp DESC`
+      )
+      .all() as { pp: number }[]
+  );
   // the total sums the pp of each map's LEADERBOARD BEST — the same rule as
   // the total-pp metric, so the tile and the metric can never disagree (a
   // beaten play with more pp counts in neither)
@@ -1324,7 +1361,7 @@ statsRouter.get("/records", (req, res) => {
     averages: db
       .prepare(
         `SELECT AVG(s.accuracy) acc, AVG(${SR}) sr, AVG(b.total_length) len,
-           SUM(COALESCE(u.best_fc, 0)) fc, COUNT(*) clears,
+           ${FC_EXPR} fc, COUNT(*) clears,
            SUM(COALESCE(s.classic_total_score, s.total_score)) classic
          ${BESTS}`
       )
@@ -1345,6 +1382,7 @@ statsRouter.get("/records", (req, res) => {
       totalStd: ppTotals.std,
       totalPp,
       weightedPp,
+      weightedPpOfficial,
       avgPp: ppTotals.n > 0 ? totalPp / ppTotals.n : null,
     },
   };

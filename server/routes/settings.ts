@@ -20,6 +20,7 @@ import { getDisplayPrefs, setDisplayPrefs } from "../prefs.js";
 import {
   getDiscordSettings,
   sendTest,
+  sendTestBest,
   setDiscordSettings,
 } from "../notify/discord.js";
 
@@ -116,7 +117,7 @@ settingsRouter.post("/settings", (req, res) => {
     pollIntervalSeconds?: unknown;
     countryRecheckHours?: unknown;
     globalRecheckHours?: unknown;
-    display?: { wither?: unknown };
+    display?: { wither?: unknown; estPerf?: unknown };
     discord?: { webhookUrl?: unknown; bests?: unknown };
     clientId?: unknown;
     clientSecret?: unknown;
@@ -157,6 +158,8 @@ settingsRouter.post("/settings", (req, res) => {
     setDisplayPrefs({
       wither:
         body.display.wither == null ? undefined : Boolean(body.display.wither),
+      estPerf:
+        body.display.estPerf == null ? undefined : Boolean(body.display.estPerf),
     });
   }
   if (body.countryRecheckHours != null) {
@@ -231,6 +234,14 @@ settingsRouter.post("/settings", (req, res) => {
 // Sends a test embed to the configured Discord webhook.
 settingsRouter.post("/settings/discord-test", async (_req, res) => {
   const error = await sendTest();
+  if (error) return res.status(400).json({ ok: false, error });
+  res.json({ ok: true });
+});
+
+// Sends a RANDOM REAL best through the live notification pipeline (render test).
+settingsRouter.post("/settings/discord-test-best", async (req, res) => {
+  const raw = Number((req.body as { ruleset?: unknown } | undefined)?.ruleset);
+  const error = await sendTestBest([0, 1, 2, 3].includes(raw) ? raw : 0);
   if (error) return res.status(400).json({ ok: false, error });
   res.json({ ok: true });
 });

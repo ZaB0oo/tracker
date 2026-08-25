@@ -135,9 +135,9 @@ const COLUMNS: Col[] = [
     className: (r) =>
       r.global_rank != null && r.global_rank <= 100 ? "global-rank-top" : "",
   },
-  { id: "pp", label: "pp", width: 50, sortable: true,
+  { id: "pp", label: "pp", width: 75, sortable: true,
     render: (r) =>
-      r.pp == null ? "—" : `${r.pp_estimated ? "~" : ""}${Math.round(r.pp)}` },
+      r.pp == null ? "—" : `${r.pp_estimated ? "~" : ""}${r.pp.toFixed(2)}` },
   { id: "ended_at", label: "Played on", width: 90, sortable: true, render: (r) => fmtDate(r.ended_at) },
   {
     // sorts on the MAP's max combo: "which maps are long" is the useful
@@ -152,7 +152,15 @@ const COLUMNS: Col[] = [
           : "—"
         : `${r.score_max_combo}${r.map_max_combo ? `/${r.map_max_combo}` : ""}`,
   },
-  { id: "star_rating", label: "★", width: 55, sortable: true, render: (r) => r.star_rating?.toFixed(2) ?? "—" },
+  { id: "star_rating", label: "★", width: 78, sortable: true,
+    // the map's nomod rating (what the filters and the sort act on), plus
+    // the best's modded rating beside it when the mods change it
+    render: (r) => (
+      <>
+        {r.star_rating?.toFixed(2) ?? "—"}
+        {r.sr_mods != null && <span className="sr-mod"> {r.sr_mods.toFixed(2)}</span>}
+      </>
+    ) },
   {
     id: "status", label: "Status", width: 70, sortable: true,
     render: (r) => STATUS_LABELS[r.status] ?? r.status,

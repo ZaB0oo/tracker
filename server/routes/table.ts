@@ -7,7 +7,7 @@ import { parseLengthSeconds, parseSearch, parseStatus } from "../logic/searchQue
 import { srMods, srModsKey } from "../logic/score.js";
 import { getBeatmapsByIds } from "../osu/api.js";
 import { queueLocalPp } from "../osu/ppFill.js";
-import { queueModdedSr } from "./metrics.js";
+import { fillSrMods, queueModdedSr } from "./metrics.js";
 
 export const tableRouter = Router();
 
@@ -427,13 +427,14 @@ tableRouter.get("/table", (req, res) => {
       ORDER BY ${sortParts.join(", ")}
       LIMIT @limit OFFSET @offset`
     )
-    .all({ ...params, limit, offset });
+    .all({ ...params, limit, offset }) as ({ beatmap_id: number; mods: string } & Record<string, unknown>)[];
 
   const total = (
     db.prepare(`SELECT COUNT(*) c ${baseSql}`).get(params) as { c: number }
   ).c;
 
-  res.json({ rows, total, mode });
+  // the best's modded star rating, cache-served (misses fill in background)
+  res.json({ rows: fillSrMods(rows, R, (r) => r.beatmap_id), total, mode });
 });
 
 // Detailed view of a map: metadata + ALL my scores + country events.

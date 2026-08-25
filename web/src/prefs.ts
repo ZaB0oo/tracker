@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { fetchSettings, type DisplayPrefs } from "./api";
 
-const DEFAULTS: DisplayPrefs = { wither: false };
+const DEFAULTS: DisplayPrefs = { wither: false, estPerf: true };
 
 /**
  * Optional-feature display flags (witherscore). Off by default; toggled in

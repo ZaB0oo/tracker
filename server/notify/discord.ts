@@ -1,6 +1,8 @@
 import { config } from "../config.js";
 import { getDb, getState, setState } from "../db/db.js";
 import { getStoredProfile } from "../osu/api.js";
+import { localPp, localStarRating, perfHits } from "../osu/difficulty.js";
+import { srMods, srModsKey, type ModRef } from "../logic/score.js";
 
 const logError = (e: unknown, ctx: string) =>
   console.error(`[${ctx}] ${e instanceof Error ? e.message : String(e)}`);
@@ -127,6 +129,7 @@ interface MapRow {
   beatmapset_id: number;
   creator: string;
   ranked_date: string | null;
+  status: number;
   bpm: number | null;
   cs: number | null;
   ar: number | null;
@@ -140,7 +143,7 @@ function mapRow(beatmapId: number): MapRow | undefined {
   return getDb()
     .prepare(
       `SELECT st.artist, st.title, b.version, b.star_rating, b.beatmapset_id,
-              st.creator, st.ranked_date, b.bpm, b.cs, b.ar, b.od, b.hp,
+              st.creator, st.ranked_date, b.status, b.bpm, b.cs, b.ar, b.od, b.hp,
               b.total_length, b.max_combo
        FROM beatmaps b JOIN beatmapsets st ON st.id = b.beatmapset_id
        WHERE b.id = ?`
@@ -267,6 +270,7 @@ function hitCounts(json: string): string | null {
 
 export interface BestEvent {
   beatmapId: number;
+  ruleset: number;
   firstClear: boolean;
   grade: string;
   accuracy: number; // 0..1
@@ -274,6 +278,8 @@ export interface BestEvent {
   score: number;
   combo: number;
   pp: number | null;
+  /** locally estimated pp when the API left pp NULL (filled at notify time) */
+  ppLocal?: number | null;
   endedAt: string; // ISO date of the play
   modsJson: string; // raw score mods JSON
   statisticsJson: string; // raw score statistics JSON
@@ -309,7 +315,11 @@ function bestEmbed(e: BestEvent, author: Embed["author"] | undefined): Embed {
       ? `**${e.combo}x**/${m.max_combo}x`
       : `**${e.combo}x**`,
     hitCounts(e.statisticsJson) ?? "",
-    e.pp != null ? `**${e.pp.toFixed(2)}pp**` : "",
+    e.pp != null
+      ? `**${e.pp.toFixed(2)}pp**`
+      : e.ppLocal != null
+        ? `**~${e.ppLocal.toFixed(2)}pp**`
+        : "",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -341,9 +351,76 @@ function bestEmbed(e: BestEvent, author: Embed["author"] | undefined): Embed {
   return embed;
 }
 
+/** automation mods never earn pp, estimated or not */
+const AUTOMATION = new Set(["RX", "AP", "AT", "CN"]);
+
+/**
+ * Local pp for a best the API left at NULL (unranked mod combo) — display
+ * only. A missing .osu file is downloaded (one map per score, serialized,
+ * and it lands in the shared cache for the backfill); rosu then computes in
+ * a few tens of ms. Anything unavailable just omits the figure.
+ */
+async function tryLocalPp(e: BestEvent): Promise<number | null> {
+  try {
+    const m = mapRow(e.beatmapId);
+    if (!m || (m.status !== 1 && m.status !== 2)) return null;
+    let mods: ModRef[] = [];
+    try {
+      mods = (JSON.parse(e.modsJson) as ModRef[]) ?? [];
+    } catch {
+      // unreadable mods: treated as nomod
+    }
+    if (mods.some((x) => AUTOMATION.has(x?.acronym))) return null;
+    if (perfHits(e.ruleset, e.statisticsJson) == null) return null;
+    return await localPp(e.beatmapId, mods, e.ruleset, {
+      statistics: e.statisticsJson,
+      accuracy: e.accuracy,
+      maxCombo: e.combo,
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The star rating OF THE MODS PLAYED when the event arrived without one —
+ * showing the nomod rating on a DT play reads plain wrong. Downloads the
+ * map file if needed (like the pp estimate) and feeds the shared modded-SR
+ * cache, so the table and records benefit from the computation too.
+ */
+async function tryLocalSr(e: BestEvent): Promise<number | null> {
+  try {
+    const played = srMods(e.modsJson);
+    if (played.length === 0) return null; // nomod: the map rating IS right
+    const sr = await localStarRating(e.beatmapId, played, e.ruleset);
+    if (sr != null)
+      getDb()
+        .prepare(
+          "INSERT OR REPLACE INTO modded_sr (beatmap_id, ruleset, mods, star_rating) VALUES (?, ?, ?, ?)"
+        )
+        .run(e.beatmapId, e.ruleset, srModsKey(played), sr);
+    return sr;
+  } catch {
+    return null;
+  }
+}
+
+/** the missing figures a notification can compute for free (cached files) */
+async function fillComputed(e: BestEvent): Promise<void> {
+  if (e.pp == null) e.ppLocal = await tryLocalPp(e);
+  if (e.moddedSr == null) e.moddedSr = await tryLocalSr(e);
+}
+
 /** One message per poll tick (5 embeds max each, Discord allows 10). */
 export function notifyBests(events: BestEvent[]): void {
   if (events.length === 0 || !getDiscordSettings().bests) return;
+  void notifyBestsAsync(events);
+}
+
+async function notifyBestsAsync(events: BestEvent[]): Promise<void> {
+  // fill what the API left out (cheap, cached files only): local pp for
+  // unranked mod combos, the modded star rating on a cache miss
+  for (const e of events) await fillComputed(e);
   const author = profileAuthor();
   const clears = events.filter((e) => e.firstClear).length;
   const improved = events.length - clears;
@@ -361,6 +438,84 @@ export function notifyBests(events: BestEvent[]): void {
       embeds: events.slice(i, i + CHUNK).map((e) => bestEmbed(e, author)),
     });
   }
+}
+
+/**
+ * "Post a random best" button in the settings: a REAL best sampled from the
+ * database, sent through the exact same embed pipeline as a live poll
+ * notification (modded SR from cache, local pp estimate when official pp is
+ * missing, top/country honors) — the fastest way to see the actual render.
+ */
+export async function sendTestBest(ruleset: number): Promise<string | null> {
+  const url = getState("discord_webhook_url");
+  if (!url) return "no webhook URL configured";
+  const db = getDb();
+  const s = db
+    .prepare(
+      `SELECT s.beatmap_id, s.rank, s.accuracy, s.fc_state,
+         COALESCE(s.classic_total_score, s.total_score) AS score,
+         s.max_combo AS combo, s.pp, s.mods, s.statistics, s.ended_at,
+         u.global_rank, u.country_first,
+         (SELECT COUNT(*) FROM scores s2
+           WHERE s2.beatmap_id = s.beatmap_id AND s2.ruleset = s.ruleset
+             AND s2.passed = 1) AS n
+       FROM beatmap_user u
+       JOIN scores s ON s.id = u.best_lazer_score_id
+       WHERE u.ruleset = ? ORDER BY RANDOM() LIMIT 1`
+    )
+    .get(ruleset) as
+    | {
+        beatmap_id: number;
+        rank: string;
+        accuracy: number;
+        fc_state: number;
+        score: number;
+        combo: number;
+        pp: number | null;
+        mods: string;
+        statistics: string;
+        ended_at: string;
+        global_rank: number | null;
+        country_first: number;
+        n: number;
+      }
+    | undefined;
+  if (!s) return "no best score to sample yet";
+  let moddedSr: number | null = null;
+  const played = srMods(s.mods);
+  if (played.length > 0) {
+    const hit = db
+      .prepare(
+        "SELECT star_rating FROM modded_sr WHERE beatmap_id = ? AND ruleset = ? AND mods = ?"
+      )
+      .get(s.beatmap_id, ruleset, srModsKey(played)) as
+      | { star_rating: number | null }
+      | undefined;
+    moddedSr = hit?.star_rating ?? null;
+  }
+  const e: BestEvent = {
+    beatmapId: s.beatmap_id,
+    ruleset,
+    firstClear: s.n === 1,
+    grade: s.rank,
+    accuracy: s.accuracy,
+    fcState: s.fc_state,
+    score: s.score,
+    combo: s.combo,
+    pp: s.pp,
+    endedAt: s.ended_at,
+    modsJson: s.mods,
+    statisticsJson: s.statistics,
+    moddedSr,
+    globalRank: s.global_rank,
+    countryFirst: s.country_first === 1,
+  };
+  await fillComputed(e);
+  enqueue({
+    content: "**Test**, display a random best",
+    embeds: [bestEmbed(e, profileAuthor())],
+  });
+  return null;
 }
 
 /** "Send a test message" button in the settings. */

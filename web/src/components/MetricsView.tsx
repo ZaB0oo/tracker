@@ -159,9 +159,12 @@ function MetricCard({
   const isDesc = m.params.kind === "count" && !!m.params.descending;
   const fmtV = isRanked
     ? fmtCompact
-    : isPp
-      ? (v: number) => `${fmtNum(Math.round(v))}pp`
-      : fmtNum;
+    : m.params.kind === "total_pp"
+      ? // millions of pp: the full integer overflows the milestone labels
+        (v: number) => `${fmtCompact(Math.round(v))}pp`
+      : isPp
+        ? (v: number) => `${fmtNum(Math.round(v))}pp`
+        : fmtNum;
   // pp metrics: top plays as of a selected period (click the curve or pick)
   const [ppPeriod, setPpPeriod] = useState("");
   const nowIso = new Date().toISOString();

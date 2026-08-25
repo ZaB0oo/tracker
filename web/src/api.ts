@@ -112,6 +112,8 @@ export interface Records {
     totalPp: number;
     /** official profile weighting: 0.95^i over the bests + bonus pp */
     weightedPp: number;
+    /** same weighting from official pp only (no local estimates) */
+    weightedPpOfficial: number;
     avgPp: number | null;
   };
 }
@@ -120,10 +122,13 @@ export async function fetchRecords(
   ruleset = 0,
   pool: PoolMode = "all",
   keys: string[] = [],
-  scope: DashScope = "all"
+  scope: DashScope = "all",
+  at: string | null = null
 ): Promise<Records> {
   const res = await fetch(
-    `/api/records?ruleset=${ruleset}&pool=${pool}${keysQ(keys)}&scope=${scope}`
+    `/api/records?ruleset=${ruleset}&pool=${pool}${keysQ(keys)}&scope=${scope}${
+      at ? `&day=${at}` : ""
+    }`
   );
   if (!res.ok) throw new Error(`records: HTTP ${res.status}`);
   return res.json();
@@ -186,6 +191,8 @@ export interface SessionScore {
   combo: number;
   len: number | null;
   sr: number | null;
+  /** star rating of the mods played (null: nomod, or not computed yet) */
+  sr_mods: number | null;
   artist: string;
   title: string;
   diff: string;
@@ -328,11 +335,15 @@ export interface ClearRow {
   total_score: number;
   classic_total_score: number | null;
   mods: string;
+  /** playback rate of the play (null/1 = normal speed) */
+  rate: number | null;
   fc_state: number;
   pp: number | null;
   beatmap_id: number;
   version: string;
   star_rating: number | null;
+  /** star rating of the mods played (null: nomod, or not computed yet) */
+  sr_mods: number | null;
   artist: string;
   title: string;
 }
@@ -763,6 +774,8 @@ export interface CountryEvent {
   beatmap_id: number;
   version: string;
   star_rating: number | null;
+  /** star rating of the mods played (null: nomod, or not computed yet) */
+  sr_mods: number | null;
   artist: string;
   title: string;
 }
@@ -792,6 +805,8 @@ export interface GlobalEvent {
   beatmap_id: number;
   version: string;
   star_rating: number | null;
+  /** star rating of the mods played (null: nomod, or not computed yet) */
+  sr_mods: number | null;
   artist: string;
   title: string;
 }
@@ -1075,6 +1090,8 @@ export async function fetchFilterBounds(ruleset = 0): Promise<FilterBounds> {
 
 export interface DisplayPrefs {
   wither: boolean;
+  /** Performance tile counts locally estimated pp (default on) */
+  estPerf: boolean;
 }
 
 export interface Settings {
@@ -1113,6 +1130,17 @@ export async function postDiscordTest(): Promise<void> {
   const res = await fetch("/api/settings/discord-test", { method: "POST" });
   const json = (await res.json().catch(() => ({}))) as { error?: string };
   if (!res.ok) throw new Error(json.error ?? `discord test: HTTP ${res.status}`);
+}
+
+/** posts a random real best through the live notification pipeline */
+export async function postDiscordTestBest(ruleset = 0): Promise<void> {
+  const res = await fetch("/api/settings/discord-test-best", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ruleset }),
+  });
+  const json = (await res.json().catch(() => ({}))) as { error?: string };
+  if (!res.ok) throw new Error(json.error ?? `discord test best: HTTP ${res.status}`);
 }
 
 export async function fetchSettings(): Promise<Settings> {
