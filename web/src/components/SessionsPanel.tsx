@@ -212,7 +212,7 @@ function SessionDetail({
           <div
             key={s.id}
             className="sess-score"
-            title="Double-click: open on osu.ppy.sh — right-click: actions"
+            title="Double-click: open on osu.ppy.sh · right-click: actions"
             onDoubleClick={() => window.open(mapUrl(s.mapId, ruleset), "_blank")}
             onContextMenu={(e) => {
               e.preventDefault();
@@ -362,7 +362,7 @@ export const SessionsPanel = memo(function SessionsPanel({
   if (!data) return <div className="panel">Loading sessions…</div>;
   const s = data.summary;
   if (s.count === 0)
-    return <div className="panel">No session yet — sessions appear as scores land.</div>;
+    return <div className="panel">No session yet: sessions appear as scores land.</div>;
   return (
     <div className={`panel sessions-panel${dimmed ? " tm-dim" : ""}`}>
       <div className="sess-summary">
@@ -371,7 +371,6 @@ export const SessionsPanel = memo(function SessionsPanel({
         <span className="mm-stat">longest <b>{dur(s.longestSec)}</b></span>
         <span className="mm-stat">average <b>{dur(s.avgSec)}</b></span>
         <span className="mm-stat"><b>{s.avgPlays.toFixed(1)}</b> plays / session</span>
-        <span className="mm-stat">in-map total <b>{dur(s.playSec)}</b></span>
         <label className="sess-gap" title="A longer silence than this starts a new session">
           split after
           <select value={gapMin} onChange={(e) => setGapMin(Number(e.target.value))}>

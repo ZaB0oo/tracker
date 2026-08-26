@@ -128,13 +128,19 @@ export function MapModal({
                 [
                   ["★", data.map.star_rating?.toFixed(2)],
                   ...(stats.ar
-                    ? ([["AR", data.map.ar]] as [string, number | null][])
+                    ? ([["AR", data.map.ar?.toFixed(2)]] as [string, string | null][])
                     : []),
-                  ["OD", data.map.od],
+                  ["OD", data.map.od?.toFixed(2)],
                   ...(stats.cs
-                    ? ([[stats.csLabel, data.map.cs]] as [string, number | null][])
+                    ? ([[
+                        stats.csLabel,
+                        // mania key count stays an integer
+                        stats.csLabel === "Keys"
+                          ? data.map.cs
+                          : data.map.cs?.toFixed(2),
+                      ]] as [string, string | number | null][])
                     : []),
-                  ["HP", data.map.hp],
+                  ["HP", data.map.hp?.toFixed(2)],
                   ["BPM", data.map.bpm],
                   ["Length", mmss(data.map.total_length)],
                   ["Max combo", data.map.max_combo],
@@ -197,7 +203,7 @@ export function MapModal({
                       className={`mm-row${s.id === bestId ? " mm-best" : ""}`}
                       title={
                         s.id === bestId
-                          ? "The score that counts on the leaderboard — click for details"
+                          ? "The score that counts on the leaderboard: click for details"
                           : "Click for details"
                       }
                       onClick={() => setOpenScore(s)}

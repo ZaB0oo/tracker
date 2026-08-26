@@ -665,6 +665,7 @@ async function pollRecentScoresForMode(mode: number): Promise<number> {
   const bestRow = db.prepare(
     `SELECT rank, accuracy, fc_state,
             COALESCE(classic_total_score, total_score) AS score,
+            total_score AS score_std,
             max_combo AS combo, pp, mods, statistics, ended_at
      FROM scores WHERE id = ?`
   );
@@ -680,7 +681,7 @@ async function pollRecentScoresForMode(mode: number): Promise<number> {
       if (st == null) unimportableMapIds.add(beatmapId);
       logActivity(
         "poll",
-        () => `${mapLabel(beatmapId)} — ${fresh.length} score(s) on an unranked map (ignored)`
+        () => `${mapLabel(beatmapId)} · ${fresh.length} score(s) on an unranked map (ignored)`
       );
       continue;
     }
@@ -693,7 +694,7 @@ async function pollRecentScoresForMode(mode: number): Promise<number> {
     });
     logActivity(
       "poll",
-      () => `${mapLabel(beatmapId)} — ${fresh.length} new score(s)`
+      () => `${mapLabel(beatmapId)} · ${fresh.length} new score(s)`
     );
     freshBeatmapIds.push(beatmapId);
     // Discord: only new BESTS (first clear or improvement), only via polling.
@@ -708,6 +709,7 @@ async function pollRecentScoresForMode(mode: number): Promise<number> {
             accuracy: number;
             fc_state: number;
             score: number;
+            score_std: number | null;
             combo: number;
             pp: number | null;
             mods: string;
@@ -724,6 +726,7 @@ async function pollRecentScoresForMode(mode: number): Promise<number> {
           accuracy: s.accuracy,
           fcState: s.fc_state,
           score: s.score,
+          scoreStd: s.score_std,
           combo: s.combo,
           pp: s.pp,
           endedAt: s.ended_at,
@@ -870,7 +873,7 @@ limiter.onBackoff = (ms, reason) => {
   // endpoint (oauth!) are different problems
   const short = reason.replace(/\s+/g, " ").slice(0, 90);
   status.message =
-    `osu! API throttled (${short}) — waiting ${Math.ceil(ms / 1000)} s, ` +
+    `osu! API throttled (${short}): waiting ${Math.ceil(ms / 1000)} s, ` +
     `slowing to ~${limiter.effectiveRpm} req/min until it clears`;
   logActivity("api", status.message);
 };
@@ -1277,7 +1280,7 @@ export async function confirmRecentCountryChecks(): Promise<void> {
       logActivity(
         "country #1",
         () =>
-          `${mapLabel(id)} — fresh-score recheck: ${
+          `${mapLabel(id)} · fresh-score recheck: ${
             top && top.user_id === config.osuUserId ? "#1 ✓" : "not #1"
           } (${getStoredCountryCode() ?? "country"})`
       );
@@ -1408,7 +1411,7 @@ export async function runCountrySweep(force = false): Promise<void> {
           logActivity(
               `${cc ? `#1 ${cc}` : "country #1"} sweep`,
             () =>
-              `${mapLabel(id)} — ${
+              `${mapLabel(id)} · ${
                 top && top.user_id === config.osuUserId
                   ? "#1 ✓"
                   : top
@@ -1496,7 +1499,7 @@ export function applyGlobalCheck(
     logActivity(
       "global tops",
       () =>
-        `${mapLabel(beatmapId)} — ${oldTier ? `top ${oldTier}` : "outside top 100"} → ${
+        `${mapLabel(beatmapId)} · ${oldTier ? `top ${oldTier}` : "outside top 100"} → ${
           newTier ? `top ${newTier}` : "outside top 100"
         } (${prevRank != null ? `#${prevRank}` : "—"} → ${pos != null ? `#${pos}` : "—"}) (global)`
     );
@@ -1592,7 +1595,7 @@ export async function runGlobalSweep(force = false): Promise<void> {
           failures = 0;
           logActivity(
             "global tops sweep",
-            () => `${mapLabel(id)} — ${pos != null ? `#${pos}` : "not on leaderboard"} (global)`
+            () => `${mapLabel(id)} · ${pos != null ? `#${pos}` : "not on leaderboard"} (global)`
           );
           if (done % 25 === 0)
             status.message = `global tops sweep: ${done} maps checked...`;
@@ -1936,7 +1939,7 @@ export async function runPipeline(opts?: { skipCatalog?: boolean }) {
       // concurrent enumerations would duplicate the work and burn API budget.
       while (catalogRunning) {
         status.message =
-          "Catalog import already running in the background — waiting for it...";
+          "Catalog import already running in the background, waiting for it...";
         await new Promise((r) => setTimeout(r, 5000));
       }
       catalogRunning = true;
@@ -2041,7 +2044,7 @@ async function runBackfill(): Promise<void> {
             logActivity(
               pass.label,
               () =>
-                `${mapLabel(id)}${scores.length ? ` — ${scores.length} score(s)` : ""}`
+                `${mapLabel(id)}${scores.length ? ` · ${scores.length} score(s)` : ""}`
             );
         }
       }

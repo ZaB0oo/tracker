@@ -360,7 +360,7 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
   const title = (
     <h3>
       Median score by {cfg.label.toLowerCase()}
-      {pastDay && <span className="dim"> — as of {pastDay}</span>}
+      {pastDay && <span className="dim"> · as of {pastDay}</span>}
       {onDim && (
         <select
           className="curve-dim-select"

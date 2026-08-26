@@ -239,7 +239,7 @@ export function StreamOverlay() {
         {!hide.has("last") && lastPlay && (
           <div
             className="ov-row ov-last"
-            title={`${lastPlay.artist} - ${lastPlay.title} [${lastPlay.version}] — ${lastPlay.rank} · ${lastPlay.at.slice(0, 16).replace("T", " ")}`}
+            title={`${lastPlay.artist} - ${lastPlay.title} [${lastPlay.version}] · ${lastPlay.rank} · ${lastPlay.at.slice(0, 16).replace("T", " ")}`}
           >
             <span className="ov-tag">LAST PLAYED</span>
             <span className="ov-lastmap">

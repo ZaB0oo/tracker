@@ -88,8 +88,8 @@ export default function App() {
       {import.meta.env.DEV && ver?.desktop && (
         <div className="dev-wrong-server">
           ⚠ This dev UI is talking to the DESKTOP app's server (port 3727 was
-          already taken, your dev server never started). Everything you see —
-          and change — is the desktop app's database. Close the tray app, then
+          already taken, your dev server never started). Everything you see
+          and change is the desktop app's database. Close the tray app, then
           restart <code>npm run dev</code>.
         </div>
       )}
@@ -103,7 +103,7 @@ export default function App() {
               href={ver.update.url}
               target="_blank"
               rel="noreferrer"
-              title="A new version is available — open the release page"
+              title="A new version is available: open the release page"
             >
               v{ver.update.version} available
             </a>

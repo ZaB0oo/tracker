@@ -152,7 +152,7 @@ const COLUMNS: Col[] = [
           : "—"
         : `${r.score_max_combo}${r.map_max_combo ? `/${r.map_max_combo}` : ""}`,
   },
-  { id: "star_rating", label: "★", width: 78, sortable: true,
+  { id: "star_rating", label: "★", width: 88, sortable: true,
     // the map's nomod rating (what the filters and the sort act on), plus
     // the best's modded rating beside it when the mods change it
     render: (r) => (
@@ -168,10 +168,10 @@ const COLUMNS: Col[] = [
   },
   { id: "ranked_date", label: "Ranked", width: 90, sortable: true, render: (r) => fmtDate(r.ranked_date) },
   { id: "total_length", label: "Length", width: 60, sortable: true, render: (r) => fmtLen(r.total_length) },
-  { id: "ar", label: "AR", width: 45, sortable: true, render: (r) => r.ar ?? "—" },
-  { id: "od", label: "OD", width: 45, sortable: true, render: (r) => r.od ?? "—" },
-  { id: "cs", label: "CS", width: 45, sortable: true, render: (r) => r.cs ?? "—" },
-  { id: "hp", label: "HP", width: 45, sortable: true, render: (r) => r.hp ?? "—" },
+  { id: "ar", label: "AR", width: 52, sortable: true, render: (r) => r.ar?.toFixed(2) ?? "—" },
+  { id: "od", label: "OD", width: 52, sortable: true, render: (r) => r.od?.toFixed(2) ?? "—" },
+  { id: "cs", label: "CS", width: 52, sortable: true, render: (r) => r.cs?.toFixed(2) ?? "—" },
+  { id: "hp", label: "HP", width: 52, sortable: true, render: (r) => r.hp?.toFixed(2) ?? "—" },
   { id: "bpm", label: "BPM", width: 75, sortable: true, render: (r) => r.bpm ?? "—" },
 ];
 
@@ -211,7 +211,14 @@ export function ScoreTable({
         c.id === "country_first"
           ? { ...c, label: firstPlaceLabel(country) }
           : c.id === "cs"
-            ? { ...c, label: stats.csLabel }
+            ? {
+                ...c,
+                label: stats.csLabel,
+                // mania key count stays an integer
+                ...(stats.csLabel === "Keys"
+                  ? { render: (r: TableRow) => r.cs ?? "—" }
+                  : {}),
+              }
             : c
       ),
     [country, stats.ar, stats.cs, stats.csLabel]
@@ -277,7 +284,7 @@ export function ScoreTable({
         <span>
           {query.isLoading
             ? "Loading..."
-            : `${total.toLocaleString("en-US")} maps — multi-column sort: Shift+click`}
+            : `${total.toLocaleString("en-US")} maps · multi-column sort: Shift+click`}
         </span>
         <div className="colpicker">
           <button className="colpicker-btn" onClick={() => setPickerOpen((o) => !o)}>

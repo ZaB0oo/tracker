@@ -209,16 +209,16 @@ function MetricCard({
   } else if (isDesc) {
     if (m.count === 0) {
       pct = 100;
-      label = "0 left — done!";
+      label = "0 left, done!";
     } else {
       const upper = Math.ceil(m.count / m.step) * m.step;
       pct = ((upper - m.count) / m.step) * 100;
-      label = `${fmtV(m.count)} left — next: ${fmtV(upper - m.step)} (${pct.toFixed(1)}%)`;
+      label = `${fmtV(m.count)} left · next: ${fmtV(upper - m.step)} (${pct.toFixed(1)}%)`;
     }
   } else {
     const reached = Math.floor(m.count / m.step) * m.step;
     pct = ((m.count - reached) / m.step) * 100;
-    label = `${fmtV(m.count)} — next: ${fmtV(reached + m.step)} (${pct.toFixed(1)}%)`;
+    label = `${fmtV(m.count)} · next: ${fmtV(reached + m.step)} (${pct.toFixed(1)}%)`;
   }
 
   return (
@@ -394,7 +394,7 @@ function MetricCard({
                     window.open(mapUrl(r.beatmap_id, m.params.ruleset ?? 0), "_blank")
                   }
                   onContextMenu={(e) => onCtx(e, r)}
-                  title="Double-click: open on osu.ppy.sh — right-click: actions"
+                  title="Double-click: open on osu.ppy.sh · right-click: actions"
                 >
                   <span className="pp-top-idx">#{i + 1}</span>
                   <b className="pp-top-pp">{r.pp.toFixed(2)}pp</b>
@@ -608,7 +608,7 @@ export function MetricsView({
       })()}
       </div>
       {data.metrics.length === 0 && (
-        <p className="goal-note">No metric yet — create one with “+ New metric”.</p>
+        <p className="goal-note">No metric yet: create one with “+ New metric”.</p>
       )}
       <div className="metrics-grid" ref={gridRef}>
         {data.metrics

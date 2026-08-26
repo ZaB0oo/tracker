@@ -579,7 +579,7 @@ export async function buildCollectionDb(
       status: 400,
       error:
         `${missing.length} maps still lack their MD5 checksum (cap ${CAP} per export). ` +
-        "The background enrichment is filling them in — retry later or narrow the filters.",
+        "The background enrichment is filling them in: retry later or narrow the filters.",
     };
   const md5ById = new Map(rows.filter((r) => r.checksum).map((r) => [r.id, r.checksum!]));
   const setChecksum = db.prepare("UPDATE beatmaps SET checksum = ? WHERE id = ?");

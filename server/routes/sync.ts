@@ -236,7 +236,7 @@ syncRouter.post("/sync/start", (req, res) => {
     return res.status(400).json({
       ok: false,
       error:
-        "osu! API credentials are not set — open Settings (menu) and fill in the Client ID / secret / user id first.",
+        "osu! API credentials are not set: open Settings (menu) and fill in the Client ID / secret / user id first.",
     });
   if (!getActiveRulesets().includes(0))
     return res
@@ -284,7 +284,7 @@ syncRouter.post("/sync/poll-now", async (_req, res) => {
       return res.json({
         ok: true,
         newScores: 0,
-        note: "a score check is already running — its result appears in the sync bar",
+        note: "a score check is already running: its result appears in the sync bar",
       });
     res.json({ ok: true, newScores: n });
   } catch (e) {
@@ -491,7 +491,7 @@ syncRouter.get("/debug/pp-diff", async (_req, res) => {
         status: r.status,
         note:
           r.status === 4
-            ? "LOVED — osu! does not count it, the metric should not either"
+            ? "LOVED: osu! does not count it, the metric should not either"
             : "above the official top-100 floor but absent from it",
       }));
     res.json({

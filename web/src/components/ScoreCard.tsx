@@ -103,8 +103,7 @@ function effectiveAttrs(
   return { cs, ar, od, hp };
 }
 
-const att = (v: number | null): string =>
-  v == null ? "—" : (Math.round(v * 10) / 10).toString();
+const att = (v: number | null): string => (v == null ? "—" : v.toFixed(2));
 
 /** "Played on 19 August 2026 18:10", the game's wording */
 const MONTHS = [
@@ -400,7 +399,8 @@ export function ScoreCard({
             ).map(([k, v]) => (
               <div key={k} className="sc-col">
                 <span>{k}</span>
-                <b>{att(v)}</b>
+                {/* mania key count stays an integer */}
+                <b>{k === "Keys" ? (v == null ? "—" : String(v)) : att(v)}</b>
               </div>
             ))}
           </div>

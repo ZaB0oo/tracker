@@ -204,7 +204,7 @@ function PackModal({
                         e.preventDefault();
                         setCtx({ x: e.clientX, y: e.clientY, map: m });
                       }}
-                      title="Double-click: open on osu.ppy.sh — right-click: actions"
+                      title="Double-click: open on osu.ppy.sh · right-click: actions"
                     >
                       <td className="pack-td-grade">
                         {m.grade ? <GradeBadge grade={m.grade} width={34} /> : <span className="dim">—</span>}
@@ -349,7 +349,7 @@ export const PacksPanel = memo(function PacksPanel({
             void postPacksImport().then((r) => {
               setImportMsg(
                 r.ok
-                  ? "Import started — progress in the sync bar, the grid appears as packs come in."
+                  ? "Import started: progress in the sync bar, the grid appears as packs come in."
                   : `Failed: ${r.error ?? "unknown"}`
               );
               setTimeout(() => void refetch(), 5000);
@@ -383,9 +383,9 @@ export const PacksPanel = memo(function PacksPanel({
     <div className="panel packs-panel">
       <h3>
         Packs
-        {atDeb && <span className="dim"> — as of {fmtDate(atDeb)}</span>}
+        {atDeb && <span className="dim"> · as of {fmtDate(atDeb)}</span>}
         {data.pending > 0 && (
-          <span className="dim"> — import in progress, {fmtNum(data.pending)} to go</span>
+          <span className="dim"> · import in progress, {fmtNum(data.pending)} to go</span>
         )}
         <input
           className="pack-search"
@@ -401,7 +401,7 @@ export const PacksPanel = memo(function PacksPanel({
             void postPacksImport().then((r) => {
               setImportMsg(
                 r.ok
-                  ? "Re-sync started — missing packs are being fetched (sync bar)."
+                  ? "Re-sync started: missing packs are being fetched (sync bar)."
                   : `Failed: ${r.error ?? "unknown"}`
               );
               setTimeout(() => void refetch(), 5000);
@@ -424,7 +424,7 @@ export const PacksPanel = memo(function PacksPanel({
               <span className={`pack-dot pack-${packState(p)}`} />
               <b>({p.tag})</b> {p.name}
               <span className="dim">
-                {" "}— {TYPE_LABELS[type] ?? type} · {p.played}/{p.total}
+                {" "}· {TYPE_LABELS[type] ?? type} · {p.played}/{p.total}
                 {p.fced >= p.total && p.total > 0 ? " · full FC" : ""}
               </span>
             </button>

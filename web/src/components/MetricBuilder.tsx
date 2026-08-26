@@ -311,7 +311,7 @@ export function MetricBuilder({
           <h2>
             {edit ? "Edit metric" : "New metric"}
             {rsMetric !== 0 && (
-              <span className="pp-dim"> — {RULESET_NAMES[rsMetric]}</span>
+              <span className="pp-dim"> · {RULESET_NAMES[rsMetric]}</span>
             )}
           </h2>
           <button className="mm-close" onClick={onClose}>✕</button>
@@ -563,7 +563,7 @@ export function MetricBuilder({
 
         <Section title="Specific maps (custom map pool)">
           <div className="mb-mods-label">
-            Restrict to these maps only — beatmap ids or osu.ppy.sh links
+            Restrict to these maps only: beatmap ids or osu.ppy.sh links
             (…#osu/id, /b/id), one per line or comma-separated. Empty = all maps.
           </div>
           <textarea
@@ -643,7 +643,7 @@ export function MetricBuilder({
                 type="checkbox" checked={p.descending ?? false}
                 onChange={(e) => setP((s) => ({ ...s, descending: e.target.checked }))}
               />
-              Countdown — maps to fix (goal 0)
+              Countdown: maps to fix (goal 0)
             </label>
           )}
           {isCount && (p.descending ?? false) && (
@@ -660,7 +660,7 @@ export function MetricBuilder({
               </label>
               <label
                 className="mb-check"
-                title="Ex: goal = 0x50, 0 miss, imperfections <= 1. The card counts the PLAYED maps whose best does not meet the goal yet — the exact complement of the goal count, even when no direct 'to fix' bounds can express it."
+                title="Ex: goal = 0x50, 0 miss, imperfections <= 1. The card counts the PLAYED maps whose best does not meet the goal yet: the exact complement of the goal count, even when no direct 'to fix' bounds can express it."
               >
                 <input
                   type="radio" name="mb-cd-mode" checked={p.invert ?? false}

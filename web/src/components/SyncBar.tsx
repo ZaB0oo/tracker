@@ -183,7 +183,7 @@ export function SyncBar({
             <div className="feed-row feed-empty">
               {s.busy?.length || msgFresh
                 ? s.message || "Waiting…"
-                : "no background task — automatic polling"}
+                : "no background task · automatic polling"}
             </div>
           )}
         </div>
@@ -359,8 +359,8 @@ export function SyncBar({
             className="avatar-btn"
             title={
               connected
-                ? `Connected: ${auth?.profile?.username ?? "osu! account"} — actions & settings`
-                : "osu! account not connected — actions & settings"
+                ? `Connected: ${auth?.profile?.username ?? "osu! account"} · actions & settings`
+                : "osu! account not connected · actions & settings"
             }
             onClick={() => setMenuOpen((o) => !o)}
           >
@@ -465,7 +465,7 @@ export function SyncBar({
                   title={
                     connected
                       ? "Start/resume checking country leaderboards (resumable)"
-                      : "Country leaderboards need a connected osu! account with supporter — use “Connect my osu! account” above"
+                      : "Country leaderboards need a connected osu! account with supporter: use “Connect my osu! account” above"
                   }
                 >
                   Start/resume {lbl} sweep

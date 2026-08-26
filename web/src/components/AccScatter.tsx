@@ -254,7 +254,7 @@ export const AccScatterPanel = memo(function AccScatterPanel({
         <h3>Accuracy by difficulty</h3>
         <span className="scatter-sub">
           my best on each of the {fmtNum(pts.length)} maps played
-          {at ? ` — as of ${at.replaceAll("-", "/")}` : ""} · drag to zoom
+          {at ? ` · as of ${at.replaceAll("-", "/")}` : ""} · drag to zoom
         </span>
         <div className="seg scatter-mode">
           <button
@@ -404,7 +404,7 @@ export const AccScatterPanel = memo(function AccScatterPanel({
               );
             })}
             {tip.extra > 0 && (
-              <div className="scatter-tip-more">+{fmtNum(tip.extra)} more — click opens the nearest</div>
+              <div className="scatter-tip-more">+{fmtNum(tip.extra)} more · click opens the nearest</div>
             )}
           </div>
         )}

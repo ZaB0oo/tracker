@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchAuthStatus, fetchRecords, fetchSessions, type DashScope } from "../api";
 import { fmtNum } from "../format";
@@ -72,11 +72,50 @@ export const StatsStrip = memo(function StatsStrip({
     ? witherXpTotal((k) => gradeMap.get(k) ?? 0, ps)
     : null;
   const weighted = prefs.estPerf ? st.weightedPp : st.weightedPpOfficial;
-  const tiles: [string, string | null][] = [
+  const tiles: [string, ReactNode | null][] = [
     ["Scores", fmtNum(st.scores)],
-    ["Clears", fmtNum(a.clears)],
+    [
+      "Clears",
+      completion && completion.total > 0 ? (
+        <>
+          {fmtNum(a.clears)}
+          <i className="strip-sub"> / {fmtNum(completion.total)}</i>
+        </>
+      ) : (
+        fmtNum(a.clears)
+      ),
+    ],
+    [
+      "Completion",
+      completion && completion.total > 0
+        ? `${((completion.done / completion.total) * 100).toFixed(2)}%`
+        : null,
+    ],
     ["Play count", ps ? fmtNum(ps.play_count) : null],
-    ["Play time", ps ? hours(ps.play_time) : st.playtime != null ? hours(st.playtime) : null],
+    ["Play time", ps ? hours(ps.play_time) : null],
+    // the nomod length of every cleared map, counted once — how much of the
+    // catalog's runtime has been cleared, regardless of the mods used
+    [
+      "Clear time",
+      st.clearTime != null ? (
+        st.catalogTime != null && st.catalogTime > 0 ? (
+          <>
+            {fmtNum(Math.round(st.clearTime / 3600))}h
+            <i className="strip-sub"> / {fmtNum(Math.round(st.catalogTime / 3600))}h</i>
+          </>
+        ) : (
+          hours(st.clearTime)
+        )
+      ) : null,
+    ],
+    // completion stays count-based (the completionist metric); this is the
+    // same idea weighted by content length instead of map count
+    [
+      "Time completion",
+      st.clearTime != null && st.catalogTime != null && st.catalogTime > 0
+        ? `${((st.clearTime / st.catalogTime) * 100).toFixed(2)}%`
+        : null,
+    ],
     ["Sessions", !tm && sess && sess.summary.count > 0 ? fmtNum(sess.summary.count) : null],
     [
       "Longest session",
@@ -97,12 +136,6 @@ export const StatsStrip = memo(function StatsStrip({
     ["Avg length", a.len != null ? mmss(a.len) : null],
     ["Avg stars", a.sr != null ? `${a.sr.toFixed(2)}★` : null],
     ["FC rate", a.clears > 0 ? `${((a.fc / a.clears) * 100).toFixed(1)}%` : null],
-    [
-      "Completion",
-      completion && completion.total > 0
-        ? `${((completion.done / completion.total) * 100).toFixed(2)}%`
-        : null,
-    ],
     [
       "Score per clear",
       a.classic != null && a.clears > 0 ? fmtNum(Math.round(a.classic / a.clears)) : null,
@@ -133,7 +166,7 @@ export const StatsStrip = memo(function StatsStrip({
       dc ? `${fmtNum(dc.daily_current)} · best ${fmtNum(dc.daily_best)}` : null,
     ],
   ];
-  const shown = tiles.filter((t): t is [string, string] => t[1] != null);
+  const shown = tiles.filter((t): t is [string, ReactNode] => t[1] != null);
   if (shown.length === 0) return null;
   return (
     <div className={`hero-strip${dimmed ? " tm-dim" : ""}`}>

@@ -99,7 +99,7 @@ const server = app.listen(config.port, HOST, () => {
     // First launch without .env: the server must still boot so the UI can be
     // used to enter the credentials (Settings menu). Sync stays dormant.
     console.log(
-      `[server] no osu! credentials yet — open http://localhost:${config.port} ` +
+      `[server] no osu! credentials yet: open http://localhost:${config.port} ` +
         `and fill them in the Settings menu (or copy .env.example to .env). ` +
         `Syncing starts as soon as they are set.`
     );
@@ -114,7 +114,7 @@ server.on("error", (e: NodeJS.ErrnoException) => {
     // this, the dev web UI silently proxies to the OTHER instance and its
     // database — very confusing. Fail loudly instead.
     console.error(
-      `[server] port ${config.port} is already in use — another osu!completionist ` +
+      `[server] port ${config.port} is already in use: another osu!completionist ` +
         "is running (check the tray icon of the desktop app, or an old dev " +
         "server). Close it, or you will be looking at ITS database through this UI."
     );

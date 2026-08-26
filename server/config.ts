@@ -7,7 +7,7 @@ function required(name: string): string {
   const v = process.env[name];
   if (!v) {
     throw new Error(
-      `osu! API credentials are not set (${name}). Open Settings (menu) and fill in the osu! OAuth section — Client ID, secret and user id. (Source installs can also use a .env file.)`
+      `osu! API credentials are not set (${name}). Open Settings (menu) and fill in the osu! OAuth section: Client ID, secret and user id. (Source installs can also use a .env file.)`
     );
   }
   return v;

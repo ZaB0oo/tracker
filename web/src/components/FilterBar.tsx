@@ -259,7 +259,7 @@ export function FilterBar({
           title={
             collapsed
               ? "Show the filter panel"
-              : "Hide the filter panel — active filters stay listed as badges"
+              : "Hide the filter panel: active filters stay listed as badges"
           }
           onClick={() =>
             setCollapsed((c) => {
@@ -476,7 +476,7 @@ export function FilterBar({
                 them, hence the three side by side. */}
             <input
               className="mods-input"
-              placeholder="Mods (HD,DT — NM = nomod)"
+              placeholder="Mods (HD,DT · NM = nomod)"
               value={local.mods}
               onChange={(e) => set("mods", e.target.value.toUpperCase())}
             />

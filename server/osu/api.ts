@@ -46,7 +46,7 @@ async function netFetch(url: string, init?: RequestInit): Promise<Response> {
     return await fetch(url, init);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    throw new RetryableError(`network: ${msg} — ${url}`);
+    throw new RetryableError(`network: ${msg} (${url})`);
   }
 }
 
@@ -84,7 +84,7 @@ async function getToken(): Promise<string> {
     if (res.status >= 500)
       throw new RetryableError(`oauth ${res.status}: ${body}`);
     throw new Error(
-      `OAuth failed (${res.status}) — check OSU_CLIENT_ID/OSU_CLIENT_SECRET in .env: ${body}`
+      `OAuth failed (${res.status}): check OSU_CLIENT_ID/OSU_CLIENT_SECRET in .env: ${body}`
     );
   }
   const json = (await res.json()) as { access_token: string; expires_in: number };
@@ -178,7 +178,7 @@ async function getUserToken(): Promise<string> {
   // retries later.
   if (Date.now() - userTokenFailedAt < 5 * 60_000)
     throw new Error(
-      "user token refresh failed recently — backing off, auto-retry in a few minutes"
+      "user token refresh failed recently: backing off, auto-retry in a few minutes"
     );
   try {
     await userTokenRequest({ grant_type: "refresh_token", refresh_token: refresh });
@@ -314,6 +314,8 @@ export interface DailyChallenge {
 
 /** Stored user_profile JSON — the fields the app reads from it. */
 export interface StoredProfile {
+  /** when this copy was fetched from the API (drives the 1h refresh) */
+  fetched_at?: string;
   username?: string;
   avatar_url?: string;
   cover_url?: string;
@@ -398,7 +400,7 @@ export async function getCountryTopScores(
         "403 on type=country: country leaderboards require an osu!supporter account"
       );
     if (res.status === 429)
-      throw new RetryableError(`429 — country LB ${beatmapId}`, retryAfterMs(res));
+      throw new RetryableError(`429: country LB ${beatmapId}`, retryAfterMs(res));
     if (res.status >= 500) throw new RetryableError(`HTTP ${res.status}`);
     if (!res.ok) throw new Error(`HTTP ${res.status} on country LB ${beatmapId}`);
     const json = (await res.json()) as {
@@ -428,7 +430,7 @@ async function apiGet<T>(pathAndQuery: string, priority: Priority): Promise<T> {
     if (res.status === 429)
       // the path names the throttled endpoint in the sync-bar message —
       // essential to tell an API-wide block from a per-endpoint rule
-      throw new RetryableError(`429 — ${pathAndQuery}`, retryAfterMs(res));
+      throw new RetryableError(`429: ${pathAndQuery}`, retryAfterMs(res));
     if (res.status >= 500) throw new RetryableError(`HTTP ${res.status}`);
     if (!res.ok) throw new Error(`HTTP ${res.status} on ${pathAndQuery}`);
     return (await res.json()) as T;

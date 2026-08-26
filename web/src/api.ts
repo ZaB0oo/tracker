@@ -109,6 +109,10 @@ export interface Records {
     playtime: number | null;
     totalStd: number | null;
     totalClassic: number | null;
+    /** nomod length of every cleared map, counted once (seconds) */
+    clearTime: number | null;
+    /** total runtime of the whole catalog in the pool/scope (seconds) */
+    catalogTime: number | null;
     totalPp: number;
     /** official profile weighting: 0.95^i over the bests + bonus pp */
     weightedPp: number;
@@ -1094,6 +1098,34 @@ export interface DisplayPrefs {
   estPerf: boolean;
 }
 
+/** editable layout of the Discord best notifications */
+export interface DiscordTemplate {
+  title: string;
+  body: string;
+  cover: boolean;
+  footer: boolean;
+  author: boolean;
+}
+
+/** a random best rendered into template variables + embed chrome */
+export interface DiscordSample {
+  vars: Record<string, string>;
+  cover: string | null;
+  footer: string | null;
+  author: { name: string; icon_url?: string } | null;
+}
+
+export async function fetchDiscordSample(
+  ruleset = 0,
+  honors = false
+): Promise<DiscordSample> {
+  const res = await fetch(
+    `/api/settings/discord-sample?ruleset=${ruleset}${honors ? "&honors=1" : ""}`
+  );
+  if (!res.ok) throw new Error(`discord sample: HTTP ${res.status}`);
+  return res.json();
+}
+
 export interface Settings {
   apiRpm: number;
   /** highest rate the server accepts (60, the documented osu! limit) */
@@ -1102,7 +1134,12 @@ export interface Settings {
   countryRecheckHours: number;
   globalRecheckHours: number;
   display: DisplayPrefs;
-  discord: { webhookSet: boolean; bests: boolean };
+  discord: {
+    webhookSet: boolean;
+    bests: boolean;
+    template: DiscordTemplate;
+    templateDefault: DiscordTemplate;
+  };
   oauth: { clientId: string; userId: number; secretSet: boolean };
   /** path to LazerCollectionImporter.exe ("" = not configured) */
   lazerImporterPath: string;
@@ -1123,7 +1160,7 @@ export async function postImportDb(file: File): Promise<string> {
     note?: string;
   };
   if (!res.ok) throw new Error(json.error ?? `import-db: HTTP ${res.status}`);
-  return json.note ?? "Import staged — restart the app to apply.";
+  return json.note ?? "Import staged: restart the app to apply.";
 }
 
 export async function postDiscordTest(): Promise<void> {
@@ -1155,7 +1192,7 @@ export async function postSettings(payload: {
   countryRecheckHours?: number;
   globalRecheckHours?: number;
   display?: Partial<DisplayPrefs>;
-  discord?: { webhookUrl?: string; bests?: boolean };
+  discord?: { webhookUrl?: string; bests?: boolean; template?: DiscordTemplate | null };
   clientId?: string | number;
   clientSecret?: string | number;
   userId?: string | number;

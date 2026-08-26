@@ -13,6 +13,7 @@ import {
 import { RULESET_NAMES } from "../rulesets";
 import { firstPlaceLabel, useCountryCode } from "../country";
 import { appConfirm } from "../dialogs";
+import { DiscordEditor } from "./DiscordEditor";
 import { useEscape } from "../useEscape";
 
 // Electron bridge (desktop/preload.cjs): native file picker + dialogs.
@@ -81,6 +82,7 @@ export function AdvancedSettings({
   const [wither, setWither] = useState<boolean | null>(null);
   const [estPerf, setEstPerf] = useState<boolean | null>(null);
   const [testMsg, setTestMsg] = useState<string | null>(null);
+  const [designerOpen, setDesignerOpen] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [importerPath, setImporterPath] = useState<string | null>(null);
   const [rulesets, setRulesets] = useState<number[] | null>(null);
@@ -100,7 +102,7 @@ export function AdvancedSettings({
       const r = await postSync(a);
       if ((r as { ok?: boolean }).ok === false)
         setMaintMsg(`Failed: ${String((r as { error?: string }).error ?? "unknown")}`);
-      else setMaintMsg("Started — tracked in the sync bar.");
+      else setMaintMsg("Started: tracked in the sync bar.");
     } catch (e) {
       setMaintMsg(`Failed: ${String(e)}`);
     }
@@ -146,7 +148,7 @@ export function AdvancedSettings({
       void qc.invalidateQueries();
       notify?.(
         oauthTouched
-          ? "Settings saved — OAuth changed: reconnect your osu! account if needed"
+          ? "Settings saved. OAuth changed: reconnect your osu! account if needed"
           : "Settings saved (applied immediately)"
       );
       onClose();
@@ -278,7 +280,7 @@ export function AdvancedSettings({
         <h3>Rulesets</h3>
         <p className="set-note">
           Each extra ruleset enumerates its own catalog and imports your scores on its maps
-          AND the converts (std maps played in that mode) — days of API budget
+          AND the converts (std maps played in that mode): days of API budget
           the first time, resumable. Disabling a mode (osu! included) stops its
           polling, score import and sweeps; its views stay readable. At least one
           mode must stay enabled.
@@ -392,8 +394,22 @@ export function AdvancedSettings({
           >
             {testBest.isPending ? "Sending…" : "Post a random best"}
           </button>
+          <button
+            onClick={() => setDesignerOpen(true)}
+            title="Design the notification layout with a live Discord preview"
+          >
+            Customize notification…
+          </button>
           {testMsg && <span> {testMsg}</span>}
         </div>
+        {designerOpen && (
+          <DiscordEditor
+            ruleset={ruleset}
+            template={data.discord.template}
+            templateDefault={data.discord.templateDefault}
+            onClose={() => setDesignerOpen(false)}
+          />
+        )}
 
         <h3>Integrations</h3>
         <p className="set-note">
@@ -404,13 +420,13 @@ export function AdvancedSettings({
           >
             LazerCollectionImporter
           </a>{" "}
-          imports collections straight into osu!lazer — download its .exe, then
+          imports collections straight into osu!lazer: download its .exe, then
           point the field below at it.
         </p>
         <div className="set-grid set-grid-wide">
           <Field
             label="LazerCollectionImporter.exe"
-            hint="Absolute path to the LazerCollectionImporter executable — enables one-click import of collections straight into osu!lazer (github.com/ZaB0oo/LazerCollectionImporter)"
+            hint="Absolute path to the LazerCollectionImporter executable: enables one-click import of collections straight into osu!lazer (github.com/ZaB0oo/LazerCollectionImporter)"
           >
             <span className="set-path">
               <input
@@ -436,7 +452,7 @@ export function AdvancedSettings({
           </Field>
         </div>
 
-        <h3>Maintenance — {modeName}</h3>
+        <h3>Maintenance · {modeName}</h3>
         <p className="set-note">
           These actions apply to the ruleset you are viewing ({modeName});
           switch tabs to target another mode. Set-level actions (marked “all
@@ -474,7 +490,7 @@ export function AdvancedSettings({
 
         <div className="set-maint-group">
           <span className="set-maint-label">
-            Catalog — if the number of maps looks wrong
+            Catalog: if the number of maps looks wrong
           </span>
           <div className="set-maint">
           <button
@@ -510,7 +526,7 @@ export function AdvancedSettings({
                 try {
                   const r = await postVerifyDump(path);
                   setMaintMsg(
-                    r.ok ? "Started — progress in the sync bar activity." : `Failed: ${r.error ?? "unknown"}`
+                    r.ok ? "Started: progress in the sync bar activity." : `Failed: ${r.error ?? "unknown"}`
                   );
                 } catch (e) {
                   setMaintMsg(`Failed: ${String(e instanceof Error ? e.message : e)}`);
@@ -553,7 +569,7 @@ export function AdvancedSettings({
                     const counted = (st.ranked ?? 0) + (st.loved ?? 0);
                     setMaintMsg(
                       counted === 0
-                        ? `Set ${r.setId} imported (${r.kind}, +${r.newDiffs ?? 0} diffs) — no ranked/loved diff, it will NOT appear in any pool`
+                        ? `Set ${r.setId} imported (${r.kind}, +${r.newDiffs ?? 0} diffs): no ranked/loved diff, it will NOT appear in any pool`
                         : `Set ${r.setId} imported (${r.kind}): +${r.newDiffs ?? 0} new diffs (${st.ranked ?? 0} ranked, ${st.loved ?? 0} loved)`
                     );
                     setSetIdInput("");
@@ -562,7 +578,7 @@ export function AdvancedSettings({
                   }
                 })();
               }}
-              title="Add a map, set or score — paste an id or any osu.ppy.sh link, even a DMCA'd one. Your scores follow."
+              title="Add a map, set or score: paste an id or any osu.ppy.sh link, even a DMCA'd one. Your scores follow."
             >
               Import id / URL <span className="scope-tag">all modes</span>
             </button>
@@ -592,7 +608,7 @@ export function AdvancedSettings({
               void maint(
                 `global-recheck-all?ruleset=${ruleset}`,
                 "Re-queuing all global positions…",
-                "Re-check ALL global positions (any depth, resumable). The periodic rotation only refreshes held top-100s — use this to refresh everything else. Start?"
+                "Re-check ALL global positions (any depth, resumable). The periodic rotation only refreshes held top-100s: use this to refresh everything else. Start?"
               )
             }
             title="Re-queue every played map for a global position check"

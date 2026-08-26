@@ -107,7 +107,7 @@ export async function importPacks(
     }
     if (failed.length > 0)
       onProgress?.(
-        `packs: listing failed for ${failed.join(", ")} — re-run the import (Dashboard → Packs → Re-sync) to complete them`
+        `packs: listing failed for ${failed.join(", ")}: re-run the import (Dashboard → Packs → Re-sync) to complete them`
       );
     const filled = await fillContents(onProgress);
     onProgress?.(`packs import done: ${filled} pack(s) fetched`);

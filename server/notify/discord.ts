@@ -22,18 +22,76 @@ const WEBHOOK_RE = /^https:\/\/(discord\.com|discordapp\.com)\/api\/webhooks\/\d
 export interface DiscordSettings {
   webhookSet: boolean;
   bests: boolean;
+  template: DiscordTemplate;
+}
+
+/** the best-notification layout, editable in the settings */
+export interface DiscordTemplate {
+  /** embed title (placeholders allowed) */
+  title: string;
+  /** embed description, one template line per embed line */
+  body: string;
+  cover: boolean;
+  footer: boolean;
+  author: boolean;
+}
+
+/** the built-in layout — exactly the historical rendering */
+export const DEFAULT_TEMPLATE: DiscordTemplate = {
+  title: "{new} {artist} - {title} [{diff}] {srb}",
+  body: [
+    "**{grade}** {mods} · **{score}** · {acc} {fc} · {when}",
+    "**{combo}**{maxcombo} · {hits} · **{pp}**",
+    "{mapstats}",
+    "{honors}",
+  ].join("\n"),
+  cover: true,
+  footer: true,
+  author: true,
+};
+
+function getDiscordTemplate(): DiscordTemplate {
+  try {
+    const raw = getState("discord_template");
+    if (!raw) return DEFAULT_TEMPLATE;
+    const t = JSON.parse(raw) as Partial<DiscordTemplate>;
+    return {
+      title:
+        typeof t.title === "string" && t.title.trim() !== ""
+          ? t.title
+          : DEFAULT_TEMPLATE.title,
+      body:
+        typeof t.body === "string" && t.body.trim() !== ""
+          ? t.body
+          : DEFAULT_TEMPLATE.body,
+      cover: t.cover !== false,
+      footer: t.footer !== false,
+      author: t.author !== false,
+    };
+  } catch {
+    return DEFAULT_TEMPLATE;
+  }
 }
 
 export function getDiscordSettings(): DiscordSettings {
   return {
     webhookSet: Boolean(getState("discord_webhook_url")),
     bests: getState("discord_notify_bests") !== "0",
+    template: getDiscordTemplate(),
   };
 }
 
 export function setDiscordSettings(o: {
   webhookUrl?: string | null; // "" clears it
   bests?: boolean;
+  /** null resets to the default layout */
+  template?: {
+    title?: unknown;
+    body?: unknown;
+    cover?: unknown;
+    footer?: unknown;
+    author?: unknown;
+  } | null;
 }): string | null {
   if (o.webhookUrl != null) {
     const url = o.webhookUrl.trim();
@@ -42,7 +100,60 @@ export function setDiscordSettings(o: {
     setState("discord_webhook_url", url);
   }
   if (o.bests != null) setState("discord_notify_bests", o.bests ? "1" : "0");
+  if (o.template !== undefined) {
+    if (o.template === null) setState("discord_template", "");
+    else
+      setState(
+        "discord_template",
+        JSON.stringify({
+          title: String(o.template.title ?? "").slice(0, 256),
+          body: String(o.template.body ?? "").slice(0, 1800),
+          cover: o.template.cover !== false,
+          footer: o.template.footer !== false,
+          author: o.template.author !== false,
+        })
+      );
+  }
   return null;
+}
+
+/**
+ * Placeholder substitution with self-erasing segments: each template line is
+ * split on «·», and a segment whose placeholders ALL resolved empty is
+ * dropped (so a score without pp or mods leaves no dangling separator); a
+ * line whose placeholders all resolved empty disappears entirely.
+ */
+export function renderTemplate(tpl: string, vars: Record<string, string>): string {
+  return tpl
+    .split("\n")
+    .map((line) => {
+      let lineHasPh = false;
+      let lineHasVal = false;
+      const segs = line
+        .split("·")
+        .map((seg) => {
+          let segHasPh = false;
+          let segHasVal = false;
+          const out = seg.replace(/\{(\w+)\}/g, (_, k: string) => {
+            segHasPh = true;
+            lineHasPh = true;
+            const v = vars[k] ?? "";
+            if (v !== "") {
+              segHasVal = true;
+              lineHasVal = true;
+            }
+            return v;
+          });
+          if (segHasPh && !segHasVal) return null;
+          return out.replace(/\s+/g, " ").trim();
+        })
+        .filter((x): x is string => x != null && x !== "");
+      if (segs.length === 0) return null;
+      if (lineHasPh && !lineHasVal) return null;
+      return segs.join(" · ");
+    })
+    .filter((l): l is string => l != null)
+    .join("\n");
 }
 
 // ---------------------------------------------------------------- sending
@@ -221,38 +332,46 @@ function parseMods(json: string): ParsedMods {
 const clamp10 = (v: number) => Math.min(Math.max(v, 0), 10);
 const round1 = (v: number) => Math.round(v * 10) / 10;
 
-/** CS/AR/OD/HP · BPM · length, adjusted for HR/EZ and the play rate. */
-function adjustedStats(m: MapRow, mods: ParsedMods): string {
+/** each map stat adjusted for HR/EZ and the play rate, formatted ("" = unknown) */
+function adjustedParts(m: MapRow, mods: ParsedMods) {
   const mul = mods.hr ? 1.4 : mods.ez ? 0.5 : 1;
   const csMul = mods.hr ? 1.3 : mods.ez ? 0.5 : 1;
-  const parts: string[] = [];
+  const p = { len: "", bpm: "", cs: "", ar: "", od: "", hp: "" };
 
   if (m.total_length != null && m.total_length > 0) {
     const len = Math.round(m.total_length / mods.rate);
-    parts.push(`${Math.floor(len / 60)}:${String(len % 60).padStart(2, "0")}`);
+    p.len = `${Math.floor(len / 60)}:${String(len % 60).padStart(2, "0")}`;
   }
-  if (m.bpm != null && m.bpm > 0) parts.push(`${round1(m.bpm * mods.rate)} BPM`);
-  if (m.cs != null) parts.push(`CS ${round1(Math.min(m.cs * csMul, 10))}`);
+  if (m.bpm != null && m.bpm > 0) p.bpm = `${round1(m.bpm * mods.rate)} BPM`;
+  if (m.cs != null) p.cs = `CS ${Math.min(m.cs * csMul, 10).toFixed(2)}`;
   if (m.ar != null) {
     // AR -> preempt ms, apply rate, back to AR (can exceed 10 with DT)
     const base = clamp10(m.ar * mul);
     const ms = base < 5 ? 1200 + 600 * ((5 - base) / 5) : 1200 - 750 * ((base - 5) / 5);
     const adj = ms / mods.rate;
     const ar = adj > 1200 ? 5 - (adj - 1200) / 120 : 5 + (1200 - adj) / 150;
-    parts.push(`AR ${round1(ar)}`);
+    p.ar = `AR ${ar.toFixed(2)}`;
   }
   if (m.od != null) {
     // OD -> hit window ms (300), apply rate, back to OD
     const base = clamp10(m.od * mul);
     const ms = (80 - 6 * base) / mods.rate;
-    parts.push(`OD ${round1((80 - ms) / 6)}`);
+    p.od = `OD ${((80 - ms) / 6).toFixed(2)}`;
   }
-  if (m.hp != null) parts.push(`HP ${round1(clamp10(m.hp * mul))}`);
-  return parts.join(" · ");
+  if (m.hp != null) p.hp = `HP ${clamp10(m.hp * mul).toFixed(2)}`;
+  return p;
 }
 
-/** lazer statistics JSON → "{300/100/50/miss}" */
-function hitCounts(json: string): string | null {
+/** CS/AR/OD/HP · BPM · length, adjusted for HR/EZ and the play rate. */
+function adjustedStats(m: MapRow, mods: ParsedMods): string {
+  const p = adjustedParts(m, mods);
+  return [p.len, p.bpm, p.cs, p.ar, p.od, p.hp].filter(Boolean).join(" · ");
+}
+
+/** lazer statistics JSON → individual hit counts */
+function hitStats(
+  json: string
+): { great: number; ok: number; meh: number; miss: number } | null {
   try {
     const s = JSON.parse(json) as {
       great?: number;
@@ -260,10 +379,21 @@ function hitCounts(json: string): string | null {
       meh?: number;
       miss?: number;
     };
-    return `{${s.great ?? 0}/${s.ok ?? 0}/${s.meh ?? 0}/${s.miss ?? 0}}`;
+    return {
+      great: s.great ?? 0,
+      ok: s.ok ?? 0,
+      meh: s.meh ?? 0,
+      miss: s.miss ?? 0,
+    };
   } catch {
     return null;
   }
+}
+
+/** lazer statistics JSON → "{300/100/50/miss}" */
+function hitCounts(json: string): string | null {
+  const s = hitStats(json);
+  return s ? `{${s.great}/${s.ok}/${s.meh}/${s.miss}}` : null;
 }
 
 // ---------------------------------------------------------------- events
@@ -276,6 +406,8 @@ export interface BestEvent {
   accuracy: number; // 0..1
   fcState: number; // 0 PFC, 1 FC, 2+ non-FC
   score: number;
+  /** lazer standardised score (total_score), {score} being classic */
+  scoreStd?: number | null;
   combo: number;
   pp: number | null;
   /** locally estimated pp when the API left pp NULL (filled at notify time) */
@@ -293,58 +425,76 @@ export interface BestEvent {
   snipedUsername?: string | null;
 }
 
-function bestEmbed(e: BestEvent, author: Embed["author"] | undefined): Embed {
-  const m = mapRow(e.beatmapId);
+/** everything a template can print about one best (formatted, "" = absent) */
+function templateVars(e: BestEvent, m: MapRow | undefined): Record<string, string> {
   const mods = parseMods(e.modsJson);
   const sr = e.moddedSr ?? m?.star_rating ?? null;
-  const srTxt = sr != null ? ` [${sr.toFixed(2)}★]` : "";
-  const name = m ? `${m.artist} - ${m.title} [${m.version}]` : `beatmap ${e.beatmapId}`;
-  const fc = e.fcState === 0 ? " PFC" : e.fcState === 1 ? " FC" : "";
   const when = Math.floor(Date.parse(e.endedAt) / 1000);
-
-  const line1 = [
-    `**${displayGrade(e.grade)}**${mods.label ? ` ${mods.label}` : ""}`,
-    `**${e.score.toLocaleString("en-US")}**`,
-    `${(e.accuracy * 100).toFixed(2)}%${fc}`,
-    Number.isFinite(when) ? `<t:${when}:R>` : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  const line2 = [
-    m?.max_combo != null && m.max_combo > 0
-      ? `**${e.combo}x**/${m.max_combo}x`
-      : `**${e.combo}x**`,
-    hitCounts(e.statisticsJson) ?? "",
-    e.pp != null
-      ? `**${e.pp.toFixed(2)}pp**`
-      : e.ppLocal != null
-        ? `**~${e.ppLocal.toFixed(2)}pp**`
+  const stats = m ? adjustedParts(m, mods) : null;
+  const hs = hitStats(e.statisticsJson);
+  const vars: Record<string, string> = {
+    new: e.firstClear ? "🆕" : "📈",
+    artist: m?.artist ?? "",
+    title: m?.title ?? `beatmap ${e.beatmapId}`,
+    diff: m?.version ?? "",
+    mapper: m?.creator ?? "",
+    sr: sr != null ? `${sr.toFixed(2)}★` : "",
+    srb: sr != null ? `[${sr.toFixed(2)}★]` : "",
+    grade: displayGrade(e.grade),
+    mods: mods.label,
+    rate: mods.rate !== 1 ? `${+mods.rate.toFixed(2)}x` : "",
+    score: e.score.toLocaleString("en-US"),
+    scorestd: e.scoreStd != null ? e.scoreStd.toLocaleString("en-US") : "",
+    acc: `${(e.accuracy * 100).toFixed(2)}%`,
+    fc: e.fcState === 0 ? "PFC" : e.fcState === 1 ? "FC" : "",
+    when: Number.isFinite(when) ? `<t:${when}:R>` : "",
+    date: e.endedAt.slice(0, 10),
+    combo: `${e.combo}x`,
+    maxcombo:
+      m?.max_combo != null && m.max_combo > 0 ? `/${m.max_combo}x` : "",
+    hits: hitCounts(e.statisticsJson) ?? "",
+    h300: hs ? String(hs.great) : "",
+    h100: hs ? String(hs.ok) : "",
+    h50: hs ? String(hs.meh) : "",
+    hmiss: hs ? String(hs.miss) : "",
+    pp:
+      e.pp != null
+        ? `${e.pp.toFixed(2)}pp`
+        : e.ppLocal != null
+          ? `~${e.ppLocal.toFixed(2)}pp`
+          : "",
+    bpm: stats?.bpm ?? "",
+    len: stats?.len ?? "",
+    cs: stats?.cs ?? "",
+    ar: stats?.ar ?? "",
+    od: stats?.od ?? "",
+    hp: stats?.hp ?? "",
+    mapstats: m ? adjustedStats(m, mods) : "",
+    globaltop:
+      e.globalRank != null && e.globalRank <= 100
+        ? `🌍 **Global Top #${e.globalRank}**`
         : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  const lines = [line1, line2];
-  if (m) {
-    const stats = adjustedStats(m, mods);
-    if (stats) lines.push(stats);
-  }
-  const honors = [
-    e.globalRank != null && e.globalRank <= 100 ? `🌍 **Global Top #${e.globalRank}**` : "",
-    e.countryFirst
+    country1: e.countryFirst
       ? `🥇 **country #1**${e.snipedUsername ? ` (sniped **${e.snipedUsername}**)` : ""}`
       : "",
-  ].filter(Boolean);
-  if (honors.length > 0) lines.push(honors.join(" · "));
-
-  const embed: Embed = {
-    title: `${e.firstClear ? "🆕" : "📈"} ${name}${srTxt}`.slice(0, 256),
-    url: mapUrl(e.beatmapId),
-    description: lines.join("\n"),
-    color: PINK,
-    author,
   };
-  if (m) {
-    embed.image = { url: coverUrl(m.beatmapset_id) };
+  vars.honors = [vars.globaltop, vars.country1].filter(Boolean).join(" · ");
+  return vars;
+}
+
+function bestEmbed(e: BestEvent, author: Embed["author"] | undefined): Embed {
+  const m = mapRow(e.beatmapId);
+  const t = getDiscordTemplate();
+  const vars = templateVars(e, m);
+  const embed: Embed = {
+    title: renderTemplate(t.title, vars).slice(0, 256),
+    url: mapUrl(e.beatmapId),
+    description: renderTemplate(t.body, vars).slice(0, 4000),
+    color: PINK,
+    ...(t.author ? { author } : {}),
+  };
+  if (m && t.cover) embed.image = { url: coverUrl(m.beatmapset_id) };
+  if (m && t.footer) {
     const ranked = m.ranked_date ? ` • Ranked ${m.ranked_date.slice(0, 10)}` : "";
     embed.footer = { text: `Mapset by ${m.creator}${ranked}` };
   }
@@ -446,14 +596,16 @@ async function notifyBestsAsync(events: BestEvent[]): Promise<void> {
  * notification (modded SR from cache, local pp estimate when official pp is
  * missing, top/country honors) — the fastest way to see the actual render.
  */
-export async function sendTestBest(ruleset: number): Promise<string | null> {
-  const url = getState("discord_webhook_url");
-  if (!url) return "no webhook URL configured";
+/** a random REAL best from the database, ready for the embed pipeline.
+ * honors = only bests that are country #1 or global top 100 (falls back to
+ * any best when there is none, so the button always shows something). */
+function sampleBestEvent(ruleset: number, honors = false): BestEvent | null {
   const db = getDb();
   const s = db
     .prepare(
       `SELECT s.beatmap_id, s.rank, s.accuracy, s.fc_state,
          COALESCE(s.classic_total_score, s.total_score) AS score,
+         s.total_score AS score_std,
          s.max_combo AS combo, s.pp, s.mods, s.statistics, s.ended_at,
          u.global_rank, u.country_first,
          (SELECT COUNT(*) FROM scores s2
@@ -461,7 +613,11 @@ export async function sendTestBest(ruleset: number): Promise<string | null> {
              AND s2.passed = 1) AS n
        FROM beatmap_user u
        JOIN scores s ON s.id = u.best_lazer_score_id
-       WHERE u.ruleset = ? ORDER BY RANDOM() LIMIT 1`
+       WHERE u.ruleset = ?${
+         honors
+           ? " AND (u.country_first = 1 OR (u.global_rank IS NOT NULL AND u.global_rank <= 100))"
+           : ""
+       } ORDER BY RANDOM() LIMIT 1`
     )
     .get(ruleset) as
     | {
@@ -470,6 +626,7 @@ export async function sendTestBest(ruleset: number): Promise<string | null> {
         accuracy: number;
         fc_state: number;
         score: number;
+        score_std: number | null;
         combo: number;
         pp: number | null;
         mods: string;
@@ -480,7 +637,7 @@ export async function sendTestBest(ruleset: number): Promise<string | null> {
         n: number;
       }
     | undefined;
-  if (!s) return "no best score to sample yet";
+  if (!s) return honors ? sampleBestEvent(ruleset) : null;
   let moddedSr: number | null = null;
   const played = srMods(s.mods);
   if (played.length > 0) {
@@ -493,7 +650,7 @@ export async function sendTestBest(ruleset: number): Promise<string | null> {
       | undefined;
     moddedSr = hit?.star_rating ?? null;
   }
-  const e: BestEvent = {
+  return {
     beatmapId: s.beatmap_id,
     ruleset,
     firstClear: s.n === 1,
@@ -501,6 +658,7 @@ export async function sendTestBest(ruleset: number): Promise<string | null> {
     accuracy: s.accuracy,
     fcState: s.fc_state,
     score: s.score,
+    scoreStd: s.score_std,
     combo: s.combo,
     pp: s.pp,
     endedAt: s.ended_at,
@@ -510,12 +668,48 @@ export async function sendTestBest(ruleset: number): Promise<string | null> {
     globalRank: s.global_rank,
     countryFirst: s.country_first === 1,
   };
+}
+
+export async function sendTestBest(ruleset: number): Promise<string | null> {
+  const url = getState("discord_webhook_url");
+  if (!url) return "no webhook URL configured";
+  const e = sampleBestEvent(ruleset);
+  if (!e) return "no best score to sample yet";
   await fillComputed(e);
   enqueue({
     content: "**Test**, display a random best",
     embeds: [bestEmbed(e, profileAuthor())],
   });
   return null;
+}
+
+/**
+ * A random best rendered into template variables + embed chrome, for the
+ * visual editor: the client renders the template locally against these and
+ * shows a pixel-faithful Discord preview without posting anything.
+ */
+export async function sampleBestPreview(
+  ruleset: number,
+  honors = false
+): Promise<{
+  vars: Record<string, string>;
+  cover: string | null;
+  footer: string | null;
+  author: { name: string; icon_url?: string } | null;
+} | null> {
+  const e = sampleBestEvent(ruleset, honors);
+  if (!e) return null;
+  await fillComputed(e);
+  const m = mapRow(e.beatmapId);
+  const a = profileAuthor();
+  return {
+    vars: templateVars(e, m),
+    cover: m ? coverUrl(m.beatmapset_id) : null,
+    footer: m
+      ? `Mapset by ${m.creator}${m.ranked_date ? ` • Ranked ${m.ranked_date.slice(0, 10)}` : ""}`
+      : null,
+    author: a ? { name: a.name, icon_url: a.icon_url } : null,
+  };
 }
 
 /** "Send a test message" button in the settings. */
@@ -530,7 +724,7 @@ export async function sendTest(): Promise<string | null> {
         embeds: [
           {
             title: "osu! completionist tracker",
-            description: "Test notification — webhook configured correctly ✅",
+            description: "Test notification: webhook configured correctly ✅",
             color: PINK,
             author: profileAuthor(),
           },

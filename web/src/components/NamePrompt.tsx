@@ -61,7 +61,7 @@ export function NamePrompt({
         />
         {existing != null && existing.length > 0 && (
           <div className="np-existing">
-            <div className="np-existing-head">Already in lazer — click to target one</div>
+            <div className="np-existing-head">Already in lazer: click to target one</div>
             <div className="np-existing-list">
               {existing.map((c) => (
                 <button

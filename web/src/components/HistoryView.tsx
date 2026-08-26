@@ -95,7 +95,7 @@ function ClearsList({ onCtx, ruleset }: { onCtx: OnMapContext; ruleset: number }
             window.open(mapUrl(c.beatmap_id, ruleset), "_blank")
           }
           onContextMenu={(e) => onCtx(e, c)}
-          title="Double-click: open on osu.ppy.sh — right-click: actions"
+          title="Double-click: open on osu.ppy.sh · right-click: actions"
         >
           <span className="fr-event-date">{fmtDate(c.ended_at)}</span>
           <span className="fr-event-badge">
@@ -170,11 +170,11 @@ function CountryList({
             window.open(mapUrl(e.beatmap_id, ruleset), "_blank")
           }
           onContextMenu={(ev) => onCtx(ev, e)}
-          title="Double-click: open on osu.ppy.sh — right-click: actions"
+          title="Double-click: open on osu.ppy.sh · right-click: actions"
         >
           <span
             className="fr-event-date"
-            title={`Detected on ${fmtDate(e.at)}${e.score_at ? ` — score set on ${fmtDate(e.score_at)}` : ""}`}
+            title={`Detected on ${fmtDate(e.at)}${e.score_at ? ` · score set on ${fmtDate(e.score_at)}` : ""}`}
           >
             {fmtDate(e.score_at ?? e.at)}
           </span>
@@ -268,7 +268,7 @@ function GlobalList({
               window.open(mapUrl(e.beatmap_id, ruleset), "_blank")
             }
             onContextMenu={(ev) => onCtx(ev, e)}
-            title="Double-click: open on osu.ppy.sh — right-click: actions"
+            title="Double-click: open on osu.ppy.sh · right-click: actions"
           >
             <span className="fr-event-date">{fmtDate(e.at)}</span>
             <span className={`fr-event-badge ${gained ? "gained" : "lost"}`}>

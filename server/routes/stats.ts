@@ -1340,9 +1340,22 @@ statsRouter.get("/records", (req, res) => {
   const ppTotals = db
     .prepare(
       `SELECT COALESCE(SUM(${PP_SQL}), 0) AS t, COUNT(${PP_SQL}) AS n,
-         SUM(s.total_score) AS std ${BESTS}`
+         SUM(s.total_score) AS std,
+         SUM(b.total_length) AS clearLen ${BESTS}`
     )
-    .get() as { t: number; n: number; std: number | null };
+    .get() as { t: number; n: number; std: number | null; clearLen: number | null };
+  // the whole catalog's runtime in the same pool/scope — the denominator of
+  // the time-based completion (how much content exists vs how much is cleared)
+  const catalogTime = (
+    db
+      .prepare(
+        `SELECT SUM(b.total_length) AS t
+         FROM beatmaps b
+         JOIN beatmapsets st ON st.id = b.beatmapset_id
+         WHERE ${POOL} AND b.status IN ${STATUSES}`
+      )
+      .get() as { t: number | null }
+  ).t;
   const totalPp = ppTotals.t;
 
   const payload = {
@@ -1380,6 +1393,9 @@ statsRouter.get("/records", (req, res) => {
       // the sum of the BESTS' standardised scores — the same state the hero
       // shows, every pass summed would double-count replayed maps
       totalStd: ppTotals.std,
+      // clear time: the nomod length of every cleared map, counted once
+      clearTime: ppTotals.clearLen,
+      catalogTime,
       totalPp,
       weightedPp,
       weightedPpOfficial,

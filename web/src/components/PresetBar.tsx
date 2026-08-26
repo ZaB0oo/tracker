@@ -52,7 +52,7 @@ export function PresetBar({
       </span>
       {custom.length === 0 && (
         <span className="presetbar-empty">
-          none yet — set up filters and save them here
+          none yet: set up filters and save them here
         </span>
       )}
       {custom.map((p) => (

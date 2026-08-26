@@ -19,6 +19,8 @@ import {
 import { getDisplayPrefs, setDisplayPrefs } from "../prefs.js";
 import {
   getDiscordSettings,
+  DEFAULT_TEMPLATE,
+  sampleBestPreview,
   sendTest,
   sendTestBest,
   setDiscordSettings,
@@ -68,7 +70,7 @@ settingsRouter.get("/settings", (_req, res) =>
     countryRecheckHours: getCountryRecheckHours(),
     globalRecheckHours: getGlobalRecheckHours(),
     display: getDisplayPrefs(),
-    discord: getDiscordSettings(),
+    discord: { ...getDiscordSettings(), templateDefault: DEFAULT_TEMPLATE },
     // safe accessors: on a first launch without .env the getters throw —
     // the settings UI is precisely where the values get filled in
     oauth: {
@@ -106,7 +108,7 @@ settingsRouter.post(
     }
     res.json({
       ok: true,
-      note: "Import staged — restart the app to apply it (the current database is kept as a backup).",
+      note: "Import staged: restart the app to apply it (the current database is kept as a backup).",
     });
   }
 );
@@ -118,7 +120,17 @@ settingsRouter.post("/settings", (req, res) => {
     countryRecheckHours?: unknown;
     globalRecheckHours?: unknown;
     display?: { wither?: unknown; estPerf?: unknown };
-    discord?: { webhookUrl?: unknown; bests?: unknown };
+    discord?: {
+      webhookUrl?: unknown;
+      bests?: unknown;
+      template?: {
+        title?: unknown;
+        body?: unknown;
+        cover?: unknown;
+        footer?: unknown;
+        author?: unknown;
+      } | null;
+    };
     clientId?: unknown;
     clientSecret?: unknown;
     userId?: unknown;
@@ -151,6 +163,7 @@ settingsRouter.post("/settings", (req, res) => {
       webhookUrl:
         body.discord.webhookUrl == null ? null : String(body.discord.webhookUrl),
       bests: body.discord.bests == null ? undefined : Boolean(body.discord.bests),
+      template: body.discord.template,
     });
     if (err) return res.status(400).json({ ok: false, error: err });
   }
@@ -236,6 +249,18 @@ settingsRouter.post("/settings/discord-test", async (_req, res) => {
   const error = await sendTest();
   if (error) return res.status(400).json({ ok: false, error });
   res.json({ ok: true });
+});
+
+// A random real best as template variables + embed chrome (editor preview).
+settingsRouter.get("/settings/discord-sample", async (req, res) => {
+  const raw = Number(req.query.ruleset);
+  const sample = await sampleBestPreview(
+    [0, 1, 2, 3].includes(raw) ? raw : 0,
+    req.query.honors === "1"
+  );
+  if (!sample)
+    return res.status(404).json({ ok: false, error: "no best score to sample yet" });
+  res.json(sample);
 });
 
 // Sends a RANDOM REAL best through the live notification pipeline (render test).

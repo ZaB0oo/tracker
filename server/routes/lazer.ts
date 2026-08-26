@@ -115,7 +115,7 @@ lazerRouter.post("/lazer-import", async (req, res) => {
     return res.status(400).json({
       ok: false,
       error:
-        "LazerCollectionImporter path is not set (or the file does not exist) — Settings → Integrations",
+        "LazerCollectionImporter path is not set (or the file does not exist): Settings → Integrations",
     });
 
   // Express 4 does not catch async throws: without this outer try, a failure

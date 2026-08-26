@@ -1128,6 +1128,10 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .strip-tile b { font-size: 15px; font-variant-numeric: tabular-nums; }
+/* the "/ total" denominator: present but quiet */
+.strip-tile b .strip-sub {
+  font-style: normal; font-weight: 400; font-size: 11px; color: var(--fg-dim);
+}
 .mm-stat b { color: var(--fg-dim); font-weight: 600; margin-right: 4px; }
 .mm-gold { color: var(--yellow); }
 .mm-green { color: var(--green); }
@@ -1905,3 +1909,122 @@ body.overlay-body { background: transparent; }
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
 .mp-count { font-size: 13px; }
+
+/* ------------------------------------------------ Discord designer */
+.dc-editor { width: min(1250px, 96vw); max-height: 92vh; overflow-y: auto; z-index: 35; }
+.dc-editor-overlay { z-index: 34; }
+.dc-editor-cols { display: flex; gap: 18px; align-items: flex-start; }
+.dc-editor-left { flex: 1 1 480px; min-width: 380px; display: flex; flex-direction: column; gap: 10px; }
+.dc-editor-right { flex: 1 1 460px; min-width: 400px; position: sticky; top: 0; }
+.dc-palette {
+  display: flex; flex-direction: column; gap: 6px; padding: 8px;
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 8px;
+}
+.dc-pal-group { display: grid; grid-template-columns: 62px 1fr; gap: 5px; align-items: start; }
+.dc-pal-label {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--fg-dim); text-align: right; padding: 4px 4px 0 0;
+}
+.dc-pal-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.dc-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 999px;
+  padding: 2px 9px; font-size: 12px; cursor: grab; user-select: none;
+  white-space: nowrap;
+}
+.dc-chip.bold { font-weight: 700; border-color: var(--accent); }
+.dc-chip-src { background: var(--bg); }
+.dc-chip-val {
+  max-width: 200px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* the sampled score has no value for this chip: dimmed example */
+.dc-chip-demo { opacity: 0.5; border-style: dashed; }
+.dc-chip-text { font-style: italic; color: var(--accent2); }
+.dc-chip-text input {
+  background: none; border: none; border-bottom: 1px dashed var(--border);
+  color: var(--accent2); font-size: 12px; font-style: italic; padding: 0;
+  min-width: 8px; max-width: 200px; text-align: center;
+}
+.dc-chip-text input:focus { outline: none; border-bottom-color: var(--accent2); }
+.dc-chip-x {
+  background: none; border: none; color: var(--fg-dim); cursor: pointer;
+  font-size: 12px; padding: 0 0 0 2px; line-height: 1;
+}
+.dc-chip-x:hover { color: var(--red); }
+.dc-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--fg-dim); }
+.dc-lines { display: flex; flex-direction: column; gap: 6px; }
+.dc-line {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 8px; min-height: 36px;
+}
+.dc-seg-wrap { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; max-width: 100%; }
+.dc-seg {
+  display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  padding: 2px; border-radius: 6px; min-width: 14px; min-height: 24px;
+  border: 1px dashed transparent; max-width: 100%;
+}
+.dc-newseg {
+  color: var(--fg-dim); padding: 2px 6px; border: 1px dashed transparent;
+  border-radius: 6px; font-size: 12px;
+}
+.dc-newseg-end { opacity: 0.45; }
+.dc-line:hover .dc-newseg { border-color: var(--border); }
+.dc-newline {
+  color: var(--fg-dim); border: 1px dashed var(--border); border-radius: 8px;
+  padding: 10px; font-size: 12px; text-align: center;
+}
+/* while a chip is being dragged, light up every drop target */
+.dc-dragging .dc-newseg { border-color: var(--border); opacity: 1; }
+.dc-dragging .dc-newline { border-color: var(--accent2); color: var(--fg); }
+.dc-dragging .dc-line { border-style: dashed; }
+/* the target the drag is hovering */
+.dc-over { border-color: var(--accent) !important; background: rgba(255, 102, 170, 0.12); }
+.dc-editor-checks { display: flex; gap: 16px; font-size: 13px; }
+.dc-editor-checks label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+.dc-editor-actions { display: flex; gap: 8px; align-items: center; }
+.dc-editor-spacer { flex: 1; }
+.dc-save { border-color: var(--accent) !important; }
+
+/* --- the Discord mock itself (dark theme, current metrics) --- */
+.dc-chat {
+  background: #313338; border-radius: 10px; padding: 16px;
+  font-family: "gg sans", "Noto Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: #dbdee1; font-size: 15px; line-height: 1.375;
+}
+.dc-msg { display: flex; gap: 16px; }
+.dc-avatar {
+  width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0;
+  background: var(--accent) url("/favicon.svg") center/70% no-repeat;
+}
+.dc-msg-main { min-width: 0; flex: 1; }
+.dc-head { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+.dc-username { color: #f2f3f5; font-weight: 500; }
+.dc-badge {
+  background: #5865f2; color: #fff; font-size: 10px; font-weight: 600;
+  border-radius: 4px; padding: 1px 5px; letter-spacing: 0.02em;
+}
+.dc-time { color: #949ba4; font-size: 12px; }
+.dc-content { margin-bottom: 2px; white-space: pre-wrap; }
+.dc-embed {
+  max-width: 432px; background: #2b2d31; border-left: 4px solid #ff66aa;
+  border-radius: 4px; margin-top: 2px;
+}
+.dc-embed-inner { padding: 8px 16px 16px 12px; }
+.dc-author {
+  display: flex; align-items: center; gap: 8px; margin-top: 8px;
+  color: #f2f3f5; font-size: 14px; font-weight: 600;
+}
+.dc-author img { width: 24px; height: 24px; border-radius: 50%; }
+.dc-title {
+  margin-top: 8px; color: #00a8fc; font-size: 16px; font-weight: 600;
+  overflow-wrap: break-word;
+}
+.dc-desc { margin-top: 8px; font-size: 14px; color: #dbdee1; white-space: pre-wrap; }
+.dc-desc strong { color: #f2f3f5; }
+.dc-timestamp {
+  background: #3f4248; border-radius: 3px; padding: 0 2px;
+}
+.dc-image { margin-top: 16px; max-width: 400px; width: 100%; border-radius: 4px; display: block; }
+.dc-footer { margin-top: 8px; color: #949ba4; font-size: 12px; font-weight: 500; }

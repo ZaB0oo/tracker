@@ -25,7 +25,11 @@ authRouter.get("/auth/callback", async (req, res) => {
     await exchangeAuthCode(code);
     try {
       const profile = await fetchUserProfile();
-      if (profile) setState("user_profile", JSON.stringify(profile));
+      if (profile)
+        setState(
+          "user_profile",
+          JSON.stringify({ ...profile, fetched_at: new Date().toISOString() })
+        );
     } catch {
       /* profile will be fetched later via /auth/status */
     }
@@ -50,18 +54,26 @@ authRouter.get("/auth/status", (req, res) => {
   let profile: StoredProfile | null = null;
   if (connected) {
     profile = getStoredProfile(R);
-    // refetch if missing, or cached by an older version (fields added since)
+    // refetch if missing, cached by an older version (fields added since),
+    // or simply old: the profile figures (play time, pp, medals, daily
+    // challenge) move constantly, one API call per hour keeps them honest
     const stale =
       !profile ||
       !profile.country_code ||
       profile.cover_url == null ||
       profile.stats?.join_date == null ||
-      profile.daily_challenge === undefined;
+      profile.daily_challenge === undefined ||
+      profile.fetched_at == null ||
+      Date.now() - Date.parse(profile.fetched_at) > 60 * 60_000;
     if (stale && !profileFetchInFlight.has(R)) {
       profileFetchInFlight.add(R);
       void fetchUserProfile(R === 0 ? undefined : rulesetDef(R).apiName)
         .then((p) => {
-          if (p) setState(profileKey(R), JSON.stringify(p));
+          if (p)
+            setState(
+              profileKey(R),
+              JSON.stringify({ ...p, fetched_at: new Date().toISOString() })
+            );
         })
         .catch(() => undefined)
         .finally(() => {

@@ -25,7 +25,7 @@ export function ActivityWindow() {
           {s?.busy?.length
             ? `running: ${s.busy.join(" + ")}`
             : "no background task"}
-          {" — "}
+          {" · "}
           {entries.length} entry(ies), refreshed every 2 s
         </span>
       </header>
