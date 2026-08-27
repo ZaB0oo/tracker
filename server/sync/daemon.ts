@@ -36,6 +36,7 @@ import type { SoloScore } from "../osu/types.js";
 import {
   getDiscordSettings,
   notifyBests,
+  notifyMetricMilestones,
   type BestEvent,
 } from "../notify/discord.js";
 import {
@@ -846,6 +847,7 @@ async function pollRecentScoresForMode(mode: number): Promise<number> {
     }
   }
   notifyBests(bestEvents);
+  if (newCount > 0) notifyMetricMilestones();
   status.lastPollAt = new Date().toISOString();
   status.lastPollNewScores = newCount;
   setState("last_poll_at", status.lastPollAt);

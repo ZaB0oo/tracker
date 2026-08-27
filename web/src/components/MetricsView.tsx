@@ -5,6 +5,7 @@ import {
   deleteMetric,
   fetchMetrics,
   fetchMetricPpTop,
+  postMetricDiscord,
   reorderMetrics,
   type Metric,
   type MetricBreakdown,
@@ -151,6 +152,8 @@ function MetricCard({
   onDragOverCard: () => void;
   onDrop: () => void;
 }) {
+  const [dcBusy, setDcBusy] = useState(false);
+  const [dcMsg, setDcMsg] = useState<string | null>(null);
   const isRanked = m.params.kind === "ranked_score" || m.params.kind === "std_score";
   const isPp = m.params.kind === "pp" || m.params.kind === "total_pp";
   // the top-plays list belongs to the weighted metric only: a total-pp sum
@@ -280,6 +283,24 @@ function MetricCard({
             </button>
           </>
         )}
+        <button
+          className="metric-btn"
+          title="Post the current progress to the Discord webhook"
+          disabled={dcBusy}
+          onClick={() => {
+            setDcBusy(true);
+            setDcMsg(null);
+            postMetricDiscord(m.id, describeParams(m.params))
+              .then(() => setDcMsg("posted"))
+              .catch((e: Error) => setDcMsg(e.message))
+              .finally(() => {
+                setDcBusy(false);
+                setTimeout(() => setDcMsg(null), 5000);
+              });
+          }}
+        >
+          ➤
+        </button>
         <button className="metric-btn" title="Edit this metric" onClick={() => onEdit(m)}>
           ✎
         </button>
@@ -293,6 +314,7 @@ function MetricCard({
           ✕
         </button>
       </div>
+      {dcMsg && <div className="metric-dc-msg">{dcMsg}</div>}
       <div className="metric-conds" title={describeParams(m.params)}>
         {describeParams(m.params)}
       </div>

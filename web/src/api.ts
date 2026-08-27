@@ -1033,6 +1033,19 @@ export async function deleteMetric(id: number): Promise<void> {
   if (!res.ok) throw new Error(`metrics: HTTP ${res.status}`);
 }
 
+/** posts the metric's progress to the Discord webhook (server-side cooldown) */
+export async function postMetricDiscord(id: number, conds?: string): Promise<void> {
+  const res = await fetch(`/api/metrics/${id}/discord`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ conds }),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? `metrics: HTTP ${res.status}`);
+  }
+}
+
 export const DEFAULT_METRIC_PARAMS: MetricParams = {
   keys: [],
   kind: "count",
@@ -1137,6 +1150,8 @@ export interface Settings {
   discord: {
     webhookSet: boolean;
     bests: boolean;
+    /** notify each milestone step a custom metric crosses */
+    metrics: boolean;
     template: DiscordTemplate;
     templateDefault: DiscordTemplate;
   };
@@ -1192,7 +1207,12 @@ export async function postSettings(payload: {
   countryRecheckHours?: number;
   globalRecheckHours?: number;
   display?: Partial<DisplayPrefs>;
-  discord?: { webhookUrl?: string; bests?: boolean; template?: DiscordTemplate | null };
+  discord?: {
+    webhookUrl?: string;
+    bests?: boolean;
+    metrics?: boolean;
+    template?: DiscordTemplate | null;
+  };
   clientId?: string | number;
   clientSecret?: string | number;
   userId?: string | number;

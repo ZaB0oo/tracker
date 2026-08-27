@@ -123,6 +123,7 @@ settingsRouter.post("/settings", (req, res) => {
     discord?: {
       webhookUrl?: unknown;
       bests?: unknown;
+      metrics?: unknown;
       template?: {
         title?: unknown;
         body?: unknown;
@@ -163,6 +164,8 @@ settingsRouter.post("/settings", (req, res) => {
       webhookUrl:
         body.discord.webhookUrl == null ? null : String(body.discord.webhookUrl),
       bests: body.discord.bests == null ? undefined : Boolean(body.discord.bests),
+      metrics:
+        body.discord.metrics == null ? undefined : Boolean(body.discord.metrics),
       template: body.discord.template,
     });
     if (err) return res.status(400).json({ ok: false, error: err });

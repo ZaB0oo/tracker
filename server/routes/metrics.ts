@@ -6,6 +6,7 @@ import { PP_SQL } from "../logic/scoreSql.js";
 import { mapWhere, scoreWhere, type MetricParams } from "../logic/metrics.js";
 import { hasOsuFile, localStarRating } from "../osu/difficulty.js";
 import { parseRulesetParam, poolWhere } from "../logic/rulesets.js";
+import { notifyMetricProgress } from "../notify/discord.js";
 
 const KINDS = ["count", "ranked_score", "std_score", "pp", "total_pp"] as const;
 
@@ -253,6 +254,19 @@ metricsRouter.post("/metrics/reorder", (req, res) => {
   const db = getDb();
   const upd = db.prepare("UPDATE metrics SET sort_order = ? WHERE id = ?");
   ids.forEach((id, i) => upd.run(i + 1, id));
+  res.json({ ok: true });
+});
+
+// "Post progress" button: one embed with the metric's current state and next
+// milestone, behind a shared server-side cooldown (spam-proof by design).
+metricsRouter.post("/metrics/:id/discord", (req, res) => {
+  // conds: the card's one-line condition summary, shown as the embed footer
+  const conds = (req.body as { conds?: unknown } | undefined)?.conds;
+  const error = notifyMetricProgress(
+    Number(req.params.id),
+    typeof conds === "string" && conds.trim() !== "" ? conds : undefined
+  );
+  if (error) return res.status(429).json({ ok: false, error });
   res.json({ ok: true });
 });
 

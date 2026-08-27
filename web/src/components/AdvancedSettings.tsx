@@ -79,6 +79,7 @@ export function AdvancedSettings({
   const [userId, setUserId] = useState<string | null>(null);
   const [webhookUrl, setWebhookUrl] = useState<string | null>(null);
   const [dBests, setDBests] = useState<boolean | null>(null);
+  const [dMetrics, setDMetrics] = useState<boolean | null>(null);
   const [wither, setWither] = useState<boolean | null>(null);
   const [estPerf, setEstPerf] = useState<boolean | null>(null);
   const [testMsg, setTestMsg] = useState<string | null>(null);
@@ -128,6 +129,7 @@ export function AdvancedSettings({
         discord: {
           ...(webhookUrl != null && webhookUrl !== "" ? { webhookUrl } : {}),
           bests: dBests ?? data!.discord.bests,
+          metrics: dMetrics ?? data!.discord.metrics,
         },
       };
       // clamp instead of erroring: typing 91 saves the 60 ceiling
@@ -350,7 +352,8 @@ export function AdvancedSettings({
             onChange={(e) => setEstPerf(e.target.checked)}
           />
           <span title="Off: the Performance tile uses official pp only">
-            Count locally estimated pp in the Performance tile.
+            Count unranked-mod scores in the Performance tile (their pp is
+            estimated locally, the API gives none).
           </span>
         </label>
         </div>
@@ -382,6 +385,14 @@ export function AdvancedSettings({
             onChange={(e) => setDBests(e.target.checked)}
           />
           <span>Notify new bests (first clears and improvements, batched per poll)</span>
+        </label>
+        <label className="adv-toggle">
+          <input
+            type="checkbox"
+            checked={dMetrics ?? data.discord.metrics}
+            onChange={(e) => setDMetrics(e.target.checked)}
+          />
+          <span>Notify metric milestones (each step a metric crosses)</span>
         </label>
         <div className="adv-toggle">
           <button disabled={test.isPending} onClick={() => test.mutate()}>

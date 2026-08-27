@@ -2,6 +2,8 @@ import { config } from "../config.js";
 import { getDb, getState, setState } from "../db/db.js";
 import { getStoredProfile } from "../osu/api.js";
 import { localPp, localStarRating, perfHits } from "../osu/difficulty.js";
+import { evalMetric } from "../logic/metricEval.js";
+import type { MetricParams } from "../logic/metrics.js";
 import { srMods, srModsKey, type ModRef } from "../logic/score.js";
 
 const logError = (e: unknown, ctx: string) =>
@@ -22,6 +24,8 @@ const WEBHOOK_RE = /^https:\/\/(discord\.com|discordapp\.com)\/api\/webhooks\/\d
 export interface DiscordSettings {
   webhookSet: boolean;
   bests: boolean;
+  /** notify each milestone step a custom metric crosses */
+  metrics: boolean;
   template: DiscordTemplate;
 }
 
@@ -77,6 +81,7 @@ export function getDiscordSettings(): DiscordSettings {
   return {
     webhookSet: Boolean(getState("discord_webhook_url")),
     bests: getState("discord_notify_bests") !== "0",
+    metrics: getState("discord_notify_metrics") !== "0",
     template: getDiscordTemplate(),
   };
 }
@@ -84,6 +89,7 @@ export function getDiscordSettings(): DiscordSettings {
 export function setDiscordSettings(o: {
   webhookUrl?: string | null; // "" clears it
   bests?: boolean;
+  metrics?: boolean;
   /** null resets to the default layout */
   template?: {
     title?: unknown;
@@ -100,6 +106,8 @@ export function setDiscordSettings(o: {
     setState("discord_webhook_url", url);
   }
   if (o.bests != null) setState("discord_notify_bests", o.bests ? "1" : "0");
+  if (o.metrics != null)
+    setState("discord_notify_metrics", o.metrics ? "1" : "0");
   if (o.template !== undefined) {
     if (o.template === null) setState("discord_template", "");
     else
@@ -124,6 +132,13 @@ export function setDiscordSettings(o: {
  * line whose placeholders all resolved empty disappears entirely.
  */
 export function renderTemplate(tpl: string, vars: Record<string, string>): string {
+  // a bold wrapper around a value that is already bold (honors carry their
+  // own **) would nest ** and print literal stars; around a timestamp it
+  // breaks the <t:..> rendering. Drop the wrapper in both cases.
+  tpl = tpl.replace(/\*\*\{(\w+)\}\*\*/g, (m, k: string) => {
+    const v = vars[k] ?? "";
+    return v.includes("**") || v.startsWith("<t:") ? `{${k}}` : m;
+  });
   return tpl
     .split("\n")
     .map((line) => {
@@ -559,6 +574,202 @@ async function tryLocalSr(e: BestEvent): Promise<number | null> {
 async function fillComputed(e: BestEvent): Promise<void> {
   if (e.pp == null) e.ppLocal = await tryLocalPp(e);
   if (e.moddedSr == null) e.moddedSr = await tryLocalSr(e);
+}
+
+/**
+ * Metric milestone notifications: after a poll tick that brought new scores,
+ * every stored metric is re-evaluated (cached by scores version, so this is
+ * one aggregate query per metric); crossing a step boundary posts one embed.
+ * Countdown metrics notify on the way DOWN. The last notified boundary lives
+ * in the state table, seeded silently on the first pass so enabling the
+ * option never replays history; regressions (a score wipe) just move the
+ * baseline without posting.
+ *
+ * Anti-spam: a metric with a tiny step (one point of ranked score...) would
+ * otherwise post on every poll tick, so each metric notifies at most once
+ * per cooldown window. Crossings inside the window are absorbed (the floor
+ * still advances); the next notification simply shows the newest boundary.
+ */
+const MILESTONE_COOLDOWN_MS = 30 * 60_000;
+
+const fmtInt = (n: number) => Math.round(n).toLocaleString("en-US");
+
+/**
+ * Text gauge rendered inside an inline code span: smooth 1/8-block precision,
+ * the empty track is the code background itself. `█████████▎        `
+ */
+const PARTIAL = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉"];
+const bar = (pct: number, w: number): string => {
+  const units = Math.round((Math.max(0, Math.min(100, pct)) / 100) * w * 8);
+  const full = Math.floor(units / 8);
+  const part = PARTIAL[units - full * 8];
+  return `${"█".repeat(full)}${part}${" ".repeat(Math.max(0, w - full - (part ? 1 : 0)))}`;
+};
+const gauge = (pct: number, w = 34): string => `\`${bar(pct, w)}\``;
+
+const BREAKDOWN_HEAD: Record<string, string> = {
+  sr: "By star rating",
+  year: "By year",
+  length: "By length",
+  combo: "By max combo",
+  ar: "By AR",
+  od: "By OD",
+  cs: "By CS",
+  hp: "By HP",
+};
+
+/** same bucket labels as the metric card */
+function bucketLabel(dim: string, bucket: number | string): string {
+  const n = Number(bucket);
+  switch (dim) {
+    case "sr":
+      return n >= 10 ? "10★+" : `${n}–${n + 1}★`;
+    case "year":
+      return String(bucket);
+    case "length":
+      return n >= 10 ? "10 min+" : `${n}–${n + 1} min`;
+    case "combo":
+      return n >= 10 ? "2500+" : `${n * 250}–${(n + 1) * 250}`;
+    default:
+      return n >= 10 ? "10" : `${n}–${n + 1}`;
+  }
+}
+
+/**
+ * The embed shared by milestone notifications and the progress button: the
+ * metric card in Discord form — overall gauge, next milestone and, for count
+ * metrics, the per-bucket completion gauges of the card's breakdown.
+ */
+function metricEmbed(
+  title: string,
+  p: MetricParams,
+  r: {
+    count: number;
+    total: number;
+    step: number;
+    byBucket: { bucket: number | string; value: number; total: number }[];
+  },
+  o: { headline?: string; conds?: string }
+): Embed {
+  const down = p.kind === "count" && p.descending === true;
+  const lines: string[] = [];
+  if (o.headline) lines.push(o.headline);
+  if (p.kind === "count" && r.total > 0) {
+    const pct = ((down ? r.total - r.count : r.count) / r.total) * 100;
+    lines.push(
+      `**${fmtInt(r.count)}**${down ? " left" : ""} / ${fmtInt(r.total)} (${pct.toFixed(2)}%${down ? " done" : ""})`
+    );
+    lines.push(gauge(pct));
+  } else {
+    lines.push(`**${fmtInt(r.count)}**${down ? " left" : ""}`);
+  }
+  if (r.step > 0) {
+    const next = down
+      ? Math.max(0, (Math.ceil(r.count / r.step) - 1) * r.step)
+      : (Math.floor(r.count / r.step) + 1) * r.step;
+    lines.push(`Next milestone: **${fmtInt(next)}**`);
+  }
+  if (p.kind === "count") {
+    const dim = p.breakdown ?? "sr";
+    const rows = r.byBucket.filter((b) => b.total > 0);
+    if (rows.length > 0) {
+      lines.push("", `**${BREAKDOWN_HEAD[dim] ?? "Breakdown"}**`);
+      const shown = rows.slice(0, 12);
+      // one code span per row: label, bar and % align in the monospace font
+      const lw = Math.max(...shown.map((b) => bucketLabel(dim, b.bucket).length));
+      for (const b of shown) {
+        const pct = ((down ? b.total - b.value : b.value) / b.total) * 100;
+        lines.push(
+          `\`${bucketLabel(dim, b.bucket).padEnd(lw)} ${bar(pct, 20)}\` **${pct.toFixed(1)}%** · ${fmtInt(b.value)}${down ? " left" : ""} / ${fmtInt(b.total)}`
+        );
+      }
+      if (rows.length > 12) lines.push(`… ${fmtInt(rows.length - 12)} more`);
+    }
+  }
+  const embed: Embed = {
+    title: title.slice(0, 256),
+    description: lines.join("\n").slice(0, 4000),
+    color: PINK,
+  };
+  if (o.conds) embed.footer = { text: o.conds.slice(0, 2048) };
+  return embed;
+}
+
+export function notifyMetricMilestones(): void {
+  if (!getState("discord_webhook_url") || !getDiscordSettings().metrics) return;
+  try {
+    const rows = getDb()
+      .prepare("SELECT id, name, params FROM metrics ORDER BY sort_order, id")
+      .all() as { id: number; name: string; params: string }[];
+    for (const r of rows) {
+      let p: MetricParams;
+      try {
+        p = JSON.parse(r.params) as MetricParams;
+      } catch {
+        continue;
+      }
+      const result = evalMetric(p, "month");
+      const { count, step } = result;
+      if (!(step > 0)) continue;
+      const floor = Math.floor(count / step);
+      const key = `metric_notify_floor_${r.id}`;
+      const prevRaw = getState(key);
+      if (String(floor) !== prevRaw) setState(key, String(floor));
+      if (prevRaw == null || prevRaw === "") continue; // baseline, no replay
+      const prev = Number(prevRaw);
+      if (!Number.isFinite(prev)) continue;
+      const down = p.kind === "count" && p.descending === true;
+      // only the progress direction notifies
+      if (down ? floor >= prev : floor <= prev) continue;
+      const atKey = `metric_notify_at_${r.id}`;
+      const lastAt = Date.parse(getState(atKey) ?? "");
+      if (Number.isFinite(lastAt) && Date.now() - lastAt < MILESTONE_COOLDOWN_MS)
+        continue; // absorbed: the floor moved, the next post shows it
+      setState(atKey, new Date().toISOString());
+      const threshold = (down ? floor + 1 : floor) * step;
+      enqueue({
+        embeds: [
+          metricEmbed(`Milestone: ${r.name}`, p, result, {
+            headline: down
+              ? `Down below **${fmtInt(threshold)}**`
+              : `**${fmtInt(threshold)}** reached`,
+          }),
+        ],
+      });
+    }
+  } catch (e) {
+    logError(e, "discord metric milestones");
+  }
+}
+
+/**
+ * "Post progress" button on a metric card: one embed with the current state
+ * and the next milestone. Server-side cooldown (shared by all metrics) so the
+ * button cannot be spammed into the webhook. Returns an error string, or null.
+ */
+const PROGRESS_COOLDOWN_MS = 60_000;
+
+export function notifyMetricProgress(id: number, conds?: string): string | null {
+  if (!getState("discord_webhook_url")) return "no webhook URL configured";
+  const r = getDb()
+    .prepare("SELECT id, name, params FROM metrics WHERE id = ?")
+    .get(id) as { id: number; name: string; params: string } | undefined;
+  if (!r) return "metric not found";
+  const lastAt = Date.parse(getState("discord_metric_button_at") ?? "");
+  if (Number.isFinite(lastAt) && Date.now() - lastAt < PROGRESS_COOLDOWN_MS) {
+    const left = Math.ceil((PROGRESS_COOLDOWN_MS - (Date.now() - lastAt)) / 1000);
+    return `cooldown: retry in ${left}s`;
+  }
+  let p: MetricParams;
+  try {
+    p = JSON.parse(r.params) as MetricParams;
+  } catch {
+    return "corrupt metric";
+  }
+  const result = evalMetric(p, "month");
+  setState("discord_metric_button_at", new Date().toISOString());
+  enqueue({ embeds: [metricEmbed(`Metric: ${r.name}`, p, result, { conds })] });
+  return null;
 }
 
 /** One message per poll tick (5 embeds max each, Discord allows 10). */

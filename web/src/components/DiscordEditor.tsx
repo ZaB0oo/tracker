@@ -54,9 +54,9 @@ const DEMO: Record<string, string> = {
   od: "OD 8.50",
   hp: "HP 5.00",
   mapstats: "3:42 · 180 BPM · CS 4.00 · AR 9.30 · OD 8.50 · HP 5.00",
-  globaltop: "🌍 Global Top #42",
-  country1: "🥇 country #1",
-  honors: "🌍 Global Top #42 · 🥇 country #1",
+  globaltop: "🌍 **Global Top #42**",
+  country1: "🥇 **country #1**",
+  honors: "🌍 **Global Top #42** · 🥇 **country #1**",
   hits: "{683/12/3/1}",
   h300: "683",
   h100: "12",
@@ -219,16 +219,22 @@ export function DiscordEditor({
     over === JSON.stringify(dst) ? " dc-over" : "";
 
   /** what a placeholder chip displays: the sampled score's real value,
-   * or a dimmed example when this score has none */
-  const chipView = (key: string, br?: boolean): { text: string; demo: boolean } => {
+   * or a dimmed example when this score has none. selfBold marks values that
+   * carry their own ** (honors): bolding them again would print stars, so
+   * their chips are always bold and the toggle is disabled. */
+  const chipView = (
+    key: string,
+    br?: boolean
+  ): { text: string; demo: boolean; selfBold: boolean } => {
     const v = sample?.vars[key] ?? "";
     const demo = v === "";
     let text = demo ? DEMO[key] ?? phLabel(key) : v;
+    const selfBold = text.includes("**");
     text = text
       .replace(/\*\*/g, "")
       .replace(/<t:(\d+):R>/g, (_, s: string) => relTime(Number(s)));
     if (br && key !== "srb") text = `[${text}]`;
-    return { text, demo };
+    return { text, demo, selfBold };
   };
 
   /** drop target for a whole line row: append to its last segment */
@@ -255,19 +261,22 @@ export function DiscordEditor({
           >
             {seg.map((chip, ci) => {
               const view = chip.kind === "ph" ? chipView(chip.key, chip.br) : null;
+              // honors are bold by themselves, timestamps cannot be bolded
+              const noBold =
+                chip.kind === "ph" && (view!.selfBold || chip.key === "when");
               return (
                 <span
                   key={ci}
-                  className={`dc-chip${chip.kind === "ph" && chip.bold ? " bold" : ""}${chip.kind === "text" ? " dc-chip-text" : ""}${view?.demo ? " dc-chip-demo" : ""}${overClass({ at: "chip", li, si, ci })}`}
+                  className={`dc-chip${chip.kind === "ph" && (chip.bold || view!.selfBold) ? " bold" : ""}${chip.kind === "text" ? " dc-chip-text" : ""}${view?.demo ? " dc-chip-demo" : ""}${overClass({ at: "chip", li, si, ci })}`}
                   {...dragProps({ from: "body", li, si, ci })}
                   {...dropProps({ at: "chip", li, si, ci })}
                   onClick={() => {
-                    if (chip.kind === "ph" && li > 0)
+                    if (chip.kind === "ph" && li > 0 && !noBold)
                       updateChip(li, si, ci, { bold: !chip.bold });
                   }}
                   title={
                     chip.kind === "ph"
-                      ? `${phLabel(chip.key)}${view?.demo ? " (no value for this score: example shown, its « · » group is hidden)" : ""}${li > 0 ? " · click: toggle bold" : ""}`
+                      ? `${phLabel(chip.key)}${view?.demo ? " (no value for this score: example shown, its « · » group is hidden)" : ""}${view?.selfBold ? " · always bold" : chip.key === "when" ? " · bold not supported" : li > 0 ? " · click: toggle bold" : ""}`
                       : "Free text"
                   }
                 >
