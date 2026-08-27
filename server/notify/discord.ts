@@ -674,16 +674,23 @@ function metricEmbed(
     const rows = r.byBucket.filter((b) => b.total > 0);
     if (rows.length > 0) {
       lines.push("", `**${BREAKDOWN_HEAD[dim] ?? "Breakdown"}**`);
-      const shown = rows.slice(0, 12);
       // one code span per row: label, bar and % align in the monospace font
-      const lw = Math.max(...shown.map((b) => bucketLabel(dim, b.bucket).length));
-      for (const b of shown) {
+      const lw = Math.max(...rows.map((b) => bucketLabel(dim, b.bucket).length));
+      // every bucket is shown; the only cap is Discord's 4096-char description
+      // (a whole 2007-2026 year breakdown fits with plenty of room)
+      let used = lines.join("\n").length;
+      let dropped = 0;
+      for (const b of rows) {
         const pct = ((down ? b.total - b.value : b.value) / b.total) * 100;
-        lines.push(
-          `\`${bucketLabel(dim, b.bucket).padEnd(lw)} ${bar(pct, 20)}\` **${pct.toFixed(1)}%** · ${fmtInt(b.value)}${down ? " left" : ""} / ${fmtInt(b.total)}`
-        );
+        const row = `\`${bucketLabel(dim, b.bucket).padEnd(lw)} ${bar(pct, 20)}\` **${pct.toFixed(1)}%** · ${fmtInt(b.value)}${down ? " left" : ""} / ${fmtInt(b.total)}`;
+        if (used + row.length + 30 > 3900) {
+          dropped++;
+          continue;
+        }
+        used += row.length + 1;
+        lines.push(row);
       }
-      if (rows.length > 12) lines.push(`… ${fmtInt(rows.length - 12)} more`);
+      if (dropped > 0) lines.push(`… ${fmtInt(dropped)} more`);
     }
   }
   const embed: Embed = {
@@ -749,17 +756,28 @@ export function notifyMetricMilestones(): void {
  */
 const PROGRESS_COOLDOWN_MS = 60_000;
 
+/** "retry in Xs" while the key was stamped less than ms ago, else null */
+function cooldownLeft(key: string, ms: number): string | null {
+  const last = Date.parse(getState(key) ?? "");
+  if (Number.isFinite(last) && Date.now() - last < ms) {
+    const left = Math.ceil((ms - (Date.now() - last)) / 1000);
+    return `cooldown: retry in ${left}s`;
+  }
+  return null;
+}
+const stampCooldown = (key: string): void =>
+  setState(key, new Date().toISOString());
+
 export function notifyMetricProgress(id: number, conds?: string): string | null {
   if (!getState("discord_webhook_url")) return "no webhook URL configured";
   const r = getDb()
     .prepare("SELECT id, name, params FROM metrics WHERE id = ?")
     .get(id) as { id: number; name: string; params: string } | undefined;
   if (!r) return "metric not found";
-  const lastAt = Date.parse(getState("discord_metric_button_at") ?? "");
-  if (Number.isFinite(lastAt) && Date.now() - lastAt < PROGRESS_COOLDOWN_MS) {
-    const left = Math.ceil((PROGRESS_COOLDOWN_MS - (Date.now() - lastAt)) / 1000);
-    return `cooldown: retry in ${left}s`;
-  }
+  // per metric: posting one metric's progress never locks the others
+  const key = `metric_button_at_${id}`;
+  const wait = cooldownLeft(key, PROGRESS_COOLDOWN_MS);
+  if (wait) return wait;
   let p: MetricParams;
   try {
     p = JSON.parse(r.params) as MetricParams;
@@ -767,7 +785,7 @@ export function notifyMetricProgress(id: number, conds?: string): string | null 
     return "corrupt metric";
   }
   const result = evalMetric(p, "month");
-  setState("discord_metric_button_at", new Date().toISOString());
+  stampCooldown(key);
   enqueue({ embeds: [metricEmbed(`Metric: ${r.name}`, p, result, { conds })] });
   return null;
 }
@@ -884,9 +902,12 @@ function sampleBestEvent(ruleset: number, honors = false): BestEvent | null {
 export async function sendTestBest(ruleset: number): Promise<string | null> {
   const url = getState("discord_webhook_url");
   if (!url) return "no webhook URL configured";
+  const wait = cooldownLeft("discord_test_best_at", PROGRESS_COOLDOWN_MS);
+  if (wait) return wait;
   const e = sampleBestEvent(ruleset);
   if (!e) return "no best score to sample yet";
   await fillComputed(e);
+  stampCooldown("discord_test_best_at");
   enqueue({
     content: "**Test**, display a random best",
     embeds: [bestEmbed(e, profileAuthor())],
@@ -927,6 +948,8 @@ export async function sampleBestPreview(
 export async function sendTest(): Promise<string | null> {
   const url = getState("discord_webhook_url");
   if (!url) return "no webhook URL configured";
+  const wait = cooldownLeft("discord_test_at", PROGRESS_COOLDOWN_MS);
+  if (wait) return wait;
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -942,7 +965,9 @@ export async function sendTest(): Promise<string | null> {
         ],
       }),
     });
-    return res.ok ? null : `Discord answered HTTP ${res.status}`;
+    if (!res.ok) return `Discord answered HTTP ${res.status}`;
+    stampCooldown("discord_test_at");
+    return null;
   } catch (e) {
     return String(e);
   }
