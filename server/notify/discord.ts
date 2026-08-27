@@ -1,6 +1,6 @@
 import { config } from "../config.js";
 import { getDb, getState, setState } from "../db/db.js";
-import { getStoredProfile } from "../osu/api.js";
+import { getStoredCountryCode, getStoredProfile } from "../osu/api.js";
 import { localPp, localStarRating, perfHits } from "../osu/difficulty.js";
 import { evalMetric } from "../logic/metricEval.js";
 import type { MetricParams } from "../logic/metrics.js";
@@ -137,7 +137,7 @@ export function renderTemplate(tpl: string, vars: Record<string, string>): strin
   // breaks the <t:..> rendering. Drop the wrapper in both cases.
   tpl = tpl.replace(/\*\*\{(\w+)\}\*\*/g, (m, k: string) => {
     const v = vars[k] ?? "";
-    return v.includes("**") || v.startsWith("<t:") ? `{${k}}` : m;
+    return v === "" || v.includes("**") || v.startsWith("<t:") ? `{${k}}` : m;
   });
   return tpl
     .split("\n")
@@ -441,6 +441,12 @@ export interface BestEvent {
 }
 
 /** everything a template can print about one best (formatted, "" = absent) */
+/** "#1 FR" when the connected account's country is known */
+function countryFirstLabel(): string {
+  const cc = getStoredCountryCode();
+  return cc ? `#1 ${cc}` : "country #1";
+}
+
 function templateVars(e: BestEvent, m: MapRow | undefined): Record<string, string> {
   const mods = parseMods(e.modsJson);
   const sr = e.moddedSr ?? m?.star_rating ?? null;
@@ -489,8 +495,10 @@ function templateVars(e: BestEvent, m: MapRow | undefined): Record<string, strin
       e.globalRank != null && e.globalRank <= 100
         ? `🌍 **Global Top #${e.globalRank}**`
         : "",
+    // "#1 FR" with the connected account's country code (same label as the
+    // tables), generic "country #1" when no profile is stored yet
     country1: e.countryFirst
-      ? `🥇 **country #1**${e.snipedUsername ? ` (sniped **${e.snipedUsername}**)` : ""}`
+      ? `🥇 **${countryFirstLabel()}**${e.snipedUsername ? ` (sniped **${e.snipedUsername}**)` : ""}`
       : "",
   };
   vars.honors = [vars.globaltop, vars.country1].filter(Boolean).join(" · ");

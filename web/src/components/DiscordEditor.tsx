@@ -16,6 +16,7 @@ import {
   type Chip,
   type Segment,
 } from "../discordTemplate";
+import { firstPlaceLabel, useCountryCode } from "../country";
 import { useEscape } from "../useEscape";
 import { DiscordPreview, relTime } from "./DiscordPreview";
 
@@ -55,8 +56,6 @@ const DEMO: Record<string, string> = {
   hp: "HP 5.00",
   mapstats: "3:42 · 180 BPM · CS 4.00 · AR 9.30 · OD 8.50 · HP 5.00",
   globaltop: "🌍 **Global Top #42**",
-  country1: "🥇 **country #1**",
-  honors: "🌍 **Global Top #42** · 🥇 **country #1**",
   hits: "{683/12/3/1}",
   h300: "683",
   h100: "12",
@@ -104,6 +103,7 @@ export function DiscordEditor({
   const [over, setOver] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
+  const country = useCountryCode();
   const { data: sample, isFetching } = useQuery({
     queryKey: ["discord-sample", ruleset, pick.seed, pick.honors],
     queryFn: () => fetchDiscordSample(ruleset, pick.honors),
@@ -228,7 +228,13 @@ export function DiscordEditor({
   ): { text: string; demo: boolean; selfBold: boolean } => {
     const v = sample?.vars[key] ?? "";
     const demo = v === "";
-    let text = demo ? DEMO[key] ?? phLabel(key) : v;
+    // country-aware examples, matching the live "#1 FR" label
+    const c1 = `🥇 **${country ? firstPlaceLabel(country) : "country #1"}**`;
+    const dyn: Record<string, string> = {
+      country1: c1,
+      honors: `${DEMO.globaltop} · ${c1}`,
+    };
+    let text = demo ? dyn[key] ?? DEMO[key] ?? phLabel(key) : v;
     const selfBold = text.includes("**");
     text = text
       .replace(/\*\*/g, "")

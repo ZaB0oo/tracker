@@ -11,7 +11,7 @@ export function renderTemplate(tpl: string, vars: Record<string, string>): strin
   // breaks the <t:..> rendering. Drop the wrapper in both cases.
   tpl = tpl.replace(/\*\*\{(\w+)\}\*\*/g, (m, k: string) => {
     const v = vars[k] ?? "";
-    return v.includes("**") || v.startsWith("<t:") ? `{${k}}` : m;
+    return v === "" || v.includes("**") || v.startsWith("<t:") ? `{${k}}` : m;
   });
   return tpl
     .split("\n")
