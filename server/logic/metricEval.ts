@@ -205,15 +205,22 @@ function evalCount(p: MetricParams, gran: "month" | "day"): MetricResult {
     total += matches ? 1 : -1;
     points.push({ at: r.at, total });
   }
+  const tot = mapTotal(p);
+  // percentage steps resolve against the CURRENT map total (a growing
+  // catalog shifts the thresholds slightly, which is the honest reading)
+  const step =
+    p.stepPct === true && tot > 0
+      ? Math.max(1, Math.round((tot * p.step) / 100))
+      : p.step;
   return {
     count: total,
-    total: mapTotal(p),
-    step: p.step,
+    total: tot,
+    step,
     // countdown metrics: the conditions select the maps still to fix, so the
     // celebrated milestones are downward (900, 800, … 0 left)
     milestones: p.descending
-      ? thresholdsDesc(points, p.step)
-      : thresholds(points, p.step),
+      ? thresholdsDesc(points, step)
+      : thresholds(points, step),
     evolution: p.showEvolution ? bucketEvolution(points, gran) : null,
     byBucket: countByBucket(p),
   };

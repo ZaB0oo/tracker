@@ -90,6 +90,10 @@ export function PlayScatter({
             {c.label}
           </button>
         ))}
+        <span className="scat-legend" title="Pink: the score that counts on the map's leaderboard. Grey: other plays.">
+          <i className="scat-key scat-key-best" /> map's best
+          <i className="scat-key scat-key-other" /> other scores
+        </span>
       </div>
       {pts.length === 0 ? (
         <div className="sess-detail-empty">No {m.label.toLowerCase()} data on these plays.</div>
@@ -137,13 +141,13 @@ export function PlayScatter({
               cx={x(p.t)}
               cy={y(p.v)}
               r="3.5"
-              className="sess-dot"
+              className={`sess-dot${p.s.best ? "" : " sess-dot-other"}`}
               onClick={() => onOpen(p.s.mapId)}
               onMouseEnter={() =>
                 setTip({
                   fx: x(p.t) / W,
                   fy: y(p.v) / H,
-                  text: `${hm(p.s.at)} · ${p.s.title} [${p.s.diff}] · ${m.fmt(p.v)}`,
+                  text: `${hm(p.s.at)} · ${p.s.title} [${p.s.diff}] · ${m.fmt(p.v)}${p.s.best ? " · map's best" : ""}`,
                 })
               }
               onMouseLeave={() => setTip(null)}

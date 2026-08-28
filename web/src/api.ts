@@ -144,6 +144,8 @@ export interface SessionEntry {
   end: string;
   sec: number;
   plays: number;
+  /** scores of the session that are the map's current best */
+  bests: number;
   classic: number;
   maxPp: number | null;
 }
@@ -200,6 +202,10 @@ export interface SessionScore {
   artist: string;
   title: string;
   diff: string;
+  /** 1 when this score is the map's current best (counts on the leaderboard) */
+  best: number;
+  /** 1 when pp is a local estimate (unranked mods: the API gave none) */
+  pp_est: number;
 }
 
 export async function fetchSessionScores(
@@ -350,6 +356,8 @@ export interface ClearRow {
   sr_mods: number | null;
   artist: string;
   title: string;
+  /** 1 when this score is the map's current best (counts on the leaderboard) */
+  best: number;
 }
 
 export async function fetchClears(
@@ -937,6 +945,8 @@ export interface MetricParams {
   invert?: boolean;
   progressMode: "milestone" | "total";
   step: number;
+  /** count metrics: `step` is a PERCENTAGE of the map total, not a map count */
+  stepPct?: boolean;
   showEvolution: boolean;
 }
 export interface Metric {

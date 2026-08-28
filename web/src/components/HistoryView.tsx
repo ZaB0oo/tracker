@@ -90,7 +90,7 @@ function ClearsList({ onCtx, ruleset }: { onCtx: OnMapContext; ruleset: number }
       {rows.map((c, i) => (
         <div
           key={c.id}
-          className={`fr-event${i % 2 ? " row-alt" : ""}`}
+          className={`fr-event${i % 2 ? " row-alt" : ""}${(c as { best?: number }).best ? " row-best" : ""}`}
           onDoubleClick={() =>
             window.open(mapUrl(c.beatmap_id, ruleset), "_blank")
           }

@@ -87,6 +87,8 @@ export interface MetricParams {
   /** "milestone": progress toward the next step. "total": X / all available maps. */
   progressMode: "milestone" | "total";
   step: number;
+  /** count metrics: `step` is a PERCENTAGE of the map total, not a map count */
+  stepPct?: boolean;
   showEvolution: boolean;
 }
 

@@ -33,10 +33,12 @@ function paging(q: Record<string, string | undefined>): {
 
 const CLEARS_SELECT = `SELECT s.id, s.ended_at, s.rank, s.accuracy, s.total_score,
     s.classic_total_score, s.mods, s.rate, s.fc_state, ${PP_SQL} AS pp,
-    s.beatmap_id, b.version, b.star_rating, st.artist, st.title
+    s.beatmap_id, b.version, b.star_rating, st.artist, st.title,
+    CASE WHEN u.best_lazer_score_id = s.id THEN 1 ELSE 0 END AS best
    FROM scores s
    JOIN beatmaps b ON b.id = s.beatmap_id
-   JOIN beatmapsets st ON st.id = b.beatmapset_id`;
+   JOIN beatmapsets st ON st.id = b.beatmapset_id
+   LEFT JOIN beatmap_user u ON u.beatmap_id = s.beatmap_id AND u.ruleset = s.ruleset`;
 
 /**
  * GET /api/clears — history of ALL my scores (not just the bests),

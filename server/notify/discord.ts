@@ -675,7 +675,11 @@ function metricEmbed(
     const next = down
       ? Math.max(0, (Math.ceil(r.count / r.step) - 1) * r.step)
       : (Math.floor(r.count / r.step) + 1) * r.step;
-    lines.push(`Next milestone: **${fmtInt(next)}**`);
+    const pct =
+      p.stepPct === true && p.kind === "count" && r.total > 0
+        ? ` (${((next / r.total) * 100).toFixed(1)}%)`
+        : "";
+    lines.push(`Next milestone: **${fmtInt(next)}**${pct}`);
   }
   if (p.kind === "count") {
     const dim = p.breakdown ?? "sr";

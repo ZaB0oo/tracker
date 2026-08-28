@@ -24,6 +24,8 @@ interface Session {
    * is not zero seconds long */
   sec: number;
   plays: number;
+  /** scores of the session that are the map's current best */
+  bests: number;
   /** classic score gained by the passes (retries all count: it is activity) */
   classic: number;
   maxPp: number | null;
@@ -65,9 +67,11 @@ sessionsRouter.get("/sessions", (req, res) => {
          b.total_length / COALESCE(s.rate, 1) AS len,
          CASE WHEN s.passed = 1
            THEN COALESCE(s.classic_total_score, s.total_score) ELSE 0
-         END AS classic
+         END AS classic,
+         CASE WHEN u.best_lazer_score_id = s.id THEN 1 ELSE 0 END AS best
        FROM scores s
        JOIN beatmaps b ON b.id = s.beatmap_id
+       LEFT JOIN beatmap_user u ON u.beatmap_id = s.beatmap_id AND u.ruleset = ${R}
        WHERE ${WHERE}
        ORDER BY s.ended_at`
     )
@@ -76,6 +80,7 @@ sessionsRouter.get("/sessions", (req, res) => {
     pp: number | null;
     len: number | null;
     classic: number;
+    best: number;
   }[];
 
   const sessions: Session[] = [];
@@ -90,7 +95,7 @@ sessionsRouter.get("/sessions", (req, res) => {
       cur = {
         start: r.at, end: r.at, endMs: t,
         sec: Math.round(r.len ?? 0),
-        plays: 0, classic: 0, maxPp: null,
+        plays: 0, bests: 0, classic: 0, maxPp: null,
       };
       sessions.push(cur);
     } else {
@@ -99,6 +104,7 @@ sessionsRouter.get("/sessions", (req, res) => {
       cur.endMs = t;
     }
     cur.plays++;
+    if (r.best === 1) cur.bests++;
     cur.classic += r.classic;
     if (r.pp != null && (cur.maxPp == null || r.pp > cur.maxPp)) cur.maxPp = r.pp;
   }
@@ -124,8 +130,8 @@ sessionsRouter.get("/sessions", (req, res) => {
     // latest first; endMs was bookkeeping, not payload
     sessions: sessions
       .reverse()
-      .map(({ start, end, sec, plays, classic, maxPp }) => ({
-        start, end, sec, plays, classic, maxPp,
+      .map(({ start, end, sec, plays, bests, classic, maxPp }) => ({
+        start, end, sec, plays, bests, classic, maxPp,
       })),
   };
   sessionsCache.set(cacheKey, { version, payload });
@@ -157,10 +163,13 @@ sessionsRouter.get("/sessions/scores", (req, res) => {
          ${PP_SQL} AS pp, s.mods,
          s.rate, s.fc_state, s.passed, s.max_combo AS combo,
          b.total_length / COALESCE(s.rate, 1) AS len, ${SR} AS sr,
-         st.artist, st.title, b.version AS diff
+         st.artist, st.title, b.version AS diff,
+         CASE WHEN u.best_lazer_score_id = s.id THEN 1 ELSE 0 END AS best,
+         CASE WHEN s.pp IS NULL AND s.pp_local >= 0 THEN 1 ELSE 0 END AS pp_est
        FROM scores s
        JOIN beatmaps b ON b.id = s.beatmap_id
        JOIN beatmapsets st ON st.id = b.beatmapset_id
+       LEFT JOIN beatmap_user u ON u.beatmap_id = s.beatmap_id AND u.ruleset = ${R}
        ${CA}
        WHERE ${sessionWhere(req, R)} AND s.ended_at BETWEEN ? AND ?
        ORDER BY s.ended_at`

@@ -603,7 +603,7 @@ export function MetricBuilder({
             <label>
               every
               <input
-                type="number" min={1} className="mb-step"
+                type="number" min={p.stepPct ? 0.1 : 1} className="mb-step"
                 value={stepStr}
                 onChange={(e) => {
                   const v = e.target.value;
@@ -612,6 +612,18 @@ export function MetricBuilder({
                   if (n > 0) setP((s) => ({ ...s, step: n }));
                 }}
               />
+              {isCount && (
+                <select
+                  value={p.stepPct ? "pct" : "maps"}
+                  title="Milestone unit: a fixed map count, or a percentage of the metric's map pool"
+                  onChange={(e) =>
+                    setP((s) => ({ ...s, stepPct: e.target.value === "pct" }))
+                  }
+                >
+                  <option value="maps">maps</option>
+                  <option value="pct">% of pool</option>
+                </select>
+              )}
             </label>
           )}
           {isCount && (

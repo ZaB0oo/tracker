@@ -210,6 +210,8 @@ metricsRouter.post("/metrics", (req, res) => {
     return res.status(400).json({ ok: false, error: "invalid metric" });
   if (!(Number(params.step) > 0))
     return res.status(400).json({ ok: false, error: "invalid step" });
+  if (params.stepPct === true && !(Number(params.step) <= 100))
+    return res.status(400).json({ ok: false, error: "invalid step (1-100%)" });
   try {
     previewMetric(params); // validates the conditions compile
   } catch (e) {
@@ -235,6 +237,8 @@ metricsRouter.put("/metrics/:id", (req, res) => {
     return res.status(400).json({ ok: false, error: "invalid metric" });
   if (!(Number(params.step) > 0))
     return res.status(400).json({ ok: false, error: "invalid step" });
+  if (params.stepPct === true && !(Number(params.step) <= 100))
+    return res.status(400).json({ ok: false, error: "invalid step (1-100%)" });
   try {
     previewMetric(params);
   } catch (e) {

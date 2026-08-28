@@ -67,7 +67,8 @@ const COLS: {
 }[] = [
   { id: "date", label: "Date", key: (s) => s.start },
   { id: "dur", label: "Duration", num: true, key: (s) => s.sec },
-  { id: "plays", label: "Plays", num: true, key: (s) => s.plays },
+  { id: "plays", label: "Scores", num: true, key: (s) => s.plays },
+  { id: "bests", label: "Bests", num: true, key: (s) => s.bests },
   { id: "score", label: "Score", num: true, key: (s) => s.classic },
   { id: "pp", label: "Best pp", num: true, key: (s) => s.maxPp },
 ];
@@ -211,8 +212,8 @@ function SessionDetail({
         {scSorted.map((s) => (
           <div
             key={s.id}
-            className="sess-score"
-            title="Double-click: open on osu.ppy.sh · right-click: actions"
+            className={`sess-score${s.best ? " row-best" : ""}`}
+            title={`${s.best ? "Map's best score · " : ""}Double-click: open on osu.ppy.sh · right-click: actions`}
             onDoubleClick={() => window.open(mapUrl(s.mapId, ruleset), "_blank")}
             onContextMenu={(e) => {
               e.preventDefault();
@@ -233,7 +234,7 @@ function SessionDetail({
             </span>
             <span className="num">{(s.accuracy * 100).toFixed(2)}%</span>
             <span className="num">{fmtNum(s.classic ?? s.std)}</span>
-            <span className="num">{s.pp != null ? `${s.pp.toFixed(2)}pp` : ""}</span>
+            <span className="num">{s.pp != null ? `${s.pp_est ? "~" : ""}${s.pp.toFixed(2)}pp` : ""}</span>
           </div>
         ))}
       </div>
@@ -428,6 +429,7 @@ export const SessionsPanel = memo(function SessionsPanel({
               </span>
               <span className="num">{dur(x.sec)}</span>
               <span className="num">{fmtNum(x.plays)}</span>
+              <span className="num">{x.bests > 0 ? fmtNum(x.bests) : "—"}</span>
               <span className="num">{x.classic > 0 ? fmtCompact(x.classic) : "—"}</span>
               <span className="num">{x.maxPp != null ? `${x.maxPp.toFixed(2)}pp` : "—"}</span>
             </div>

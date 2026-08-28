@@ -1034,7 +1034,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   color: var(--fg-dim); font-size: 12px; font-variant-numeric: tabular-nums;
 }
 .sess-row {
-  display: grid; grid-template-columns: 1fr 56px 46px 72px 56px;
+  display: grid; grid-template-columns: 1fr 56px 46px 42px 72px 56px;
   gap: 10px; padding: 4px 8px; font-size: 13px;
   font-variant-numeric: tabular-nums; border-radius: 4px; cursor: pointer;
 }
@@ -1076,7 +1076,21 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .sess-chart-wrap { position: relative; overflow-x: clip; }
 .sess-chart svg { width: 100%; height: auto; display: block; }
 .sess-dot { fill: var(--accent); opacity: 0.8; cursor: pointer; }
+/* plays that are NOT the map's current best: neutral grey dots */
+.sess-dot-other { fill: #7d7691; opacity: 0.6; }
 .sess-dot:hover { fill: var(--accent2); opacity: 1; r: 5; }
+.scat-legend {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; color: var(--fg-dim);
+}
+.scat-key {
+  width: 9px; height: 9px; border-radius: 50%; display: inline-block;
+}
+.scat-key-best { background: var(--accent); }
+.scat-key-other { background: #7d7691; margin-left: 10px; }
+/* table rows whose score is the map's current best */
+.sess-score.row-best { box-shadow: inset 2px 0 0 var(--accent); }
+.fr-event.row-best { box-shadow: inset 2px 0 0 var(--accent); }
 /* shaded spans behind the dots: breaks (session detail), active sessions
    (heatmap day view) */
 .scat-break { fill: #ed1121; opacity: 0.12; }
