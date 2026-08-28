@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { PanelSkeleton } from "./Skeleton";
 import { useQuery } from "@tanstack/react-query";
 import { fetchMapNames, fetchScatter, type DashScope, type ScatterPoint } from "../api";
 import { fmtNum } from "../format";
@@ -229,7 +230,7 @@ export const AccScatterPanel = memo(function AccScatterPanel({
     staleTime: Infinity,
   });
 
-  if (!data) return null;
+  if (!data) return <PanelSkeleton lines={8} />;
   const legend =
     mode === "grades"
       ? GRADE_ORDER.map((g, revIdx) => {

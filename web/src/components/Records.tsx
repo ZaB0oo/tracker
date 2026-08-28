@@ -1,4 +1,5 @@
 import { memo, useState } from "react";
+import { PanelSkeleton } from "./Skeleton";
 import { useQuery } from "@tanstack/react-query";
 import { fetchRecords, type DashScope, type RecordEntry } from "../api";
 import { ctxMenuStyle } from "../ctxmenu";
@@ -40,7 +41,7 @@ export const HeroRecords = memo(function HeroRecords({
   });
   const [modalId, setModalId] = useState<number | null>(null);
   const [ctx, setCtx] = useState<{ x: number; y: number; rec: RecordEntry } | null>(null);
-  if (!data) return null;
+  if (!data) return <PanelSkeleton lines={8} />;
   // "6.71★ DT 1.1x": the mods played, with the exact rate when customised
   const star = (r: RecordEntry) =>
     `${(r.value ?? 0).toFixed(2)}★${r.mods?.length ? ` ${r.mods.join(" ")}` : ""}${

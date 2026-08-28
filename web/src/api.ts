@@ -146,6 +146,10 @@ export interface SessionEntry {
   plays: number;
   /** scores of the session that are the map's current best */
   bests: number;
+  /** first-ever clears earned in the session */
+  newClears: number;
+  /** the session's best pp is a local estimate */
+  maxPpEst: number;
   classic: number;
   maxPp: number | null;
 }
@@ -199,6 +203,8 @@ export interface SessionScore {
   sr: number | null;
   /** star rating of the mods played (null: nomod, or not computed yet) */
   sr_mods: number | null;
+  /** the map's max combo (converts: their own), for the combo/max display */
+  map_max_combo: number | null;
   artist: string;
   title: string;
   diff: string;
@@ -206,6 +212,16 @@ export interface SessionScore {
   best: number;
   /** 1 when pp is a local estimate (unranked mods: the API gave none) */
   pp_est: number;
+  /** beatmap status (1 ranked, 2 approved, 4 loved) */
+  map_status: number;
+  /** best classic score on the map BEFORE this play (null: first clear) */
+  prev_best: number | null;
+  /** grade of that previous best (null: first clear) */
+  prev_grade: string | null;
+  /** standardised score of that previous best (null: first clear) */
+  prev_best_std: number | null;
+  /** 1 when the map was already FC before this play */
+  prev_fc: number;
 }
 
 export async function fetchSessionScores(

@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useState } from "react";
+import { PanelSkeleton } from "./Skeleton";
 import { useQuery } from "@tanstack/react-query";
 import {
   fetchPackDetail,
@@ -330,7 +331,7 @@ export const PacksPanel = memo(function PacksPanel({
   // so it follows the cursor from dot to dot.
   const [hovered, setHovered] = useState<PackRow | null>(null);
   const { setWrap, tipRef, tipStyle, clearTip } = useTipPlacement(hovered?.tag);
-  if (!data) return null;
+  if (!data) return <PanelSkeleton lines={8} />;
 
   if (data.synced === 0)
     return (

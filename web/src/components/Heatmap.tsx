@@ -1,4 +1,5 @@
 import { memo, useMemo, useState } from "react";
+import { PanelSkeleton } from "./Skeleton";
 import { mapUrl } from "../rulesets";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -152,7 +153,7 @@ export const HeatmapPanel = memo(function HeatmapPanel({
       };
     });
   }, [year]);
-  if (!data) return null;
+  if (!data) return <PanelSkeleton lines={8} />;
 
   const GRADE_ORDER: Record<string, number> = {
     XH: 7, X: 6, SH: 5, S: 4, A: 3, B: 2, C: 1, D: 0,
@@ -202,6 +203,31 @@ export const HeatmapPanel = memo(function HeatmapPanel({
   }
 
   const sel = tl ? dayStats(tl.points, tl.tiers, selDay) : null;
+
+  // richer day figures from the day's actual plays (same rows as the chart):
+  // net standardised gain, in-map time, best pp, average accuracy
+  const dayAgg = (() => {
+    let stdGained = 0;
+    let inMapSec = 0;
+    let bestPp: number | null = null;
+    let bestPpEst = false;
+    let accSum = 0;
+    let accN = 0;
+    for (const p of daySc) {
+      inMapSec += Math.round(p.len ?? 0);
+      if (p.pp != null && (bestPp == null || p.pp > bestPp)) {
+        bestPp = p.pp;
+        bestPpEst = p.pp_est === 1;
+      }
+      if (!p.passed) continue;
+      accSum += p.accuracy;
+      accN++;
+      const now = p.classic ?? p.std;
+      if (now > (p.prev_best ?? 0))
+        stdGained += Math.max(0, p.std - (p.prev_best_std ?? 0));
+    }
+    return { stdGained, inMapSec, bestPp, bestPpEst, avgAcc: accN ? accSum / accN : null };
+  })();
   const gradeDeltas = tl
     ? tl.tiers
         .map((t, i) => ({ tier: t, d: sel!.grades[i] }))
@@ -372,10 +398,11 @@ export const HeatmapPanel = memo(function HeatmapPanel({
                 </button>
               )}
             </div>
-            {sel == null ? null : sel.clears === 0 && sel.fc === 0 && sel.ranked === 0 && gradeDeltas.length === 0 ? (
+            {sel == null ? null : sel.clears === 0 && sel.fc === 0 && sel.ranked === 0 && gradeDeltas.length === 0 && daySc.length === 0 ? (
               <div className="hm-day-empty">No clears</div>
             ) : (
               <>
+                {(sel.clears > 0 || sel.fc > 0 || sel.ranked > 0 || dayAgg.stdGained > 0) && (
                 <div className="hm-day-summary">
                   <span>
                     <b>+{fmtNum(sel.clears)}</b> clears
@@ -384,9 +411,42 @@ export const HeatmapPanel = memo(function HeatmapPanel({
                     <b>+{fmtNum(sel.fc)}</b> FC
                   </span>
                   <span>
-                    <b>+{fmtCompact(sel.ranked)}</b> ranked
+                    <b>+{fmtNum(sel.ranked)}</b> ranked
                   </span>
+                  {dayAgg.stdGained > 0 && (
+                    <span>
+                      <b>+{fmtNum(dayAgg.stdGained)}</b> standardised
+                    </span>
+                  )}
                 </div>
+                )}
+                {daySc.length > 0 && (
+                  <div className="hm-day-summary hm-day-summary-sub">
+                    <span>
+                      <b>{fmtNum(daySc.length)}</b> scores
+                    </span>
+                    {daySc.filter((p) => p.best === 1).length > 0 && (
+                      <span>
+                        <b>+{fmtNum(daySc.filter((p) => p.best === 1).length)}</b> bests
+                      </span>
+                    )}
+                    {dayAgg.inMapSec > 0 && (
+                      <span>
+                        <b>{Math.floor(dayAgg.inMapSec / 3600) > 0 ? `${Math.floor(dayAgg.inMapSec / 3600)}h${String(Math.floor((dayAgg.inMapSec % 3600) / 60)).padStart(2, "0")}` : `${Math.floor(dayAgg.inMapSec / 60)}min`}</b> in map
+                      </span>
+                    )}
+                    {dayAgg.avgAcc != null && (
+                      <span>
+                        <b>{(dayAgg.avgAcc * 100).toFixed(2)}%</b> avg acc
+                      </span>
+                    )}
+                    {dayAgg.bestPp != null && (
+                      <span>
+                        <b>{dayAgg.bestPpEst ? "~" : ""}{dayAgg.bestPp.toFixed(2)}pp</b> best
+                      </span>
+                    )}
+                  </div>
+                )}
                 {gradeDeltas.length > 0 && (
                   <div className="hm-day-grades">
                     {gradeDeltas.map((g) => (
@@ -411,11 +471,11 @@ export const HeatmapPanel = memo(function HeatmapPanel({
                     <tr>
                       {(
                         [
+                          ["time", "Time"],
                           ["grade", "Grade"],
                           ["title", "Map"],
-                          ["acc", "Acc"],
                           ["sr", "★"],
-                          ["time", "Time"],
+                          ["acc", "Acc"],
                         ] as const
                       ).map(([key, label]) => (
                         <th
@@ -424,7 +484,7 @@ export const HeatmapPanel = memo(function HeatmapPanel({
                           onClick={() => setSort(key)}
                         >
                           {label}
-                          {sortKey === key ? (sortDesc ? " ↓" : " ↑") : ""}
+                          {sortKey === key ? (sortDesc ? " ▼" : " ▲") : ""}
                         </th>
                       ))}
                     </tr>
@@ -442,6 +502,13 @@ export const HeatmapPanel = memo(function HeatmapPanel({
                           setCtx({ x: e.clientX, y: e.clientY, row: r });
                         }}
                       >
+                        <td className="hm-day-map-time">
+                          {new Date(r.ended_at).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            hour12: false,
+                          })}
+                        </td>
                         <td>
                           <GradeBadge grade={r.rank} width={24} />
                         </td>
@@ -460,19 +527,13 @@ export const HeatmapPanel = memo(function HeatmapPanel({
                             )}
                           </div>
                         </td>
-                        <td className="hm-day-map-acc">
-                          {(r.accuracy * 100).toFixed(2)}%
-                        </td>
                         <td className={`hm-day-map-sr${r.sr_mods != null ? " sr-mod" : ""}`}>
                           {(r.sr_mods ?? r.star_rating) != null
                             ? (r.sr_mods ?? r.star_rating)!.toFixed(2)
                             : "—"}
                         </td>
-                        <td className="hm-day-map-time">
-                          {new Date(r.ended_at).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
+                        <td className="hm-day-map-acc">
+                          {(r.accuracy * 100).toFixed(2)}%
                         </td>
                       </tr>
                     ))}

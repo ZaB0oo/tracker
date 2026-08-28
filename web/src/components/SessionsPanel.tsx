@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useState } from "react";
+import { PanelSkeleton } from "./Skeleton";
 import { useQuery } from "@tanstack/react-query";
 import {
   fetchSessions,
@@ -10,7 +11,7 @@ import {
 import { ctxMenuStyle } from "../ctxmenu";
 import { displayGrade, fmtCompact, fmtDate, fmtNum, fmtTime } from "../format";
 import { mapUrl } from "../rulesets";
-import { GRADE_ORDER, type PoolMode } from "../types";
+import { FC_LABELS, GRADE_ORDER, type PoolMode } from "../types";
 import { GradeBadge } from "./GradeBadge";
 import { MapModal } from "./MapModal";
 import { PlayScatter } from "./PlayScatter";
@@ -54,7 +55,10 @@ const SC_COLS: {
   { id: "mods", label: "Mods", key: (s) => modsText(s.mods) },
   { id: "sr", label: "Stars", num: true, key: (s) => s.sr_mods ?? s.sr },
   { id: "acc", label: "Acc", num: true, key: (s) => s.accuracy },
-  { id: "score", label: "Score", num: true, key: (s) => s.classic ?? s.std },
+  { id: "combo", label: "Combo", num: true, key: (s) => s.combo },
+  { id: "fc", label: "FC", key: (s) => -s.fc_state },
+  { id: "classic", label: "Classic", num: true, key: (s) => s.classic },
+  { id: "std", label: "Standardised", num: true, key: (s) => s.std },
   { id: "pp", label: "pp", num: true, key: (s) => s.pp },
 ];
 
@@ -69,6 +73,7 @@ const COLS: {
   { id: "dur", label: "Duration", num: true, key: (s) => s.sec },
   { id: "plays", label: "Scores", num: true, key: (s) => s.plays },
   { id: "bests", label: "Bests", num: true, key: (s) => s.bests },
+  { id: "clears", label: "New", num: true, key: (s) => s.newClears },
   { id: "score", label: "Score", num: true, key: (s) => s.classic },
   { id: "pp", label: "Best pp", num: true, key: (s) => s.maxPp },
 ];
@@ -115,6 +120,32 @@ function SessionDetail({
   const grades = new Map<string, number>();
   for (const s of sc) grades.set(s.rank, (grades.get(s.rank) ?? 0) + 1);
   const passes = sc.filter((s) => s.passed);
+  // Gains, daily-heatmap semantics: what the session changed on the maps'
+  // BEST state, not the raw play count. A tier badge counts when a play
+  // raises the map's grade (the old tier loses one, like the timeline).
+  const tierRank = (g: string | null | undefined) =>
+    g == null ? -1 : GRADE_ORDER.length - 1 - GRADE_ORDER.indexOf(g);
+  const gradeDelta = new Map<string, number>();
+  let newClears = 0;
+  let fcGained = 0;
+  let classicGained = 0;
+  let stdGained = 0;
+  for (const s of sc) {
+    if (!s.passed) continue;
+    if (s.prev_best == null) newClears++;
+    if (s.fc_state <= 1 && !s.prev_fc) fcGained++;
+    // net gain on the map's BEST (loved included: they have leaderboards too)
+    const now = s.classic ?? s.std;
+    if (now > (s.prev_best ?? 0)) {
+      classicGained += now - (s.prev_best ?? 0);
+      stdGained += Math.max(0, s.std - (s.prev_best_std ?? 0));
+    }
+    if (tierRank(s.rank) > tierRank(s.prev_grade)) {
+      gradeDelta.set(s.rank, (gradeDelta.get(s.rank) ?? 0) + 1);
+      if (s.prev_grade)
+        gradeDelta.set(s.prev_grade, (gradeDelta.get(s.prev_grade) ?? 0) - 1);
+    }
+  }
   const sum = (v: (x: (typeof sc)[number]) => number | null) =>
     sc.reduce((a, x) => a + (v(x) ?? 0), 0);
   const max = (v: (x: (typeof sc)[number]) => number | null) =>
@@ -122,10 +153,9 @@ function SessionDetail({
       const n = v(x);
       return n != null && (a == null || n > a) ? n : a;
     }, null);
-  const classicTotal = sum((x) => (x.passed ? (x.classic ?? x.std) : 0));
-  const stdTotal = sum((x) => (x.passed ? x.std : 0));
   const ppTotal = sum((x) => x.pp);
   const ppMax = max((x) => x.pp);
+  const ppMaxEst = sc.some((x) => x.pp != null && x.pp === ppMax && x.pp_est === 1);
   const ppCount = sc.filter((x) => x.pp != null).length;
   // breaks: idle time between one play's end and the next one's start
   // (next end minus its own length), when it exceeds five minutes — the
@@ -150,12 +180,13 @@ function SessionDetail({
   const tiles: [string, string][] = [
     ["Duration", dur(session.sec)],
     ["Scores", fmtNum(sc.length)],
-    ["Classic gained", fmtNum(classicTotal)],
-    ["Avg classic", passes.length ? fmtNum(Math.round(classicTotal / passes.length)) : "—"],
-    ["Standardised gained", fmtNum(stdTotal)],
+    ["New clears", newClears > 0 ? `+${fmtNum(newClears)}` : "—"],
+    ["FC gained", fcGained > 0 ? `+${fmtNum(fcGained)}` : "—"],
+    ["Classic gained", classicGained > 0 ? `+${fmtNum(classicGained)}` : "—"],
+    ["Standardised gained", stdGained > 0 ? `+${fmtNum(stdGained)}` : "—"],
     ["Total pp", ppCount ? `${fmtNum(Math.round(ppTotal))}pp` : "—"],
     ["Avg pp", ppCount ? `${Math.round(ppTotal / ppCount)}pp` : "—"],
-    ["Best pp", ppMax != null ? `${ppMax.toFixed(2)}pp` : "—"],
+    ["Best pp", ppMax != null ? `${ppMaxEst ? "~" : ""}${ppMax.toFixed(2)}pp` : "—"],
     ["Breaks", breaks > 0 ? `${breaks} · ${dur(breakSec)}` : "none"],
     ["Longest break", breaks > 0 ? dur(longestBreak) : "—"],
   ];
@@ -167,11 +198,16 @@ function SessionDetail({
           {hm(session.start)} → {hm(session.end)}
         </span>
         <div className="sess-grades">
-          {/* only the grades this session actually earned, big enough to read */}
-          {GRADE_ORDER.filter((g) => (grades.get(g) ?? 0) > 0).map((g) => (
+          {/* net grade GAINS of the session (a raised map counts for its new
+              tier and leaves its old one), same reading as the daily heatmap */}
+          {GRADE_ORDER.filter((g) => (gradeDelta.get(g) ?? 0) !== 0).map((g) => (
             <span key={g} className="sess-grade" title={displayGrade(g)}>
               <GradeBadge grade={g} width={46} title={displayGrade(g)} />
-              <b className="val-pos">+{fmtNum(grades.get(g) ?? 0)}</b>
+              <b className={(gradeDelta.get(g) ?? 0) < 0 ? "val-neg" : "val-pos"}>
+                {(gradeDelta.get(g) ?? 0) > 0
+                  ? `+${fmtNum(gradeDelta.get(g) ?? 0)}`
+                  : fmtNum(gradeDelta.get(g) ?? 0)}
+              </b>
             </span>
           ))}
         </div>
@@ -233,7 +269,15 @@ function SessionDetail({
               {(s.sr_mods ?? s.sr) != null ? `${(s.sr_mods ?? s.sr)!.toFixed(2)}★` : ""}
             </span>
             <span className="num">{(s.accuracy * 100).toFixed(2)}%</span>
-            <span className="num">{fmtNum(s.classic ?? s.std)}</span>
+            <span className="num">
+              {fmtNum(s.combo)}x
+              {s.map_max_combo != null && s.map_max_combo > 0 && (
+                <i className="sess-sc-max">/{fmtNum(s.map_max_combo)}x</i>
+              )}
+            </span>
+            <span className={`fc fc-${s.fc_state}`}>{FC_LABELS[s.fc_state]}</span>
+            <span className="num">{s.classic != null ? fmtNum(s.classic) : ""}</span>
+            <span className="num">{fmtNum(s.std)}</span>
             <span className="num">{s.pp != null ? `${s.pp_est ? "~" : ""}${s.pp.toFixed(2)}pp` : ""}</span>
           </div>
         ))}
@@ -360,7 +404,7 @@ export const SessionsPanel = memo(function SessionsPanel({
   useEffect(() => {
     if (sel == null && data && data.sessions.length > 0) setSel(data.sessions[0]);
   }, [sel, data]);
-  if (!data) return <div className="panel">Loading sessions…</div>;
+  if (!data) return <PanelSkeleton lines={10} />;
   const s = data.summary;
   if (s.count === 0)
     return <div className="panel">No session yet: sessions appear as scores land.</div>;
@@ -430,8 +474,9 @@ export const SessionsPanel = memo(function SessionsPanel({
               <span className="num">{dur(x.sec)}</span>
               <span className="num">{fmtNum(x.plays)}</span>
               <span className="num">{x.bests > 0 ? fmtNum(x.bests) : "—"}</span>
+              <span className="num">{x.newClears > 0 ? fmtNum(x.newClears) : "—"}</span>
               <span className="num">{x.classic > 0 ? fmtCompact(x.classic) : "—"}</span>
-              <span className="num">{x.maxPp != null ? `${x.maxPp.toFixed(2)}pp` : "—"}</span>
+              <span className="num">{x.maxPp != null ? `${x.maxPpEst ? "~" : ""}${x.maxPp.toFixed(2)}pp` : "—"}</span>
             </div>
           ))}
           </div>

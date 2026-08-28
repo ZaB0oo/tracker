@@ -26,6 +26,10 @@ interface Session {
   plays: number;
   /** scores of the session that are the map's current best */
   bests: number;
+  /** first-ever clears earned in the session */
+  newClears: number;
+  /** the session's best pp is a local estimate */
+  maxPpEst: number;
   /** classic score gained by the passes (retries all count: it is activity) */
   classic: number;
   maxPp: number | null;
@@ -64,6 +68,8 @@ sessionsRouter.get("/sessions", (req, res) => {
   const rows = getDb()
     .prepare(
       `SELECT s.ended_at AS at, ${PP_SQL} AS pp,
+         s.beatmap_id AS bid, s.passed,
+         CASE WHEN s.pp IS NULL AND s.pp_local >= 0 THEN 1 ELSE 0 END AS pp_est,
          b.total_length / COALESCE(s.rate, 1) AS len,
          CASE WHEN s.passed = 1
            THEN COALESCE(s.classic_total_score, s.total_score) ELSE 0
@@ -78,12 +84,16 @@ sessionsRouter.get("/sessions", (req, res) => {
     .all() as {
     at: string;
     pp: number | null;
+    bid: number;
+    passed: number;
+    pp_est: number;
     len: number | null;
     classic: number;
     best: number;
   }[];
 
   const sessions: Session[] = [];
+  const clearedMaps = new Set<number>();
   // real seconds spent in maps (each pass at its rate) — the session `sec`
   // is wall-clock and includes the short pauses
   let playSec = 0;
@@ -95,7 +105,7 @@ sessionsRouter.get("/sessions", (req, res) => {
       cur = {
         start: r.at, end: r.at, endMs: t,
         sec: Math.round(r.len ?? 0),
-        plays: 0, bests: 0, classic: 0, maxPp: null,
+        plays: 0, bests: 0, newClears: 0, maxPpEst: 0, classic: 0, maxPp: null,
       };
       sessions.push(cur);
     } else {
@@ -105,8 +115,16 @@ sessionsRouter.get("/sessions", (req, res) => {
     }
     cur.plays++;
     if (r.best === 1) cur.bests++;
+    // ordered scan over every score: the first pass on a map is its clear
+    if (r.passed === 1 && !clearedMaps.has(r.bid)) {
+      clearedMaps.add(r.bid);
+      cur.newClears++;
+    }
     cur.classic += r.classic;
-    if (r.pp != null && (cur.maxPp == null || r.pp > cur.maxPp)) cur.maxPp = r.pp;
+    if (r.pp != null && (cur.maxPp == null || r.pp > cur.maxPp)) {
+      cur.maxPp = r.pp;
+      cur.maxPpEst = r.pp_est;
+    }
   }
 
   let longestSec = 0;
@@ -130,8 +148,8 @@ sessionsRouter.get("/sessions", (req, res) => {
     // latest first; endMs was bookkeeping, not payload
     sessions: sessions
       .reverse()
-      .map(({ start, end, sec, plays, bests, classic, maxPp }) => ({
-        start, end, sec, plays, bests, classic, maxPp,
+      .map(({ start, end, sec, plays, bests, newClears, maxPpEst, classic, maxPp }) => ({
+        start, end, sec, plays, bests, newClears, maxPpEst, classic, maxPp,
       })),
   };
   sessionsCache.set(cacheKey, { version, payload });
@@ -152,6 +170,11 @@ sessionsRouter.get("/sessions/scores", (req, res) => {
   if (!start || !end || Number.isNaN(Date.parse(start)) || Number.isNaN(Date.parse(end)))
     return res.status(400).json({ error: "invalid session bounds" });
   const SR = R === 0 ? "b.star_rating" : "COALESCE(ca.star_rating, b.star_rating)";
+  const MC = R === 0 ? "b.max_combo" : "COALESCE(ca.max_combo, b.max_combo)";
+  // this map's PASSED scores strictly before the row's score (same instant:
+  // lower id first) — the "state of the map before this play"
+  const PRIOR = `s2.beatmap_id = s.beatmap_id AND s2.ruleset = ${R} AND s2.passed = 1
+       AND (s2.ended_at < s.ended_at OR (s2.ended_at = s.ended_at AND s2.id < s.id))`;
   const CA =
     R === 0
       ? ""
@@ -163,9 +186,19 @@ sessionsRouter.get("/sessions/scores", (req, res) => {
          ${PP_SQL} AS pp, s.mods,
          s.rate, s.fc_state, s.passed, s.max_combo AS combo,
          b.total_length / COALESCE(s.rate, 1) AS len, ${SR} AS sr,
-         st.artist, st.title, b.version AS diff,
+         ${MC} AS map_max_combo,
+         st.artist, st.title, b.version AS diff, b.status AS map_status,
          CASE WHEN u.best_lazer_score_id = s.id THEN 1 ELSE 0 END AS best,
-         CASE WHEN s.pp IS NULL AND s.pp_local >= 0 THEN 1 ELSE 0 END AS pp_est
+         CASE WHEN s.pp IS NULL AND s.pp_local >= 0 THEN 1 ELSE 0 END AS pp_est,
+         (SELECT MAX(COALESCE(s2.classic_total_score, s2.total_score))
+            FROM scores s2 WHERE ${PRIOR}) AS prev_best,
+         (SELECT s2.rank FROM scores s2 WHERE ${PRIOR}
+            ORDER BY COALESCE(s2.classic_total_score, s2.total_score) DESC, s2.id
+            LIMIT 1) AS prev_grade,
+         (SELECT s2.total_score FROM scores s2 WHERE ${PRIOR}
+            ORDER BY COALESCE(s2.classic_total_score, s2.total_score) DESC, s2.id
+            LIMIT 1) AS prev_best_std,
+         EXISTS(SELECT 1 FROM scores s2 WHERE ${PRIOR} AND s2.fc_state <= 1) AS prev_fc
        FROM scores s
        JOIN beatmaps b ON b.id = s.beatmap_id
        JOIN beatmapsets st ON st.id = b.beatmapset_id

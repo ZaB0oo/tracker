@@ -38,10 +38,10 @@ const SCORE_COLS: {
   { id: "rate", label: "Rate", right: true, key: (s) => s.rate },
   { id: "multi", label: "Multi", right: true, key: (s) => s.mod_multiplier },
   { id: "acc", label: "Acc", right: true, key: (s) => s.accuracy },
-  { id: "std", label: "Standardised", right: true, key: (s) => s.total_score },
-  { id: "classic", label: "Classic", right: true, key: (s) => s.classic_total_score },
   { id: "combo", label: "Combo", right: true, key: (s) => s.max_combo },
   { id: "fc", label: "FC", key: (s) => -s.fc_state },
+  { id: "classic", label: "Classic", right: true, key: (s) => s.classic_total_score },
+  { id: "std", label: "Standardised", right: true, key: (s) => s.total_score },
   { id: "pp", label: "pp", right: true, key: (s) => effPp(s) },
 ];
 const GRADE_RANK: Record<string, number> = {
@@ -218,12 +218,17 @@ export function MapModal({
                         {s.mod_multiplier != null ? `×${s.mod_multiplier.toFixed(2)}` : ""}
                       </td>
                       <td className="num">{(s.accuracy * 100).toFixed(2)}%</td>
-                      <td className="num">{fmtNum(s.total_score)}</td>
+                      <td className="num">
+                        {fmtNum(s.max_combo)}x
+                        {data.map.max_combo != null && data.map.max_combo > 0 && (
+                          <i className="sess-sc-max">/{fmtNum(data.map.max_combo)}x</i>
+                        )}
+                      </td>
+                      <td className={`fc fc-${s.fc_state}`}>{FC_LABELS[s.fc_state]}</td>
                       <td className="num">
                         {s.classic_total_score != null ? fmtNum(s.classic_total_score) : ""}
                       </td>
-                      <td className="num">{fmtNum(s.max_combo)}x</td>
-                      <td className={`fc fc-${s.fc_state}`}>{FC_LABELS[s.fc_state]}</td>
+                      <td className="num">{fmtNum(s.total_score)}</td>
                       <td
                         className="num"
                         title={s.pp == null && effPp(s) != null ? "Estimated locally (no official pp)" : undefined}
