@@ -68,6 +68,9 @@ export function saveScores(
 
   transaction(() => {
     for (const s of scores) {
+      // fails are not part of the tracker at all: never stored, so nothing
+      // downstream can ever count or display them
+      if (!s.passed) continue;
       if (!existsStmt.get(s.id)) hasNewScore = true;
       const fcState = computeFcState(s, maxCombo, s.ruleset_id ?? ruleset);
       upsertScore.run({

@@ -192,17 +192,59 @@ interface WebhookMessage {
 const queue: WebhookMessage[] = [];
 let draining = false;
 
+/** characters Discord counts toward its 6000-char combined embed cap */
+const embedChars = (e: Embed) =>
+  (e.title?.length ?? 0) +
+  (e.description?.length ?? 0) +
+  (e.footer?.text.length ?? 0) +
+  (e.author?.name.length ?? 0);
+
+/** stay under Discord's 6000 combined cap with margin for serialization */
+const EMBED_BUDGET = 5800;
+
 function enqueue(message: WebhookMessage): void {
   const url = getState("discord_webhook_url");
   if (!url) return;
-  queue.push(message);
-  if (!draining) void drain(url);
+  // Discord caps the COMBINED characters of one message's embeds at 6000
+  // (each embed alone already fits: descriptions are cut at 4000). Five
+  // long custom-template embeds can blow past it and the whole message
+  // would bounce with a 400, so an oversized batch is split here, where
+  // every sender goes through.
+  if (message.embeds.length > 1) {
+    const parts: WebhookMessage[] = [];
+    let cur: Embed[] = [];
+    let chars = 0;
+    for (const e of message.embeds) {
+      const c = embedChars(e);
+      if (cur.length > 0 && chars + c > EMBED_BUDGET) {
+        parts.push({ embeds: cur });
+        cur = [];
+        chars = 0;
+      }
+      cur.push(e);
+      chars += c;
+    }
+    parts.push({ embeds: cur });
+    parts[0].content = message.content;
+    queue.push(...parts);
+  } else {
+    queue.push(message);
+  }
+  if (!draining) void drain();
 }
 
-async function drain(url: string): Promise<void> {
+async function drain(): Promise<void> {
   draining = true;
   try {
     while (queue.length > 0) {
+      // re-read per message: the webhook can be changed (or cleared) while a
+      // long batch drains, and the messages must follow the setting rather
+      // than the URL captured when the queue started
+      const url = getState("discord_webhook_url");
+      if (!url) {
+        queue.length = 0;
+        break;
+      }
       const message = queue[0];
       let attempts = 0;
       for (;;) {
@@ -730,28 +772,48 @@ export function notifyMetricMilestones(): void {
       const result = evalMetric(p, "month");
       const { count, step } = result;
       if (!(step > 0)) continue;
-      const floor = Math.floor(count / step);
+      const down = p.kind === "count" && p.descending === true;
+      // bucket index of the current count: floor going up, CEIL going down,
+      // so landing exactly on a multiple counts as reaching it in both
+      // directions (a countdown hitting "200 left" dead on used to be missed).
+      // Completion (the whole pool: 0 left, or count = total) is its own
+      // virtual bucket past the last step boundary, otherwise a pool whose
+      // size is not a multiple of the step would finish silently.
+      const rawBuck = down ? Math.ceil(count / step) : Math.floor(count / step);
+      const done =
+        p.kind === "count" &&
+        result.total > 0 &&
+        (down ? count <= 0 : count >= result.total);
+      const buck = done ? (down ? -1 : rawBuck + 1) : rawBuck;
       const key = `metric_notify_floor_${r.id}`;
       const prevRaw = getState(key);
-      if (String(floor) !== prevRaw) setState(key, String(floor));
+      // the step is stored with the bucket: bucket indices are meaningless
+      // across steps, so an edited step (or a % step drifting as the pool
+      // grows) re-baselines silently instead of posting phantom milestones
+      const stamp = `${buck}@${step}`;
+      if (stamp !== prevRaw) setState(key, stamp);
       if (prevRaw == null || prevRaw === "") continue; // baseline, no replay
-      const prev = Number(prevRaw);
+      const [prevBuckRaw, prevStepRaw] = prevRaw.split("@");
+      const prev = Number(prevBuckRaw);
       if (!Number.isFinite(prev)) continue;
-      const down = p.kind === "count" && p.descending === true;
+      if (prevStepRaw != null && Number(prevStepRaw) !== step) continue;
       // only the progress direction notifies
-      if (down ? floor >= prev : floor <= prev) continue;
+      if (down ? buck >= prev : buck <= prev) continue;
       const atKey = `metric_notify_at_${r.id}`;
       const lastAt = Date.parse(getState(atKey) ?? "");
       if (Number.isFinite(lastAt) && Date.now() - lastAt < MILESTONE_COOLDOWN_MS)
-        continue; // absorbed: the floor moved, the next post shows it
+        continue; // absorbed: the bucket moved, the next post shows it
       setState(atKey, new Date().toISOString());
-      const threshold = (down ? floor + 1 : floor) * step;
       enqueue({
         embeds: [
           metricEmbed(`Milestone: ${r.name}`, p, result, {
-            headline: down
-              ? `Down below **${fmtInt(threshold)}**`
-              : `**${fmtInt(threshold)}** reached`,
+            headline: done
+              ? down
+                ? "**Completed**: 0 left"
+                : `**Completed**: ${fmtInt(result.total)} / ${fmtInt(result.total)}`
+              : down
+                ? `Down to **${fmtInt(buck * step)}** left`
+                : `**${fmtInt(buck * step)}** reached`,
           }),
         ],
       });
@@ -779,6 +841,8 @@ function cooldownLeft(key: string, ms: number): string | null {
 }
 const stampCooldown = (key: string): void =>
   setState(key, new Date().toISOString());
+/** failed sends give the slot back: fixing a bad URL retries instantly */
+const liftCooldown = (key: string): void => setState(key, "");
 
 export function notifyMetricProgress(id: number, conds?: string): string | null {
   if (!getState("discord_webhook_url")) return "no webhook URL configured";
@@ -916,10 +980,15 @@ export async function sendTestBest(ruleset: number): Promise<string | null> {
   if (!url) return "no webhook URL configured";
   const wait = cooldownLeft("discord_test_best_at", PROGRESS_COOLDOWN_MS);
   if (wait) return wait;
-  const e = sampleBestEvent(ruleset);
-  if (!e) return "no best score to sample yet";
-  await fillComputed(e);
+  // claim the slot BEFORE any await: two quick clicks both passed the check
+  // during fillComputed and posted twice
   stampCooldown("discord_test_best_at");
+  const e = sampleBestEvent(ruleset);
+  if (!e) {
+    liftCooldown("discord_test_best_at");
+    return "no best score to sample yet";
+  }
+  await fillComputed(e);
   enqueue({
     content: "**Test**, display a random best",
     embeds: [bestEmbed(e, profileAuthor())],
@@ -962,6 +1031,9 @@ export async function sendTest(): Promise<string | null> {
   if (!url) return "no webhook URL configured";
   const wait = cooldownLeft("discord_test_at", PROGRESS_COOLDOWN_MS);
   if (wait) return wait;
+  // claim the slot BEFORE the await (double-click posted twice); a failed
+  // send gives it back so a corrected URL can be retested right away
+  stampCooldown("discord_test_at");
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -977,10 +1049,13 @@ export async function sendTest(): Promise<string | null> {
         ],
       }),
     });
-    if (!res.ok) return `Discord answered HTTP ${res.status}`;
-    stampCooldown("discord_test_at");
+    if (!res.ok) {
+      liftCooldown("discord_test_at");
+      return `Discord answered HTTP ${res.status}`;
+    }
     return null;
   } catch (e) {
+    liftCooldown("discord_test_at");
     return String(e);
   }
 }

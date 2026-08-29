@@ -194,6 +194,7 @@ export function FilterBar({
   rangeBadge("combo", "Max combo", "comboMin", "comboMax");
   // then the ones describing my best, in the order of the "My best" group
   rangeBadge("score", "Score", "scoreMin", "scoreMax");
+  rangeBadge("pp", "pp", "ppMin", "ppMax");
   rangeBadge("missing", "Missing", "missingMin", "missingMax");
   rangeBadge("mult", "Multi", "multMin", "multMax", "x");
   rangeBadge("rate", "Rate", "rateMin", "rateMax", "x");
@@ -471,15 +472,27 @@ export function FilterBar({
               step="1"
               lo={0}
             />
+            <Range
+              label="pp"
+              min={local.ppMin}
+              max={local.ppMax}
+              onMin={(v) => set("ppMin", v)}
+              onMax={(v) => set("ppMax", v)}
+              step="0.01"
+              lo={0}
+            />
             {/* How it was played. The mods are the mods OF that best score,
                 not of the map; the multiplier and the rate both derive from
                 them, hence the three side by side. */}
-            <input
-              className="mods-input"
-              placeholder="Mods (HD,DT · NM = nomod)"
-              value={local.mods}
-              onChange={(e) => set("mods", e.target.value.toUpperCase())}
-            />
+            <label className="range mods-field">
+              <span>Mods</span>
+              <input
+                className="mods-input"
+                placeholder="HD,DT · NM = nomod"
+                value={local.mods}
+                onChange={(e) => set("mods", e.target.value.toUpperCase())}
+              />
+            </label>
             <Range
               label="Multi"
               min={local.multMin}

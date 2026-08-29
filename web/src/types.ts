@@ -270,6 +270,7 @@ export interface Filters {
    * Classic / Standardised toggle displays — same unit as the two columns
    * they bound. Sent as classicMin/stdMin by buildTableQuery. */
   scoreMin: string; scoreMax: string;
+  ppMin: string; ppMax: string;
   missingMin: string; missingMax: string;
   /** mod multiplier of the best */
   multMin: string; multMax: string;
@@ -309,6 +310,7 @@ export const DEFAULT_FILTERS: Filters = {
   globalTopMin: "", globalTopMax: "",
   rateMin: "", rateMax: "",
   scoreMin: "", scoreMax: "",
+  ppMin: "", ppMax: "",
   missingMin: "", missingMax: "",
   multMin: "", multMax: "",
   metricMissing: null,

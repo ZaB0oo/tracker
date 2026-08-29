@@ -56,6 +56,9 @@ function thresholds(
   let next = step;
   for (const p of points) {
     while (p.total >= next) {
+      // a pathological step (tiny vs a score sum) must not build millions
+      // of milestones and take the process down with it
+      if (out.length >= 20_000) return out;
       out.push({ threshold: next, at: p.at });
       next += step;
     }
@@ -73,6 +76,7 @@ function thresholdsDesc(
   for (const p of points) {
     if (next == null) next = Math.ceil(p.total / step) * step - step;
     while (next >= 0 && p.total <= next) {
+      if (out.length >= 20_000) return out;
       out.push({ threshold: next, at: p.at });
       next -= step;
     }
@@ -178,7 +182,7 @@ function evalCount(p: MetricParams, gran: "month" | "day"): MetricResult {
   const rows = db
     .prepare(
       `SELECT s.beatmap_id AS bid, s.ended_at AS at,
-         COALESCE(s.classic_total_score, s.total_score) AS v,
+         s.total_score AS v,
          (${scoreWhere(p.score, isInverted(p))}) AS matches
        FROM scores s
        JOIN beatmaps b ON b.id = s.beatmap_id
@@ -241,6 +245,7 @@ function evalRankedScore(p: MetricParams, gran: "month" | "day"): MetricResult {
   const rows = db
     .prepare(
       `SELECT s.beatmap_id AS bid, s.ended_at AS at, ${VAL} AS v,
+         s.total_score AS ord,
          (${scoreWhere(p.score, isInverted(p))}) AS matches
        FROM scores s
        JOIN beatmaps b ON b.id = s.beatmap_id
@@ -250,17 +255,18 @@ function evalRankedScore(p: MetricParams, gran: "month" | "day"): MetricResult {
          AND ${mapWhere(p.map, { ruleset: R, pool: p.pool, keys: p.keys })}
        ORDER BY s.ended_at`
     )
-    .all() as { bid: number; at: string; v: number; matches: number }[];
+    .all() as { bid: number; at: string; v: number; ord: number; matches: number }[];
   // Replay: track each map's running best, and what it contributes. The
   // total can go DOWN (a new best that fails the conditions replaces one
-  // that passed) — the same rule the count metrics follow.
+  // that passed) — the same rule the count metrics follow. Best detection
+  // runs on the standardised score (never NULL, classic is monotone in it).
   const bestVal = new Map<number, number>();
   const contrib = new Map<number, number>();
   let total = 0;
   const points: { at: string; total: number }[] = [];
   for (const r of rows) {
-    if (r.v <= (bestVal.get(r.bid) ?? -1)) continue; // not a new best
-    bestVal.set(r.bid, r.v);
+    if (r.ord <= (bestVal.get(r.bid) ?? -1)) continue; // not a new best
+    bestVal.set(r.bid, r.ord);
     const now = r.matches === 1 ? r.v : 0;
     const before = contrib.get(r.bid) ?? 0;
     if (now === before) continue;
@@ -289,7 +295,7 @@ function evalTotalPp(p: MetricParams, gran: "month" | "day"): MetricResult {
   const R = p.ruleset ?? 0;
   const rows = db
     .prepare(
-      `SELECT s.beatmap_id AS bid, s.ended_at AS at, ${RANKED_CLASSIC} AS v,
+      `SELECT s.beatmap_id AS bid, s.ended_at AS at, s.total_score AS v,
          ${PP_SQL} AS pp,
          (${scoreWhere(p.score, isInverted(p))}) AS matches
        FROM scores s
@@ -411,7 +417,12 @@ export function evalMetric(
   const version = `${scoresVersion()}|pp${ppLocalVersion()}`;
   const key = `${JSON.stringify(p)}|${gran}`;
   const hit = cache.get(key);
-  if (hit && hit.version === version) return hit.result;
+  if (hit && hit.version === version) {
+    // LRU touch: re-insert so a live entry is not first in line for eviction
+    cache.delete(key);
+    cache.set(key, hit);
+    return hit.result;
+  }
   const result =
     p.kind === "ranked_score" || p.kind === "std_score"
       ? evalRankedScore(p, gran)

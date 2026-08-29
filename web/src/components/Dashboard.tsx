@@ -379,7 +379,17 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
       )}
     </h3>
   );
-  if (!buckets?.length) return <div className="panel curve-panel">{title}</div>;
+  if (!buckets?.length)
+    return (
+      <div className="panel curve-panel">
+        {title}
+        {/* still loading: shimmer like the other dashboard panels */}
+        {pastBuckets == null && data == null &&
+          [...Array(6)].map((_, i) => (
+            <div key={i} className="skeleton skeleton-line" />
+          ))}
+      </div>
+    );
   // cumulative missing = sum of missing across all bands <= this one
   const cumByQ = new Map<number, { classic: number; wither: number }>();
   let accC = 0;

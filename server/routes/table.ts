@@ -138,6 +138,8 @@ function buildFilters(
   // multiplier index could not resolve: a bound excludes those, like any other
   // score-derived statistic that was never determined.
   num("multMin", "s.mod_multiplier", ">="); num("multMax", "s.mod_multiplier", "<=");
+  // pp of the best (official, or the local estimate when the API gave none)
+  num("ppMin", PP_SQL, ">="); num("ppMax", PP_SQL, "<=");
   // Maps of one or more metrics (metricMissing=3 or metricMissing=3,7,9): maps
   // matching a metric's MAP conditions whose BEST score does not match its
   // SCORE conditions — the missing maps (leaderboard semantics, same rule as

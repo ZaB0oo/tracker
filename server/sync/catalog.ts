@@ -15,6 +15,7 @@ import {
 } from "../osu/api.js";
 import { RetryableError } from "../osu/rateLimiter.js";
 import { poolGrowth, poolWhere, shortModeName } from "../logic/rulesets.js";
+import { bumpScoresVersion } from "../logic/scoreSql.js";
 import type { ApiBeatmap, ApiBeatmapset } from "../osu/types.js";
 
 const KEEP_STATUSES = new Set([1, 2, 4]); // ranked, approved, loved
@@ -139,6 +140,9 @@ export async function updateCatalogDelta(
     }
   }
   setState("catalog_delta_at", new Date().toISOString());
+  // catalog writes change what the cached payloads say (pool totals, status
+  // filters, new maps): invalidate them like a score write would
+  bumpScoresVersion();
   return newBeatmapIds;
 }
 
@@ -204,6 +208,9 @@ function upsertFullSet(set: ApiBeatmapset): number[] {
       if (isNew) newIds.push(bm.id);
     }
   });
+  // a status/SR change on an existing map matters as much as a new one:
+  // the caches filtering on b.status must not serve the old catalog
+  bumpScoresVersion();
   return newIds;
 }
 
@@ -575,6 +582,7 @@ export async function importCatalogFromApi(
   }
   setState("catalog_imported_at", new Date().toISOString());
   enumMode = null;
+  bumpScoresVersion(); // the pool just changed shape: caches must rebuild
   return counts;
 }
 
@@ -705,5 +713,8 @@ async function enrichMaxComboInner(
     // larger of the two rather than "40000/37057"
     onProgress?.(done, Math.max(total, done));
   }
+  // max_combo / SR just changed on `done` maps: star buckets and combo
+  // columns served from caches must recompute
+  if (done > 0) bumpScoresVersion();
   return done;
 }

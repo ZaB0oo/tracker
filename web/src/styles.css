@@ -254,6 +254,7 @@ h1 { font-size: 21px; margin: 0; }
 .seg button:last-child { border-radius: 0 6px 6px 0; }
 .search { flex: 1; min-width: 220px; }
 .mods-input { width: 120px; }
+.mods-field .mods-input { width: 120px; }
 .global-rank-top { color: #ffd966; }
 .chips { display: flex; gap: 4px; }
 .chip { padding: 4px 11px; border-radius: 13px; }

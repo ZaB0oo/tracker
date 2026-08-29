@@ -194,8 +194,13 @@ metricsRouter.get("/overlay-metrics", (req, res) => {
 
 // Live preview for the builder: count + per-star-rating breakdown, unsaved.
 metricsRouter.post("/metrics/preview", (req, res) => {
+  // same guards as the save routes: an unvalidated step of 0 would spin
+  // the milestone builder forever and hang the process
+  const p = req.body as MetricParams | undefined;
+  if (!p || !KINDS.includes(p.kind) || !(Number(p.step) > 0))
+    return res.status(400).json({ ok: false, error: "invalid metric" });
   try {
-    res.json(previewMetric(req.body as MetricParams));
+    res.json(previewMetric(p));
   } catch (e) {
     res.status(400).json({ ok: false, error: String(e) });
   }
@@ -210,6 +215,10 @@ metricsRouter.post("/metrics", (req, res) => {
     return res.status(400).json({ ok: false, error: "invalid metric" });
   if (!(Number(params.step) > 0))
     return res.status(400).json({ ok: false, error: "invalid step" });
+  if (params.stepPct === true && params.kind !== "count")
+    return res
+      .status(400)
+      .json({ ok: false, error: "percent steps are for count metrics" });
   if (params.stepPct === true && !(Number(params.step) <= 100))
     return res.status(400).json({ ok: false, error: "invalid step (1-100%)" });
   try {
@@ -237,6 +246,10 @@ metricsRouter.put("/metrics/:id", (req, res) => {
     return res.status(400).json({ ok: false, error: "invalid metric" });
   if (!(Number(params.step) > 0))
     return res.status(400).json({ ok: false, error: "invalid step" });
+  if (params.stepPct === true && params.kind !== "count")
+    return res
+      .status(400)
+      .json({ ok: false, error: "percent steps are for count metrics" });
   if (params.stepPct === true && !(Number(params.step) <= 100))
     return res.status(400).json({ ok: false, error: "invalid step (1-100%)" });
   try {

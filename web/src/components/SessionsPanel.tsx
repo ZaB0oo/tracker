@@ -120,11 +120,12 @@ function SessionDetail({
   const grades = new Map<string, number>();
   for (const s of sc) grades.set(s.rank, (grades.get(s.rank) ?? 0) + 1);
   const passes = sc.filter((s) => s.passed);
-  // Gains, daily-heatmap semantics: what the session changed on the maps'
-  // BEST state, not the raw play count. A tier badge counts when a play
-  // raises the map's grade (the old tier loses one, like the timeline).
-  const tierRank = (g: string | null | undefined) =>
-    g == null ? -1 : GRADE_ORDER.length - 1 - GRADE_ORDER.indexOf(g);
+  // Gains, timeline semantics: everything follows the map's BEST state.
+  // Grade and FC only move when the play BEATS the best ("beats" decided on
+  // the standardised score: present on every score, and classic is monotone
+  // in it), and they track the new best's state, so both can go down: a
+  // higher-scoring non-FC over an FC takes the FC away, an S over an SS
+  // takes the SS tier away (+1 S, -1 SS), exactly like the timeline replay.
   const gradeDelta = new Map<string, number>();
   let newClears = 0;
   let fcGained = 0;
@@ -133,17 +134,18 @@ function SessionDetail({
   for (const s of sc) {
     if (!s.passed) continue;
     if (s.prev_best == null) newClears++;
-    if (s.fc_state <= 1 && !s.prev_fc) fcGained++;
-    // net gain on the map's BEST (loved included: they have leaderboards too)
-    const now = s.classic ?? s.std;
-    if (now > (s.prev_best ?? 0)) {
-      classicGained += now - (s.prev_best ?? 0);
-      stdGained += Math.max(0, s.std - (s.prev_best_std ?? 0));
-    }
-    if (tierRank(s.rank) > tierRank(s.prev_grade)) {
-      gradeDelta.set(s.rank, (gradeDelta.get(s.rank) ?? 0) + 1);
-      if (s.prev_grade)
-        gradeDelta.set(s.prev_grade, (gradeDelta.get(s.prev_grade) ?? 0) - 1);
+    if (s.std > (s.prev_best_std ?? 0)) {
+      // net gain on the map's BEST (loved included: they have leaderboards too)
+      classicGained += Math.max(0, (s.classic ?? s.std) - (s.prev_best ?? 0));
+      stdGained += s.std - (s.prev_best_std ?? 0);
+      const fcNow = s.fc_state <= 1;
+      const fcWas = s.prev_best_fc === 1;
+      if (fcNow !== fcWas) fcGained += fcNow ? 1 : -1;
+      if (s.rank !== s.prev_grade) {
+        gradeDelta.set(s.rank, (gradeDelta.get(s.rank) ?? 0) + 1);
+        if (s.prev_grade)
+          gradeDelta.set(s.prev_grade, (gradeDelta.get(s.prev_grade) ?? 0) - 1);
+      }
     }
   }
   const sum = (v: (x: (typeof sc)[number]) => number | null) =>
@@ -181,7 +183,7 @@ function SessionDetail({
     ["Duration", dur(session.sec)],
     ["Scores", fmtNum(sc.length)],
     ["New clears", newClears > 0 ? `+${fmtNum(newClears)}` : "—"],
-    ["FC gained", fcGained > 0 ? `+${fmtNum(fcGained)}` : "—"],
+    ["FC gained", fcGained !== 0 ? `${fcGained > 0 ? "+" : ""}${fmtNum(fcGained)}` : "—"],
     ["Classic gained", classicGained > 0 ? `+${fmtNum(classicGained)}` : "—"],
     ["Standardised gained", stdGained > 0 ? `+${fmtNum(stdGained)}` : "—"],
     ["Total pp", ppCount ? `${fmtNum(Math.round(ppTotal))}pp` : "—"],

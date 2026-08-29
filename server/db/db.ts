@@ -467,6 +467,23 @@ function migrate(d: DatabaseSync): void {
     console.log("[db] migration: FC now describes the best score of each map");
   }
 
+  // Fails are not tracked at all (the importer now drops them before the
+  // insert); purge the ones stored by older versions. Best pointers only
+  // ever referenced passed scores, so nothing needs refreshing.
+  const FAILS_KEY = "fails_purged";
+  const failsDone = (
+    d.prepare("SELECT value FROM sync_state WHERE key = ?").get(FAILS_KEY) as
+      | { value: string }
+      | undefined
+  )?.value;
+  if (failsDone !== "v1") {
+    const n = d.prepare("DELETE FROM scores WHERE passed = 0").run().changes;
+    d.prepare(
+      "INSERT INTO sync_state (key, value) VALUES (?, 'v1') ON CONFLICT(key) DO UPDATE SET value = 'v1'"
+    ).run(FAILS_KEY);
+    console.log(`[db] migration: ${n} stored fail(s) purged`);
+  }
+
   // Both local calculators (modded SR, local pp) answer for the algorithm
   // version EMBEDDED IN rosu-pp: updating the package means new values, so
   // the caches invalidate themselves when its version changes. The "local-rx"

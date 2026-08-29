@@ -50,8 +50,12 @@ packsRouter.get("/packs", (req, res) => {
   const MAPS = mapScope(req, R);
   const key = `packs-${R}-${at ?? "now"}-${MAPS}`;
   const hit = cache.get(key);
-  if (hit && hit.version === version && Date.now() - hit.at < TTL_MS)
+  if (hit && hit.version === version && Date.now() - hit.at < TTL_MS) {
+    // LRU touch: re-insert so a live entry is not first in line for eviction
+    cache.delete(key);
+    cache.set(key, hit);
     return res.json(hit.payload);
+  }
 
   // per-pack aggregates over the maps of its sets, seen from this mode's
   // pool: total diffs, played, cleared, FC'd (only ranked/approved/loved).

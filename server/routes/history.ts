@@ -57,11 +57,12 @@ historyRouter.get("/clears", (req, res) => {
       .prepare(
         `${CLEARS_SELECT}
          WHERE ${POOL} AND b.status IN ${STATUSES} AND s.ruleset = ${R}
+           AND s.passed = 1
            AND date(s.ended_at) = @day AND s.id = (
            SELECT s2.id FROM scores s2
            WHERE s2.beatmap_id = s.beatmap_id AND s2.ruleset = ${R}
-             AND date(s2.ended_at) = @day
-           ORDER BY COALESCE(s2.classic_total_score, s2.total_score) DESC
+             AND s2.passed = 1 AND date(s2.ended_at) = @day
+           ORDER BY COALESCE(s2.classic_total_score, s2.total_score) DESC, s2.id
            LIMIT 1)
          ORDER BY s.ended_at`
       )
@@ -72,7 +73,8 @@ historyRouter.get("/clears", (req, res) => {
         .prepare(
           `SELECT COUNT(DISTINCT s.beatmap_id) c FROM scores s
            JOIN beatmaps b ON b.id = s.beatmap_id
-           WHERE ${POOL} AND b.status IN ${STATUSES} AND s.ruleset = ${R} AND date(s.ended_at) = ?`
+           WHERE ${POOL} AND b.status IN ${STATUSES} AND s.ruleset = ${R}
+             AND s.passed = 1 AND date(s.ended_at) = ?`
         )
         .get(day) as { c: number }
     ).c;
@@ -83,6 +85,7 @@ historyRouter.get("/clears", (req, res) => {
     .prepare(
       `${CLEARS_SELECT}
        WHERE ${POOL} AND b.status IN ${STATUSES} AND s.ruleset = ${R}
+         AND s.passed = 1
        ORDER BY s.ended_at DESC, s.id DESC
        LIMIT ? OFFSET ?`
     )
@@ -92,7 +95,8 @@ historyRouter.get("/clears", (req, res) => {
       .prepare(
         `SELECT COUNT(*) c FROM scores s
          JOIN beatmaps b ON b.id = s.beatmap_id
-         WHERE ${POOL} AND b.status IN ${STATUSES} AND s.ruleset = ${R}`
+         WHERE ${POOL} AND b.status IN ${STATUSES} AND s.ruleset = ${R}
+           AND s.passed = 1`
       )
       .get() as { c: number }
   ).c;

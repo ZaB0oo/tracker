@@ -220,8 +220,8 @@ export interface SessionScore {
   prev_grade: string | null;
   /** standardised score of that previous best (null: first clear) */
   prev_best_std: number | null;
-  /** 1 when the map was already FC before this play */
-  prev_fc: number;
+  /** 1 when that previous best was an FC (null: first clear) */
+  prev_best_fc: number | null;
 }
 
 export async function fetchSessionScores(
@@ -328,7 +328,7 @@ function buildTableQuery(
   for (const k of [
     "srMin", "srMax", "arMin", "arMax", "odMin", "odMax", "hpMin", "hpMax",
     "csMin", "csMax", "lenMin", "lenMax", "comboMin", "comboMax",
-    "globalTopMin", "globalTopMax", "rateMin", "rateMax",
+    "globalTopMin", "globalTopMax", "rateMin", "rateMax", "ppMin", "ppMax",
     "missingMin", "missingMax", "multMin", "multMax",
     "rankedFrom", "rankedTo", "playedFrom", "playedTo",
   ] as const) {

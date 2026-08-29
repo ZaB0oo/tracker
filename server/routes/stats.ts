@@ -60,8 +60,12 @@ statsRouter.get("/stats", (req, res) => {
   // junk query values collapse into one entry instead of growing the cache
   const cacheKey = `${R}|${POOL}|${STATUSES}`;
   const hit = statsCache.get(cacheKey);
-  if (hit && hit.version === version && Date.now() - hit.at < STATS_TTL_MS)
+  if (hit && hit.version === version && Date.now() - hit.at < STATS_TTL_MS) {
+    // LRU touch: re-insert so a live entry is not first in line for eviction
+    statsCache.delete(cacheKey);
+    statsCache.set(cacheKey, hit);
     return res.json(hit.payload);
+  }
 
   ensureMissingFresh();
   const db = getDb();
@@ -410,7 +414,11 @@ statsRouter.get("/skill-curve", (req, res) => {
   const version = scoresVersion();
   const curveKey = `${R}|${POOL}|${STATUSES}|${dim}`;
   const curveHit = curveCache.get(curveKey);
-  if (curveHit && curveHit.version === version) return res.json(curveHit.payload);
+  if (curveHit && curveHit.version === version) {
+    curveCache.delete(curveKey); // LRU touch
+    curveCache.set(curveKey, curveHit);
+    return res.json(curveHit.payload);
+  }
   const D = curveDimSql(R, dim);
   // beatmapsets is only read by the month axis; joining it everywhere cost a
   // PK probe per beatmap and silently dropped any map without a set row from
@@ -588,7 +596,11 @@ statsRouter.get("/timeline", (req, res) => {
   // values collapse into one entry instead of growing the cache
   const cacheKey = `${R}|${POOL}|${STATUSES}`;
   const cached = timelineCache.get(cacheKey);
-  if (cached && cached.version === version) return res.json(cached.payload);
+  if (cached && cached.version === version) {
+    timelineCache.delete(cacheKey); // LRU touch
+    timelineCache.set(cacheKey, cached);
+    return res.json(cached.payload);
+  }
 
   // s.ruleset = R matters as much as the pool: a convert map carries BOTH the
   // osu! score and the mode's score, and counting the wrong one turned another
@@ -1196,8 +1208,11 @@ statsRouter.get("/records", (req, res) => {
   const version = `${scoresVersion()}|pp${ppLocalVersion()}`;
   const cacheKey = `${R}|${POOL}|${STATUSES}|${day ?? "live"}`;
   const hit = recordsCache.get(cacheKey);
-  if (hit && hit.version === version && !hit.srPending)
+  if (hit && hit.version === version && !hit.srPending) {
+    recordsCache.delete(cacheKey); // LRU touch
+    recordsCache.set(cacheKey, hit);
     return res.json(hit.payload);
+  }
 
   const SR = R === 0 ? "b.star_rating" : "COALESCE(ca.star_rating, b.star_rating)";
   const CA =
@@ -1306,6 +1321,8 @@ statsRouter.get("/records", (req, res) => {
     hit.payload.bestFcSr = bestBySr("AND s.fc_state <= 1");
     hit.payload.bestSsSr = bestBySr("AND s.rank IN ('X','XH')");
     hit.srPending = srPending;
+    recordsCache.delete(cacheKey); // LRU touch
+    recordsCache.set(cacheKey, hit);
     return res.json(hit.payload);
   }
 
@@ -1424,7 +1441,11 @@ statsRouter.get("/scatter", (req, res) => {
   const version = `${scoresVersion()}|pp${ppLocalVersion()}`;
   const cacheKey = `${R}|${POOL}|${STATUSES}|${day ?? "live"}`;
   const hit = scatterCache.get(cacheKey);
-  if (hit && hit.version === version) return res.json(hit.payload);
+  if (hit && hit.version === version) {
+    scatterCache.delete(cacheKey); // LRU touch
+    scatterCache.set(cacheKey, hit);
+    return res.json(hit.payload);
+  }
 
   const SR = R === 0 ? "b.star_rating" : "COALESCE(ca.star_rating, b.star_rating)";
   const CA =
@@ -1562,7 +1583,7 @@ statsRouter.get("/overlay", (req, res) => {
          FROM scores s
          JOIN beatmaps b ON b.id = s.beatmap_id
          JOIN beatmapsets st ON st.id = b.beatmapset_id
-         WHERE s.ruleset = ${R} AND ${POOL}
+         WHERE s.ruleset = ${R} AND ${POOL} AND s.passed = 1
          ORDER BY s.ended_at DESC LIMIT 1`
       )
       .get() ?? null) as {

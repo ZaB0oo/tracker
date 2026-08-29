@@ -222,9 +222,8 @@ export const HeatmapPanel = memo(function HeatmapPanel({
       if (!p.passed) continue;
       accSum += p.accuracy;
       accN++;
-      const now = p.classic ?? p.std;
-      if (now > (p.prev_best ?? 0))
-        stdGained += Math.max(0, p.std - (p.prev_best_std ?? 0));
+      if (p.std > (p.prev_best_std ?? 0))
+        stdGained += p.std - (p.prev_best_std ?? 0);
     }
     return { stdGained, inMapSec, bestPp, bestPpEst, avgAcc: accN ? accSum / accN : null };
   })();

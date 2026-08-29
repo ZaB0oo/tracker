@@ -341,6 +341,8 @@ export function MetricBuilder({
                 ...s,
                 kind,
                 step,
+                // percent steps only exist for count metrics
+                stepPct: kind === "count" ? s.stepPct : false,
                 progressMode: kind === "count" ? s.progressMode : "milestone",
               }));
             }}
@@ -603,7 +605,7 @@ export function MetricBuilder({
             <label>
               every
               <input
-                type="number" min={p.stepPct ? 0.1 : 1} className="mb-step"
+                type="number" min={p.stepPct ? 0.1 : 1} step="any" className="mb-step"
                 value={stepStr}
                 onChange={(e) => {
                   const v = e.target.value;

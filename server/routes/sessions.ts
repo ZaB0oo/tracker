@@ -63,7 +63,12 @@ sessionsRouter.get("/sessions", (req, res) => {
   const version = `${scoresVersion()}|pp${ppLocalVersion()}`;
   const cacheKey = `${WHERE}|${gapMin}`;
   const hit = sessionsCache.get(cacheKey);
-  if (hit && hit.version === version) return res.json(hit.payload);
+  if (hit && hit.version === version) {
+    // LRU touch: re-insert so a live entry is not first in line for eviction
+    sessionsCache.delete(cacheKey);
+    sessionsCache.set(cacheKey, hit);
+    return res.json(hit.payload);
+  }
 
   const rows = getDb()
     .prepare(
@@ -78,8 +83,8 @@ sessionsRouter.get("/sessions", (req, res) => {
        FROM scores s
        JOIN beatmaps b ON b.id = s.beatmap_id
        LEFT JOIN beatmap_user u ON u.beatmap_id = s.beatmap_id AND u.ruleset = ${R}
-       WHERE ${WHERE}
-       ORDER BY s.ended_at`
+       WHERE ${WHERE} AND s.passed = 1
+       ORDER BY s.ended_at, s.id`
     )
     .all() as {
     at: string;
@@ -171,8 +176,10 @@ sessionsRouter.get("/sessions/scores", (req, res) => {
     return res.status(400).json({ error: "invalid session bounds" });
   const SR = R === 0 ? "b.star_rating" : "COALESCE(ca.star_rating, b.star_rating)";
   const MC = R === 0 ? "b.max_combo" : "COALESCE(ca.max_combo, b.max_combo)";
-  // this map's PASSED scores strictly before the row's score (same instant:
-  // lower id first) — the "state of the map before this play"
+  // this map's scores strictly before the row's score (same instant: lower
+  // id first) — the "state of the map before this play". Ordering by the
+  // standardised score: present on every row, and classic is monotone in it,
+  // so the winner is the same score refreshBest picks, without scale mixing.
   const PRIOR = `s2.beatmap_id = s.beatmap_id AND s2.ruleset = ${R} AND s2.passed = 1
        AND (s2.ended_at < s.ended_at OR (s2.ended_at = s.ended_at AND s2.id < s.id))`;
   const CA =
@@ -190,22 +197,23 @@ sessionsRouter.get("/sessions/scores", (req, res) => {
          st.artist, st.title, b.version AS diff, b.status AS map_status,
          CASE WHEN u.best_lazer_score_id = s.id THEN 1 ELSE 0 END AS best,
          CASE WHEN s.pp IS NULL AND s.pp_local >= 0 THEN 1 ELSE 0 END AS pp_est,
-         (SELECT MAX(COALESCE(s2.classic_total_score, s2.total_score))
-            FROM scores s2 WHERE ${PRIOR}) AS prev_best,
+         (SELECT COALESCE(s2.classic_total_score, s2.total_score)
+            FROM scores s2 WHERE ${PRIOR}
+            ORDER BY s2.total_score DESC, s2.id LIMIT 1) AS prev_best,
          (SELECT s2.rank FROM scores s2 WHERE ${PRIOR}
-            ORDER BY COALESCE(s2.classic_total_score, s2.total_score) DESC, s2.id
-            LIMIT 1) AS prev_grade,
-         (SELECT s2.total_score FROM scores s2 WHERE ${PRIOR}
-            ORDER BY COALESCE(s2.classic_total_score, s2.total_score) DESC, s2.id
-            LIMIT 1) AS prev_best_std,
-         EXISTS(SELECT 1 FROM scores s2 WHERE ${PRIOR} AND s2.fc_state <= 1) AS prev_fc
+            ORDER BY s2.total_score DESC, s2.id LIMIT 1) AS prev_grade,
+         (SELECT MAX(s2.total_score) FROM scores s2 WHERE ${PRIOR}) AS prev_best_std,
+         (SELECT CASE WHEN s2.fc_state <= 1 THEN 1 ELSE 0 END
+            FROM scores s2 WHERE ${PRIOR}
+            ORDER BY s2.total_score DESC, s2.id LIMIT 1) AS prev_best_fc
        FROM scores s
        JOIN beatmaps b ON b.id = s.beatmap_id
        JOIN beatmapsets st ON st.id = b.beatmapset_id
        LEFT JOIN beatmap_user u ON u.beatmap_id = s.beatmap_id AND u.ruleset = ${R}
        ${CA}
-       WHERE ${sessionWhere(req, R)} AND s.ended_at BETWEEN ? AND ?
-       ORDER BY s.ended_at`
+       WHERE ${sessionWhere(req, R)} AND s.passed = 1
+         AND s.ended_at BETWEEN ? AND ?
+       ORDER BY s.ended_at, s.id`
     )
     .all(start, end) as ({ mapId: number; mods: string } & Record<string, unknown>)[];
   // star rating of the mods played, from the shared cache (misses queued)
