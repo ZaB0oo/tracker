@@ -82,6 +82,8 @@ export const AccScatterPanel = memo(function AccScatterPanel({
   const [zoom, setZoom] = useState<Zoom | null>(null);
   const dragRef = useRef<{ sx: number; sy: number; zoomed: boolean } | null>(null);
   const [dragBox, setDragBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  // middle-button pan: start position + the domain as it was grabbed
+  const panRef = useRef<{ sx: number; sy: number; z: Zoom } | null>(null);
 
   const pts = useMemo(() => data?.points ?? [], [data]);
   // a different point cloud (scope, pool, time machine…) invalidates the zoom
@@ -89,19 +91,27 @@ export const AccScatterPanel = memo(function AccScatterPanel({
   // key of a point in the current colour mode (grade 0-7, or 0/1 for FC)
   const keyOf = (p: ScatterPoint) => (mode === "grades" ? p[4] : p[3] <= 1 ? 0 : 1);
   const isHidden = (p: ScatterPoint) => hidden.has(keyOf(p));
-  // x capped to the 99.5th percentile so a handful of aspire maps do not
-  // squash everything into the left half
+  // Full extent by default: the hardest ranked maps (13-14★) deserve their
+  // place on the axis instead of piling on the right edge. The percentile
+  // cap only kicks in when the tail is OUT OF SCALE with the bulk (aspire
+  // maps in the hundreds of stars would squash everything into a sliver);
+  // capped-out points still pile on the edge, nothing disappears.
   const xMax = useMemo(() => {
     if (pts.length === 0) return 10;
     const srs = pts.map((p) => p[1]).sort((a, b) => a - b);
     const cap = srs[Math.min(srs.length - 1, Math.floor(srs.length * 0.995))];
-    return Math.max(1, Math.ceil(cap * 2) / 2);
+    const top = srs[srs.length - 1];
+    const lim = top <= cap * 3 ? top : cap;
+    return Math.max(1, Math.ceil(lim * 2) / 2);
   }, [pts]);
   // the visible domain: the zoom rectangle, or the full extent
   const dx0 = zoom?.x0 ?? 0;
   const dx1 = zoom?.x1 ?? xMax;
   const da0 = zoom?.a0 ?? ACC_FLOOR;
   const da1 = zoom?.a1 ?? 1;
+  // latest view for the native wheel listener (attached once, reads through)
+  const viewRef = useRef({ dx0, dx1, da0, da1, xMax, width });
+  viewRef.current = { dx0, dx1, da0, da1, xMax, width };
   const x = (sr: number) =>
     L + ((Math.min(sr, dx1) - dx0) / (dx1 - dx0)) * (width - L - RGT);
   const y = (acc: number) =>
@@ -112,17 +122,51 @@ export const AccScatterPanel = memo(function AccScatterPanel({
     zoom == null ||
     (p[1] >= dx0 && p[1] <= dx1 && p[2] >= da0 && p[2] <= da1);
 
-  // the element's real width, kept in sync so the canvas never upscales
+  // The element's real width, kept in sync so the canvas never upscales.
+  // `ready` matters: the first mount renders the skeleton (no canvas), so an
+  // effect run only once would observe nothing and the canvas would stay on
+  // its default width forever, CSS-stretched into fat blurry dots until the
+  // tab was left and reopened. Re-run when the canvas actually exists.
+  const ready = data != null;
   useEffect(() => {
     const el = canvasRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => {
+    const measure = () => {
       const w = el.getBoundingClientRect().width;
       if (w > 0) setWidth(Math.round(w));
-    });
+    };
+    measure(); // no blurry first frame while the observer warms up
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+    // Wheel = zoom on the cursor. A NATIVE non-passive listener: React's
+    // onWheel cannot preventDefault (passive), and the page must not scroll
+    // while zooming the cloud.
+    const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const v = viewRef.current;
+      const rect = el.getBoundingClientRect();
+      const fx = clamp((e.clientX - rect.left - L) / (v.width - L - RGT), 0, 1);
+      const fy = clamp((((e.clientY - rect.top) / rect.height) * H - T) / (H - T - B), 0, 1);
+      const cx = v.dx0 + fx * (v.dx1 - v.dx0);
+      const cy = v.da1 - fy * (v.da1 - v.da0);
+      const k = e.deltaY < 0 ? 0.8 : 1.25;
+      let spanX = (v.dx1 - v.dx0) * k;
+      let spanA = (v.da1 - v.da0) * k;
+      // zoomed all the way back out: return to the plain full view
+      if (spanX >= v.xMax && spanA >= 1 - ACC_FLOOR) return setZoom(null);
+      spanX = clamp(spanX, 0.05, v.xMax);
+      spanA = clamp(spanA, 0.002, 1 - ACC_FLOOR);
+      const x0 = clamp(cx - fx * spanX, 0, v.xMax - spanX);
+      const a1 = clamp(cy + fy * spanA, ACC_FLOOR + spanA, 1);
+      setZoom({ x0, x1: x0 + spanX, a0: a1 - spanA, a1 });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      ro.disconnect();
+      el.removeEventListener("wheel", onWheel);
+    };
+  }, [ready]);
 
   // spatial index for the hover lookup, in logical px
   const grid = useMemo(() => {
@@ -277,11 +321,15 @@ export const AccScatterPanel = memo(function AccScatterPanel({
             FC
           </button>
         </div>
-        {zoom != null && (
-          <button className="scatter-reset" onClick={() => setZoom(null)}>
-            Reset zoom
-          </button>
-        )}
+        <button
+          className="scatter-reset"
+          // the slot is reserved (visibility, not unmount): appearing and
+          // vanishing used to shove the legend sideways on every zoom
+          style={{ visibility: zoom != null ? "visible" : "hidden" }}
+          onClick={() => setZoom(null)}
+        >
+          Reset zoom
+        </button>
         <div className="scatter-legend">
           {legend.map((l) => (
             <button
@@ -308,13 +356,38 @@ export const AccScatterPanel = memo(function AccScatterPanel({
           ref={canvasRef}
           className="scatter-canvas"
           style={{ height: H }}
-          title="Drag a rectangle to zoom"
+          title="Drag a rectangle to zoom · wheel: zoom on the cursor · middle drag: pan"
           onMouseDown={(e) => {
             const { mx, my } = mouseXY(e);
+            if (e.button === 1) {
+              // middle button: grab the view and pan it. Only when zoomed:
+              // panning the full view would turn it into an explicit zoom of
+              // the same domain, which DROPS the edge-piled outliers (the
+              // full view clamps them onto the edges, a zoom clips them)
+              e.preventDefault();
+              if (zoom == null) return;
+              panRef.current = { sx: mx, sy: my, z: { x0: dx0, x1: dx1, a0: da0, a1: da1 } };
+              return;
+            }
+            if (e.button !== 0) return;
             dragRef.current = { sx: mx, sy: my, zoomed: false };
           }}
           onMouseMove={(e) => {
             const { mx, my } = mouseXY(e);
+            const pan = panRef.current;
+            if (pan) {
+              setTip(null);
+              const z = pan.z;
+              const spanX = z.x1 - z.x0;
+              const spanA = z.a1 - z.a0;
+              // pixel delta converted to data units, clamped to the extent
+              const ddx = ((pan.sx - mx) / (width - L - RGT)) * spanX;
+              const dda = ((my - pan.sy) / (H - T - B)) * spanA;
+              const x0 = Math.min(Math.max(0, z.x0 + ddx), xMax - spanX);
+              const a0 = Math.min(Math.max(ACC_FLOOR, z.a0 + dda), 1 - spanA);
+              setZoom({ x0, x1: x0 + spanX, a0, a1: a0 + spanA });
+              return;
+            }
             const drag = dragRef.current;
             if (drag && (Math.abs(mx - drag.sx) > 4 || Math.abs(my - drag.sy) > 4)) {
               setTip(null);
@@ -337,15 +410,21 @@ export const AccScatterPanel = memo(function AccScatterPanel({
             });
           }}
           onMouseUp={(e) => {
+            if (e.button === 1) {
+              panRef.current = null;
+              return;
+            }
             const drag = dragRef.current;
             dragRef.current = null;
             setDragBox(null);
             if (!drag) return;
             const { mx, my } = mouseXY(e);
             if (Math.abs(mx - drag.sx) < 8 || Math.abs(my - drag.sy) < 8) return;
-            const nx0 = Math.max(0, invX(Math.min(mx, drag.sx)));
+            // clamp to the CURRENT domain: a drag started over the axis
+            // gutter must not zoom below it (or under the accuracy floor)
+            const nx0 = Math.max(dx0, invX(Math.min(mx, drag.sx)));
             const nx1 = Math.min(dx1, invX(Math.max(mx, drag.sx)));
-            const na0 = Math.max(0, invY(Math.max(my, drag.sy)));
+            const na0 = Math.max(da0, invY(Math.max(my, drag.sy)));
             const na1 = Math.min(1, invY(Math.min(my, drag.sy)));
             // a sliver of a rectangle would zoom into nothing
             if (nx1 - nx0 < 0.05 || na1 - na0 < 0.002) return;
@@ -359,7 +438,9 @@ export const AccScatterPanel = memo(function AccScatterPanel({
             setTip(null);
             setDragBox(null);
             dragRef.current = null;
+            panRef.current = null;
           }}
+          onAuxClick={(e) => e.preventDefault()}
           onClick={(e) => {
             if (dragRef.current?.zoomed) return;
             const found = findAt(e);

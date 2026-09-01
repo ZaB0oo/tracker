@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { rulesetStatFields } from "../rulesets";
 import { AccScatterPanel } from "./AccScatter";
+import { YearCurvePanel } from "./YearCurve";
 import { fetchSkillCurve, fetchSnapshot, fetchStats, fetchTimeline, type DashScope, type Snapshot, type SnapshotBucket } from "../api";
 import { firstPlaceLabel, useCountryCode } from "../country";
 import { useDisplayPrefs } from "../prefs";
@@ -456,7 +457,7 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
     <div className="panel curve-panel">
       {title}
       <div className="curve-chart">
-        <svg viewBox={`0 0 ${W} ${H}`} onMouseLeave={() => setHover(null)}>
+        <svg key={dim} className="fade-swap" viewBox={`0 0 ${W} ${H}`} onMouseLeave={() => setHover(null)}>
           <defs>
             <linearGradient id="curve-fade" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.35" />
@@ -832,6 +833,8 @@ export function Dashboard({
     refetchInterval: 5 * 60_000,
   });
   const [tmIdx, setTmIdx] = useState<number | null>(null);
+  // heatmap year selector, shared with the year curve below it
+  const [hmYear, setHmYear] = useState(new Date().getUTCFullYear());
   // A scope/pool/mode switch swaps the timeline for one with different
   // points: keep the same DAY engaged instead of the same index (a shorter
   // series — loved has few event days — used to clamp the slider back to
@@ -1269,7 +1272,6 @@ export function Dashboard({
       {points.length > 1 && tab !== "sessions" && (
         <TimeMachineBar points={points} idx={tmIdx} onChange={setTmIdx} />
       )}
-      </div>
       <div className="dash-tabs">
         {DASH_TABS.map(([id, label]) => (
           <button
@@ -1281,6 +1283,8 @@ export function Dashboard({
           </button>
         ))}
       </div>
+      </div>
+      <div className="dash-tab-body fade-swap" key={tab}>
       {tab === "overview" && (
       <>
       {/* Hero: the essentials at a glance */}
@@ -1424,7 +1428,9 @@ export function Dashboard({
         />
       </div>
 
-      <HeatmapPanel cutoffDay={past?.day ?? null} ruleset={ruleset} pool={pool} keys={keys} scope={scope} />
+      <HeatmapPanel cutoffDay={past?.day ?? null} ruleset={ruleset} pool={pool} keys={keys} scope={scope} year={hmYear} onYear={setHmYear} />
+
+      <YearCurvePanel points={timeline?.points ?? []} dimmed={past != null} year={hmYear} />
       </>
       )}
 
@@ -1490,6 +1496,7 @@ export function Dashboard({
         onViewPack={onViewPack && viewPack}
       />
       )}
+      </div>
     </div>
   );
 }

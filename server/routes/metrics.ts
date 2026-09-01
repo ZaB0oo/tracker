@@ -314,13 +314,22 @@ metricsRouter.get("/metrics/:id/pp-top", (req, res) => {
   const bound = isDay
     ? "date(s.ended_at) <= @period"
     : "strftime('%Y-%m', s.ended_at) <= @period";
+  // converts carry their own star rating (a mania play of a std map must
+  // not show the osu! SR): same COALESCE as the dashboard tables
+  const RS = p.ruleset ?? 0;
+  const SR_COL = RS === 0 ? "b.star_rating" : "COALESCE(ca.star_rating, b.star_rating)";
+  const CA_JOIN =
+    RS === 0
+      ? ""
+      : `LEFT JOIN convert_attrs ca ON ca.beatmap_id = b.id AND ca.ruleset = ${RS} AND b.ruleset != ${RS}`;
   const rows = getDb()
     .prepare(
       `SELECT s.beatmap_id, MAX(${PP_SQL}) AS pp, s.rank, s.accuracy, s.mods,
-         s.ended_at, b.version, b.star_rating, st.artist, st.title
+         s.rate, s.ended_at, b.version, ${SR_COL} AS star_rating, st.artist, st.title
        FROM scores s
        JOIN beatmaps b ON b.id = s.beatmap_id
        JOIN beatmapsets st ON st.id = b.beatmapset_id
+       ${CA_JOIN}
        LEFT JOIN beatmap_user u ON u.beatmap_id = b.id AND u.ruleset = ${p.ruleset ?? 0}
        WHERE s.ruleset = ${p.ruleset ?? 0}
          AND ${mapWhere(p.map, { ruleset: p.ruleset ?? 0, pool: p.pool, keys: p.keys })} AND ${scoreWhere(p.score)}

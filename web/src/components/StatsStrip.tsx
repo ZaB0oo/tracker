@@ -1,3 +1,4 @@
+import { StripSkeleton } from "./Skeleton";
 import { memo, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchAuthStatus, fetchRecords, fetchSessions, type DashScope } from "../api";
@@ -53,13 +54,25 @@ export const StatsStrip = memo(function StatsStrip({
     queryKey: ["auth", ruleset],
     queryFn: () => fetchAuthStatus(ruleset),
   });
+  // same split setting as the Sessions tab (persisted there), so the tile
+  // and the tab always count the same sittings; also shares its cache entry
+  let gapRaw = NaN;
+  try {
+    gapRaw = Number(localStorage.getItem("sess-gap"));
+  } catch {
+    /* storage blocked: fall back to the default split */
+  }
+  const gapMin = Number.isFinite(gapRaw) && gapRaw > 0 ? gapRaw : 60;
   const { data: sess } = useQuery({
-    queryKey: ["sessions", ruleset, pool, keys, scope],
-    queryFn: () => fetchSessions(ruleset, pool, keys, scope),
+    queryKey: ["sessions", ruleset, pool, keys, scope, gapMin],
+    queryFn: () => fetchSessions(ruleset, pool, keys, scope, gapMin),
     refetchInterval: 60_000,
   });
   const prefs = useDisplayPrefs();
-  if (!data?.stats || !data.averages) return null;
+  // shimmer while the aggregates load: this strip used to pop in from
+  // nothing, shoving the panels below it down
+  if (!data) return <StripSkeleton />;
+  if (!data.stats || !data.averages) return null;
   const st = data.stats;
   const a = data.averages;
   // under the time machine, only the tracker's own aggregates exist: the

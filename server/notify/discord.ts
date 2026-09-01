@@ -23,6 +23,8 @@ const WEBHOOK_RE = /^https:\/\/(discord\.com|discordapp\.com)\/api\/webhooks\/\d
 
 export interface DiscordSettings {
   webhookSet: boolean;
+  /** the configured webhooks, URL masked for display (token hidden) */
+  webhooks: { url: string; name: string; bests: boolean; metrics: boolean }[];
   bests: boolean;
   /** notify each milestone step a custom metric crosses */
   metrics: boolean;
@@ -77,9 +79,82 @@ function getDiscordTemplate(): DiscordTemplate {
   }
 }
 
+/**
+ * The configured webhooks (url + display name). Stored as a JSON array of
+ * objects; plain strings from the first multi-webhook version and the
+ * historical single-URL key are both read as fallbacks so existing setups
+ * keep working, and everything is rewritten in the new shape on first write.
+ */
+export interface WebhookEntry {
+  url: string;
+  /** display name so several servers stay tellable apart ("" = unnamed) */
+  name: string;
+  /** this webhook receives best-score notifications */
+  bests: boolean;
+  /** this webhook receives metric milestone / progress posts */
+  metrics: boolean;
+}
+
+export function getWebhookEntries(): WebhookEntry[] {
+  const raw = getState("discord_webhook_urls");
+  if (raw) {
+    try {
+      const arr = JSON.parse(raw) as unknown;
+      if (Array.isArray(arr))
+        return arr
+          .map((e): WebhookEntry | null => {
+            if (typeof e === "string")
+              return e ? { url: e, name: "", bests: true, metrics: true } : null;
+            if (e && typeof e === "object" && typeof (e as { url?: unknown }).url === "string") {
+              const o = e as { url: string; name?: unknown; bests?: unknown; metrics?: unknown };
+              return {
+                url: o.url,
+                name: String(o.name ?? "").slice(0, 60),
+                bests: o.bests !== false,
+                metrics: o.metrics !== false,
+              };
+            }
+            return null;
+          })
+          .filter((e): e is WebhookEntry => e != null && e.url !== "");
+    } catch {
+      /* fall through to the legacy key */
+    }
+  }
+  const legacy = getState("discord_webhook_url");
+  return legacy ? [{ url: legacy, name: "", bests: true, metrics: true }] : [];
+}
+
+export function getWebhookUrls(): string[] {
+  return getWebhookEntries().map((e) => e.url);
+}
+
+const MAX_WEBHOOKS = 5;
+
+/** does at least one webhook receive this message kind? */
+function hasKindTarget(kind: "best" | "metric"): boolean {
+  return getWebhookEntries().some((e) => (kind === "best" ? e.bests : e.metrics));
+}
+
+function writeWebhookEntries(list: WebhookEntry[]): void {
+  setState("discord_webhook_urls", JSON.stringify(list.slice(0, MAX_WEBHOOKS)));
+  setState("discord_webhook_url", ""); // the legacy key is retired
+}
+
+/** URL shown in the settings list: webhook id kept, token hidden */
+const maskWebhook = (u: string): string =>
+  u.replace(/(\/api\/webhooks\/\d+\/).+$/, (_m, p: string) => `${p}····${u.slice(-4)}`);
+
 export function getDiscordSettings(): DiscordSettings {
+  const entries = getWebhookEntries();
   return {
-    webhookSet: Boolean(getState("discord_webhook_url")),
+    webhookSet: entries.length > 0,
+    webhooks: entries.map((e) => ({
+      url: maskWebhook(e.url),
+      name: e.name,
+      bests: e.bests,
+      metrics: e.metrics,
+    })),
     bests: getState("discord_notify_bests") !== "0",
     metrics: getState("discord_notify_metrics") !== "0",
     template: getDiscordTemplate(),
@@ -87,7 +162,16 @@ export function getDiscordSettings(): DiscordSettings {
 }
 
 export function setDiscordSettings(o: {
-  webhookUrl?: string | null; // "" clears it
+  webhookUrl?: string | null; // legacy single-URL field: "" clears the list, a URL replaces it
+  /** append one webhook to the list (deduplicated, capped) */
+  webhookAdd?: string;
+  /** display name for the webhook being added */
+  webhookAddName?: string;
+  /** remove the webhook at this index of the stored list */
+  webhookRemoveAt?: number;
+  /** edit the webhook at this index (partial: only given fields change) */
+  webhookUpdateAt?: number;
+  webhookUpdate?: { name?: string; url?: string; bests?: boolean; metrics?: boolean };
   bests?: boolean;
   metrics?: boolean;
   /** null resets to the default layout */
@@ -103,7 +187,52 @@ export function setDiscordSettings(o: {
     const url = o.webhookUrl.trim();
     if (url !== "" && !WEBHOOK_RE.test(url))
       return "invalid webhook URL (expected https://discord.com/api/webhooks/...)";
-    setState("discord_webhook_url", url);
+    writeWebhookEntries(url === "" ? [] : [{ url, name: "", bests: true, metrics: true }]);
+  }
+  if (o.webhookAdd != null) {
+    const url = o.webhookAdd.trim();
+    if (!WEBHOOK_RE.test(url))
+      return "invalid webhook URL (expected https://discord.com/api/webhooks/...)";
+    const list = getWebhookEntries();
+    if (!list.some((e) => e.url === url)) {
+      if (list.length >= MAX_WEBHOOKS) return `${MAX_WEBHOOKS} webhooks max`;
+      list.push({
+        url,
+        name: String(o.webhookAddName ?? "").trim().slice(0, 60),
+        bests: true,
+        metrics: true,
+      });
+      writeWebhookEntries(list);
+    }
+  }
+  if (o.webhookUpdateAt != null && o.webhookUpdate != null) {
+    const list = getWebhookEntries();
+    const i = Math.floor(o.webhookUpdateAt);
+    if (!Number.isInteger(i) || i < 0 || i >= list.length)
+      return "no webhook at this position";
+    const u = o.webhookUpdate;
+    if (u.url != null && u.url.trim() !== "") {
+      const url = u.url.trim();
+      if (!WEBHOOK_RE.test(url))
+        return "invalid webhook URL (expected https://discord.com/api/webhooks/...)";
+      if (list.some((e, j) => j !== i && e.url === url))
+        return "this webhook is already in the list";
+      list[i].url = url;
+    }
+    if (u.name != null) list[i].name = u.name.trim().slice(0, 60);
+    if (u.bests != null) list[i].bests = u.bests;
+    if (u.metrics != null) list[i].metrics = u.metrics;
+    writeWebhookEntries(list);
+  }
+  if (o.webhookRemoveAt != null) {
+    const list = getWebhookEntries();
+    const i = Math.floor(o.webhookRemoveAt);
+    // Number.isInteger also rejects NaN, which passes both < and >= guards
+    // and would make splice silently delete the FIRST webhook
+    if (!Number.isInteger(i) || i < 0 || i >= list.length)
+      return "no webhook at this position";
+    list.splice(i, 1);
+    writeWebhookEntries(list);
   }
   if (o.bests != null) setState("discord_notify_bests", o.bests ? "1" : "0");
   if (o.metrics != null)
@@ -187,6 +316,12 @@ interface Embed {
 interface WebhookMessage {
   content?: string;
   embeds: Embed[];
+  /** what this message is, so per-webhook filters can route it
+   * (undefined: administrative, e.g. a test — goes everywhere) */
+  kind?: "best" | "metric";
+  /** best notifications: the event behind each embed (index-aligned), so a
+   * deferred honors confirmation can edit the already-posted message */
+  meta?: { events: BestEvent[]; author: Embed["author"] | undefined };
 }
 
 const queue: WebhookMessage[] = [];
@@ -203,8 +338,7 @@ const embedChars = (e: Embed) =>
 const EMBED_BUDGET = 5800;
 
 function enqueue(message: WebhookMessage): void {
-  const url = getState("discord_webhook_url");
-  if (!url) return;
+  if (getWebhookUrls().length === 0) return;
   // Discord caps the COMBINED characters of one message's embeds at 6000
   // (each embed alone already fits: descriptions are cut at 4000). Five
   // long custom-template embeds can blow past it and the whole message
@@ -213,18 +347,26 @@ function enqueue(message: WebhookMessage): void {
   if (message.embeds.length > 1) {
     const parts: WebhookMessage[] = [];
     let cur: Embed[] = [];
+    let curEv: BestEvent[] = [];
     let chars = 0;
-    for (const e of message.embeds) {
+    const part = (): WebhookMessage =>
+      message.meta
+        ? { embeds: cur, kind: message.kind, meta: { events: curEv, author: message.meta.author } }
+        : { embeds: cur, kind: message.kind };
+    message.embeds.forEach((e, i) => {
       const c = embedChars(e);
       if (cur.length > 0 && chars + c > EMBED_BUDGET) {
-        parts.push({ embeds: cur });
+        parts.push(part());
         cur = [];
+        curEv = [];
         chars = 0;
       }
       cur.push(e);
+      // the events stay index-aligned with the embeds through the split
+      if (message.meta) curEv.push(message.meta.events[i]);
       chars += c;
-    }
-    parts.push({ embeds: cur });
+    });
+    parts.push(part());
     parts[0].content = message.content;
     queue.push(...parts);
   } else {
@@ -237,45 +379,78 @@ async function drain(): Promise<void> {
   draining = true;
   try {
     while (queue.length > 0) {
-      // re-read per message: the webhook can be changed (or cleared) while a
-      // long batch drains, and the messages must follow the setting rather
-      // than the URL captured when the queue started
-      const url = getState("discord_webhook_url");
-      if (!url) {
+      // re-read per message: the webhook list can change (or be cleared)
+      // while a long batch drains, and the messages must follow the setting
+      // rather than the list captured when the queue started
+      const entries = getWebhookEntries();
+      if (entries.length === 0) {
         queue.length = 0;
         break;
       }
       const message = queue[0];
-      let attempts = 0;
-      for (;;) {
-        attempts++;
-        try {
-          const res = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(message),
-          });
-          if (res.status === 429) {
-            const body = (await res.json().catch(() => null)) as
-              | { retry_after?: number }
-              | null;
-            await sleep(Math.min((body?.retry_after ?? 2) * 1000, 30_000));
-            continue;
-          }
-          if (!res.ok && attempts < 3) {
-            await sleep(2000);
-            continue;
-          }
-          if (!res.ok) logError(`HTTP ${res.status}`, "discord webhook");
-          break;
-        } catch (e) {
-          if (attempts >= 3) {
-            logError(e, "discord webhook");
+      // per-webhook routing: each channel only gets the kinds it asked for
+      const urls = entries
+        .filter((e) =>
+          message.kind === "best" ? e.bests : message.kind === "metric" ? e.metrics : true
+        )
+        .map((e) => e.url);
+      // every configured webhook receives the same message; one failing
+      // channel never blocks the others
+      const targets: { url: string; messageId: string }[] = [];
+      for (const url of urls) {
+        let attempts = 0;
+        for (;;) {
+          attempts++;
+          try {
+            // best notifications ask Discord for the created message back
+            // (?wait=true): its id is what lets a deferred honors
+            // confirmation edit the embed later
+            const postUrl = message.meta
+              ? `${url}${url.includes("?") ? "&" : "?"}wait=true`
+              : url;
+            const res = await fetch(postUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                content: message.content,
+                embeds: message.embeds,
+              }),
+            });
+            if (res.status === 429) {
+              // capped: a webhook permanently answering 429 must not hold
+              // the whole queue hostage
+              if (attempts >= 6) {
+                logError("HTTP 429 (gave up)", "discord webhook");
+                break;
+              }
+              const body = (await res.json().catch(() => null)) as
+                | { retry_after?: number }
+                | null;
+              await sleep(Math.min((body?.retry_after ?? 2) * 1000, 30_000));
+              continue;
+            }
+            if (!res.ok && attempts < 3) {
+              await sleep(2000);
+              continue;
+            }
+            if (!res.ok) logError(`HTTP ${res.status}`, "discord webhook");
+            else if (message.meta) {
+              const body = (await res.json().catch(() => null)) as
+                | { id?: string }
+                | null;
+              if (body?.id) targets.push({ url, messageId: String(body.id) });
+            }
             break;
+          } catch (e) {
+            if (attempts >= 3) {
+              logError(e, "discord webhook");
+              break;
+            }
+            await sleep(2000);
           }
-          await sleep(2000);
         }
       }
+      if (targets.length > 0) registerHonorWatch(targets, message);
       queue.shift();
     }
   } finally {
@@ -284,6 +459,133 @@ async function drain(): Promise<void> {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// ------------------------------------------------------- late honors edits
+// The leaderboards can lag behind a fresh submit: the notification often goes
+// out before the API sees the score on top, and only the deferred confirms
+// (or the sweeps) discover the country #1 / global top afterwards. Each best
+// message is therefore remembered here (webhook message id + its events);
+// when a later check upgrades the honors of a watched map, the posted embed
+// is rebuilt and PATCHed in place, so the message ends up telling the truth.
+
+interface SentBestMessage {
+  /** the same message as posted on each webhook (one id per channel) */
+  targets: { url: string; messageId: string }[];
+  embeds: Embed[];
+}
+const honorWatch = new Map<
+  string, // `${ruleset}:${beatmapId}`
+  {
+    msg: SentBestMessage; // shared by the embeds of one message
+    idx: number;
+    event: BestEvent;
+    author: Embed["author"] | undefined;
+    at: number;
+  }
+>();
+const HONOR_WATCH_TTL_MS = 24 * 3600_000;
+const HONOR_WATCH_MAX = 300;
+
+const hasAllHonors = (e: BestEvent): boolean =>
+  e.countryFirst === true && e.globalRank != null && e.globalRank <= 100;
+
+function pruneHonorWatch(): void {
+  const now = Date.now();
+  for (const [k, v] of honorWatch)
+    if (now - v.at > HONOR_WATCH_TTL_MS) honorWatch.delete(k);
+  while (honorWatch.size > HONOR_WATCH_MAX)
+    honorWatch.delete(honorWatch.keys().next().value!);
+}
+
+function registerHonorWatch(
+  targets: { url: string; messageId: string }[],
+  message: WebhookMessage
+): void {
+  if (!message.meta) return;
+  pruneHonorWatch();
+  const msg: SentBestMessage = { targets, embeds: message.embeds };
+  message.meta.events.forEach((event, idx) => {
+    const key = `${event.ruleset}:${event.beatmapId}`;
+    // a newer best supersedes any older watch on the map: honors discovered
+    // from now on belong to THIS message, never to the superseded one
+    honorWatch.delete(key);
+    if (hasAllHonors(event)) return; // nothing more can arrive
+    honorWatch.set(key, {
+      msg,
+      idx,
+      event,
+      author: message.meta!.author,
+      at: Date.now(),
+    });
+  });
+}
+
+/**
+ * Called by the daemon after every country/global state write: if the map's
+ * best was recently notified WITHOUT one of the honors it now holds, rebuild
+ * that embed and edit the webhook message. Cheap no-op for unwatched maps.
+ */
+export function updateBestHonors(beatmapId: number, ruleset: number): void {
+  const key = `${ruleset}:${beatmapId}`;
+  const w = honorWatch.get(key);
+  if (!w) return;
+  try {
+    const row = getDb()
+      .prepare(
+        "SELECT global_rank, country_first FROM beatmap_user WHERE beatmap_id = ? AND ruleset = ?"
+      )
+      .get(beatmapId, ruleset) as
+      | { global_rank: number | null; country_first: number }
+      | undefined;
+    if (!row) return;
+    const gainedCountry = row.country_first === 1 && w.event.countryFirst !== true;
+    const gainedGlobal =
+      row.global_rank != null &&
+      row.global_rank <= 100 &&
+      !(w.event.globalRank != null && w.event.globalRank <= 100);
+    if (!gainedCountry && !gainedGlobal) return;
+    if (gainedCountry) w.event.countryFirst = true;
+    if (gainedGlobal) w.event.globalRank = row.global_rank;
+    w.msg.embeds[w.idx] = bestEmbed(w.event, w.author);
+    if (hasAllHonors(w.event)) honorWatch.delete(key);
+    void editWebhookMessage(w.msg);
+  } catch (e) {
+    logError(e, "discord honors edit");
+  }
+}
+
+async function editWebhookMessage(msg: SentBestMessage): Promise<void> {
+  for (const t of msg.targets) {
+    for (let attempts = 1; ; attempts++) {
+      try {
+        const res = await fetch(`${t.url}/messages/${t.messageId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ embeds: msg.embeds }),
+        });
+        if (res.status === 429) {
+          if (attempts >= 6) {
+            logError("HTTP 429 (gave up)", "discord honors edit");
+            break;
+          }
+          const body = (await res.json().catch(() => null)) as
+            | { retry_after?: number }
+            | null;
+          await sleep(Math.min((body?.retry_after ?? 2) * 1000, 30_000));
+          continue;
+        }
+        if (!res.ok) logError(`HTTP ${res.status}`, "discord honors edit");
+        break;
+      } catch (e) {
+        if (attempts >= 3) {
+          logError(e, "discord honors edit");
+          break;
+        }
+        await sleep(2000);
+      }
+    }
+  }
+}
 
 // ---------------------------------------------------------------- helpers
 
@@ -757,7 +1059,14 @@ function metricEmbed(
 }
 
 export function notifyMetricMilestones(): void {
-  if (!getState("discord_webhook_url") || !getDiscordSettings().metrics) return;
+  // no metric-subscribed webhook: bail BEFORE stamping cooldowns, otherwise
+  // a crossed milestone is consumed by a message that reaches zero channels
+  if (
+    getWebhookUrls().length === 0 ||
+    !getDiscordSettings().metrics ||
+    !hasKindTarget("metric")
+  )
+    return;
   try {
     const rows = getDb()
       .prepare("SELECT id, name, params FROM metrics ORDER BY sort_order, id")
@@ -805,6 +1114,7 @@ export function notifyMetricMilestones(): void {
         continue; // absorbed: the bucket moved, the next post shows it
       setState(atKey, new Date().toISOString());
       enqueue({
+        kind: "metric",
         embeds: [
           metricEmbed(`Milestone: ${r.name}`, p, result, {
             headline: done
@@ -845,7 +1155,8 @@ const stampCooldown = (key: string): void =>
 const liftCooldown = (key: string): void => setState(key, "");
 
 export function notifyMetricProgress(id: number, conds?: string): string | null {
-  if (!getState("discord_webhook_url")) return "no webhook URL configured";
+  if (getWebhookUrls().length === 0) return "no webhook URL configured";
+  if (!hasKindTarget("metric")) return "no webhook receives metric posts (see the Milestones column)";
   const r = getDb()
     .prepare("SELECT id, name, params FROM metrics WHERE id = ?")
     .get(id) as { id: number; name: string; params: string } | undefined;
@@ -862,7 +1173,7 @@ export function notifyMetricProgress(id: number, conds?: string): string | null 
   }
   const result = evalMetric(p, "month");
   stampCooldown(key);
-  enqueue({ embeds: [metricEmbed(`Metric: ${r.name}`, p, result, { conds })] });
+  enqueue({ kind: "metric", embeds: [metricEmbed(`Metric: ${r.name}`, p, result, { conds })] });
   return null;
 }
 
@@ -888,9 +1199,13 @@ async function notifyBestsAsync(events: BestEvent[]): Promise<void> {
 
   const CHUNK = 5;
   for (let i = 0; i < events.length; i += CHUNK) {
+    const slice = events.slice(i, i + CHUNK);
     enqueue({
+      kind: "best",
       content: events.length > 1 && i === 0 ? `**${summary}**` : undefined,
-      embeds: events.slice(i, i + CHUNK).map((e) => bestEmbed(e, author)),
+      embeds: slice.map((e) => bestEmbed(e, author)),
+      // remembered for the late honors edit (deferred leaderboard confirms)
+      meta: { events: slice, author },
     });
   }
 }
@@ -976,8 +1291,8 @@ function sampleBestEvent(ruleset: number, honors = false): BestEvent | null {
 }
 
 export async function sendTestBest(ruleset: number): Promise<string | null> {
-  const url = getState("discord_webhook_url");
-  if (!url) return "no webhook URL configured";
+  if (getWebhookUrls().length === 0) return "no webhook URL configured";
+  if (!hasKindTarget("best")) return "no webhook receives best notifications (see the Bests column)";
   const wait = cooldownLeft("discord_test_best_at", PROGRESS_COOLDOWN_MS);
   if (wait) return wait;
   // claim the slot BEFORE any await: two quick clicks both passed the check
@@ -990,6 +1305,7 @@ export async function sendTestBest(ruleset: number): Promise<string | null> {
   }
   await fillComputed(e);
   enqueue({
+    kind: "best",
     content: "**Test**, display a random best",
     embeds: [bestEmbed(e, profileAuthor())],
   });
@@ -1027,35 +1343,38 @@ export async function sampleBestPreview(
 
 /** "Send a test message" button in the settings. */
 export async function sendTest(): Promise<string | null> {
-  const url = getState("discord_webhook_url");
-  if (!url) return "no webhook URL configured";
+  const urls = getWebhookUrls();
+  if (urls.length === 0) return "no webhook URL configured";
   const wait = cooldownLeft("discord_test_at", PROGRESS_COOLDOWN_MS);
   if (wait) return wait;
   // claim the slot BEFORE the await (double-click posted twice); a failed
   // send gives it back so a corrected URL can be retested right away
   stampCooldown("discord_test_at");
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        embeds: [
-          {
-            title: "osu! completionist tracker",
-            description: "Test notification: webhook configured correctly ✅",
-            color: PINK,
-            author: profileAuthor(),
-          },
-        ],
-      }),
-    });
-    if (!res.ok) {
-      liftCooldown("discord_test_at");
-      return `Discord answered HTTP ${res.status}`;
+  let firstErr: string | null = null;
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          embeds: [
+            {
+              title: "osu! completionist tracker",
+              description: "Test notification: webhook configured correctly ✅",
+              color: PINK,
+              author: profileAuthor(),
+            },
+          ],
+        }),
+      });
+      if (!res.ok) firstErr ??= `Discord answered HTTP ${res.status}`;
+    } catch (e) {
+      firstErr ??= String(e);
     }
-    return null;
-  } catch (e) {
-    liftCooldown("discord_test_at");
-    return String(e);
   }
+  if (firstErr) {
+    liftCooldown("discord_test_at");
+    return firstErr;
+  }
+  return null;
 }

@@ -193,7 +193,7 @@ function SessionDetail({
     ["Longest break", breaks > 0 ? dur(longestBreak) : "—"],
   ];
   return (
-    <div className="sess-detail">
+    <div className="sess-detail fade-swap" key={session.start}>
       <div className="sess-detail-head">
         <b>{fmtDate(session.start)}</b>
         <span>

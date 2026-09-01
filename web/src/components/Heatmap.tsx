@@ -94,14 +94,24 @@ export const HeatmapPanel = memo(function HeatmapPanel({
   pool = "all",
   keys = [],
   scope = "all",
+  year: yearProp,
+  onYear,
 }: {
   cutoffDay?: string | null;
   ruleset?: number;
   pool?: PoolMode;
   keys?: string[];
   scope?: DashScope;
+  /** controlled year (the overview shares it with the year curve) */
+  year?: number;
+  onYear?: (y: number) => void;
 }) {
-  const [year, setYear] = useState(new Date().getUTCFullYear());
+  const [yearState, setYearState] = useState(new Date().getUTCFullYear());
+  const year = yearProp ?? yearState;
+  const setYear = (y: number) => {
+    setYearState(y);
+    onYear?.(y);
+  };
   const todayIso = new Date().toISOString().slice(0, 10);
   const [selDay, setSelDay] = useState(todayIso);
   const { data } = useQuery({
@@ -259,11 +269,11 @@ export const HeatmapPanel = memo(function HeatmapPanel({
       <div className="heatmap-head">
         <h3>Clears per day</h3>
         <div className="seg">
-          <button disabled={year <= data.years.min} onClick={() => setYear((y) => y - 1)}>
+          <button disabled={year <= data.years.min} onClick={() => setYear(year - 1)}>
             ‹
           </button>
           <button className="active">{year}</button>
-          <button disabled={year >= data.years.max} onClick={() => setYear((y) => y + 1)}>
+          <button disabled={year >= data.years.max} onClick={() => setYear(year + 1)}>
             ›
           </button>
         </div>
@@ -285,7 +295,7 @@ export const HeatmapPanel = memo(function HeatmapPanel({
           )}
         </div>
       </div>
-      <div className="heatmap-wrap">
+      <div className="heatmap-wrap fade-swap" key={year}>
         <svg viewBox={`0 0 ${W} ${H}`} className="heatmap-svg" width="100%">
         {MONTHS.map((m, i) => {
           const first = Date.UTC(year, i, 1);
@@ -388,7 +398,7 @@ export const HeatmapPanel = memo(function HeatmapPanel({
       </div>
 
         {(sel != null || ruleset !== 0) && (
-          <div className="hm-day">
+          <div className="hm-day fade-swap" key={selDay}>
             <div className="hm-day-head">
               <b>{selDay === todayIso ? "Today" : fmtDate(selDay)}</b>
               {selDay !== todayIso && (
@@ -546,7 +556,7 @@ export const HeatmapPanel = memo(function HeatmapPanel({
       {/* the selected day unfolded over the full panel width: one dot per
           play across 24h, the active spans shaded */}
       {daySc.length > 1 && (
-        <div className="hm-intraday">
+        <div className="hm-intraday fade-swap" key={`i-${selDay}`}>
           <div className="hm-intraday-head">
             <b>{selDay === todayIso ? "Today" : fmtDate(selDay)}</b>
             <span>day timeline</span>

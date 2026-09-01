@@ -212,6 +212,8 @@ export function MetricBuilder({
   const [idsText, setIdsText] = useState(
     edit?.params.map.ids?.length ? edit.params.map.ids.join("\n") : ""
   );
+  // the form got long: one tab per subject, the live preview always visible
+  const [mbTab, setMbTab] = useState<"score" | "maps" | "display">("score");
   const [preview, setPreview] = useState<{
     count: number;
     byBucket: { bucket: number | string; value: number; total: number }[];
@@ -279,10 +281,18 @@ export function MetricBuilder({
   // Debounced live preview.
   const paramsKey = useMemo(() => JSON.stringify(p), [p]);
   useEffect(() => {
+    // `live` also guards the in-flight response: without it, a slower
+    // request from OLDER params could land last and win over the newer one
+    let live = true;
     const t = setTimeout(() => {
-      previewMetric(p).then(setPreview).catch(() => setPreview(null));
+      previewMetric(p)
+        .then((r) => live && setPreview(r))
+        .catch(() => live && setPreview(null));
     }, 500);
-    return () => clearTimeout(t);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
   }, [paramsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = useMutation({
@@ -355,7 +365,26 @@ export function MetricBuilder({
           </select>
         </div>
 
-        {hasScoreConds && (
+        <div className="set-tabs mb-tabs">
+          {(
+            [
+              ["score", "Score conditions"],
+              ["maps", "Map pool"],
+              ["display", "Display"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              className={mbTab === id ? "active" : ""}
+              onClick={() => setMbTab(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="mb-body fade-swap" key={mbTab}>
+        {mbTab === "score" && hasScoreConds && (
           <>
             <div className="mb-title">
               {isCount
@@ -490,6 +519,8 @@ export function MetricBuilder({
           </>
         )}
 
+        {mbTab === "maps" && (
+        <>
         <div className="mb-title">On maps matching…</div>
         {/* Same scope controls as the dashboard: which maps of the mode the
             metric counts. Saved WITH the metric — a metric is a definition,
@@ -587,6 +618,11 @@ export function MetricBuilder({
           )}
         </Section>
 
+        </>
+        )}
+
+        {mbTab === "display" && (
+        <>
         <div className="mb-title">Display</div>
         <div className="mb-inline">
           <label>
@@ -691,6 +727,9 @@ export function MetricBuilder({
             />
             Show evolution curve
           </label>
+        </div>
+        </>
+        )}
         </div>
 
         <div className="mb-preview">

@@ -122,6 +122,16 @@ settingsRouter.post("/settings", (req, res) => {
     display?: { wither?: unknown; estPerf?: unknown };
     discord?: {
       webhookUrl?: unknown;
+      webhookAdd?: unknown;
+      webhookAddName?: unknown;
+      webhookRemoveAt?: unknown;
+      webhookUpdateAt?: unknown;
+      webhookUpdate?: {
+        name?: unknown;
+        url?: unknown;
+        bests?: unknown;
+        metrics?: unknown;
+      } | null;
       bests?: unknown;
       metrics?: unknown;
       template?: {
@@ -163,6 +173,41 @@ settingsRouter.post("/settings", (req, res) => {
     const err = setDiscordSettings({
       webhookUrl:
         body.discord.webhookUrl == null ? null : String(body.discord.webhookUrl),
+      webhookAdd:
+        body.discord.webhookAdd == null ? undefined : String(body.discord.webhookAdd),
+      webhookAddName:
+        body.discord.webhookAddName == null
+          ? undefined
+          : String(body.discord.webhookAddName),
+      webhookRemoveAt:
+        body.discord.webhookRemoveAt == null
+          ? undefined
+          : Number(body.discord.webhookRemoveAt),
+      webhookUpdateAt:
+        body.discord.webhookUpdateAt == null
+          ? undefined
+          : Number(body.discord.webhookUpdateAt),
+      webhookUpdate:
+        body.discord.webhookUpdate == null
+          ? undefined
+          : {
+              name:
+                body.discord.webhookUpdate.name == null
+                  ? undefined
+                  : String(body.discord.webhookUpdate.name),
+              url:
+                body.discord.webhookUpdate.url == null
+                  ? undefined
+                  : String(body.discord.webhookUpdate.url),
+              bests:
+                body.discord.webhookUpdate.bests == null
+                  ? undefined
+                  : Boolean(body.discord.webhookUpdate.bests),
+              metrics:
+                body.discord.webhookUpdate.metrics == null
+                  ? undefined
+                  : Boolean(body.discord.webhookUpdate.metrics),
+            },
       bests: body.discord.bests == null ? undefined : Boolean(body.discord.bests),
       metrics:
         body.discord.metrics == null ? undefined : Boolean(body.discord.metrics),

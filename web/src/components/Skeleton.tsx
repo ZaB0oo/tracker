@@ -8,3 +8,18 @@ export function PanelSkeleton({ lines = 6 }: { lines?: number }) {
     </div>
   );
 }
+
+/** Shimmering placeholder for the hero stat strip: same grid as the tiles,
+ * so the section holds its place instead of popping in when the data lands. */
+export function StripSkeleton({ tiles = 18 }: { tiles?: number }) {
+  return (
+    <div className="hero-strip">
+      {[...Array(tiles)].map((_, i) => (
+        <div key={i} className="strip-tile">
+          <div className="skeleton skeleton-line skeleton-strip-label" />
+          <div className="skeleton skeleton-line skeleton-strip-value" />
+        </div>
+      ))}
+    </div>
+  );
+}

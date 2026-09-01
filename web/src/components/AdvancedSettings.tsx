@@ -89,6 +89,13 @@ export function AdvancedSettings({
   const [rulesets, setRulesets] = useState<number[] | null>(null);
   const importInput = useRef<HTMLInputElement>(null);
   const [maintMsg, setMaintMsg] = useState<string | null>(null);
+  // the modal got crowded: one tab per subject
+  const [tabS, setTabS] = useState<
+    "api" | "display" | "discord" | "integrations" | "maintenance"
+  >("api");
+  const [webhookName, setWebhookName] = useState("");
+  // inline edit of one webhook row (name, optional URL replacement)
+  const [whEdit, setWhEdit] = useState<{ i: number; name: string; url: string } | null>(null);
   const [setIdInput, setSetIdInput] = useState("");
 
   // maintenance actions run immediately (they are not part of "Save")
@@ -127,7 +134,10 @@ export function AdvancedSettings({
           estPerf: estPerf ?? data!.display.estPerf,
         },
         discord: {
-          ...(webhookUrl != null && webhookUrl !== "" ? { webhookUrl } : {}),
+          // a URL typed but not yet added is added by Save, name included
+          ...(webhookUrl != null && webhookUrl !== ""
+            ? { webhookAdd: webhookUrl, webhookAddName: webhookName }
+            : {}),
           bests: dBests ?? data!.discord.bests,
           metrics: dMetrics ?? data!.discord.metrics,
         },
@@ -158,11 +168,48 @@ export function AdvancedSettings({
     onError: (e: Error) => setSaveMsg(e.message),
   });
 
+  // the typed URL joins the list before a test, so testing "just works"
+  const flushWebhookInput = async () => {
+    if (webhookUrl != null && webhookUrl !== "") {
+      await postSettings({
+        discord: { webhookAdd: webhookUrl, webhookAddName: webhookName },
+      });
+      setWebhookUrl(null);
+      setWebhookName("");
+      void qc.invalidateQueries({ queryKey: ["settings"] });
+    }
+  };
+  const addWebhook = useMutation({
+    mutationFn: flushWebhookInput,
+    onSuccess: () => setTestMsg("Webhook added ✓"),
+    onError: (e: Error) => setTestMsg(e.message),
+  });
+  const removeWebhook = useMutation({
+    mutationFn: (i: number) => postSettings({ discord: { webhookRemoveAt: i } }),
+    onSuccess: () => {
+      setTestMsg(null);
+      setWhEdit(null);
+      void qc.invalidateQueries({ queryKey: ["settings"] });
+    },
+    onError: (e: Error) => setTestMsg(e.message),
+  });
+  const updateWebhook = useMutation({
+    mutationFn: (p: {
+      i: number;
+      u: { name?: string; url?: string; bests?: boolean; metrics?: boolean };
+    }) => postSettings({ discord: { webhookUpdateAt: p.i, webhookUpdate: p.u } }),
+    onSuccess: (_d, vars) => {
+      setTestMsg(null);
+      // only close the edit form when THIS row was saved: a checkbox toggled
+      // on another row must not wipe a half-typed rename
+      setWhEdit((e) => (e == null || e.i === vars.i ? null : e));
+      void qc.invalidateQueries({ queryKey: ["settings"] });
+    },
+    onError: (e: Error) => setTestMsg(e.message),
+  });
   const test = useMutation({
     mutationFn: async () => {
-      // save the URL first so the test uses what's in the input
-      if (webhookUrl != null && webhookUrl !== "")
-        await postSettings({ discord: { webhookUrl } });
+      await flushWebhookInput();
       await postDiscordTest();
     },
     onSuccess: () => setTestMsg("Test message sent ✓"),
@@ -170,8 +217,7 @@ export function AdvancedSettings({
   });
   const testBest = useMutation({
     mutationFn: async () => {
-      if (webhookUrl != null && webhookUrl !== "")
-        await postSettings({ discord: { webhookUrl } });
+      await flushWebhookInput();
       await postDiscordTestBest(ruleset);
     },
     onSuccess: () => setTestMsg("Random best sent ✓"),
@@ -190,8 +236,29 @@ export function AdvancedSettings({
           <button className="mm-close" onClick={onClose}>✕</button>
         </div>
 
-        <div className="set-cols">
-        <div className="set-col">
+        <div className="set-tabs">
+          {(
+            [
+              ["api", "API & sync"],
+              ["display", "Display"],
+              ["discord", "Discord"],
+              ["integrations", "Integrations"],
+              ["maintenance", "Maintenance"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              className={tabS === id ? "active" : ""}
+              onClick={() => setTabS(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="set-body fade-swap" key={tabS}>
+        {tabS === "api" && (
+        <>
         <h3>osu! API (OAuth)</h3>
         <p className="set-note">
           Create an OAuth application in{" "}
@@ -316,6 +383,11 @@ export function AdvancedSettings({
           })}
         </div>
 
+        </>
+        )}
+
+        {tabS === "display" && (
+        <>
         <h3>Display</h3>
         <label className="adv-toggle">
           <input
@@ -356,26 +428,139 @@ export function AdvancedSettings({
             estimated locally, the API gives none).
           </span>
         </label>
-        </div>
+        </>
+        )}
 
-        <div className="set-col">
+        {tabS === "discord" && (
+        <>
         <h3>Discord notifications</h3>
+        {(data.discord.webhooks ?? []).length > 0 && (
+          <table className="set-webhook-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Webhook</th>
+                <th title="This webhook receives new bests (first clears, improvements)">Bests</th>
+                <th title="This webhook receives metric milestones and progress posts">Milestones</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {(data.discord.webhooks ?? []).map((w, i) =>
+                whEdit?.i === i ? (
+                  <tr key={`${w.url}-${i}`} className="set-wh-editing">
+                    <td>
+                      <input
+                        value={whEdit.name}
+                        maxLength={60}
+                        placeholder={`Webhook ${i + 1}`}
+                        onChange={(e) => setWhEdit({ ...whEdit, name: e.target.value })}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="password"
+                        placeholder="unchanged (paste to replace)"
+                        value={whEdit.url}
+                        onChange={(e) => setWhEdit({ ...whEdit, url: e.target.value })}
+                        autoComplete="off"
+                      />
+                    </td>
+                    <td colSpan={2} className="set-wh-actions">
+                      <button
+                        disabled={updateWebhook.isPending}
+                        onClick={() =>
+                          updateWebhook.mutate({
+                            i,
+                            u: {
+                              name: whEdit.name,
+                              ...(whEdit.url !== "" ? { url: whEdit.url } : {}),
+                            },
+                          })
+                        }
+                      >
+                        Save
+                      </button>
+                      <button onClick={() => setWhEdit(null)}>Cancel</button>
+                    </td>
+                    <td />
+                  </tr>
+                ) : (
+                  <tr key={`${w.url}-${i}`}>
+                    <td className="set-webhook-name">{w.name || `Webhook ${i + 1}`}</td>
+                    <td>
+                      <code>{w.url}</code>
+                    </td>
+                    <td className="set-wh-check">
+                      <input
+                        type="checkbox"
+                        checked={w.bests}
+                        disabled={updateWebhook.isPending}
+                        onChange={(e) =>
+                          updateWebhook.mutate({ i, u: { bests: e.target.checked } })
+                        }
+                      />
+                    </td>
+                    <td className="set-wh-check">
+                      <input
+                        type="checkbox"
+                        checked={w.metrics}
+                        disabled={updateWebhook.isPending}
+                        onChange={(e) =>
+                          updateWebhook.mutate({ i, u: { metrics: e.target.checked } })
+                        }
+                      />
+                    </td>
+                    <td className="set-wh-actions">
+                      <button
+                        title="Rename or replace this webhook"
+                        onClick={() => setWhEdit({ i, name: w.name, url: "" })}
+                      >
+                        ✎
+                      </button>
+                      <button
+                        title="Remove this webhook"
+                        disabled={removeWebhook.isPending}
+                        onClick={() => removeWebhook.mutate(i)}
+                      >
+                        ✕
+                      </button>
+                    </td>
+                  </tr>
+                )
+              )}
+            </tbody>
+          </table>
+        )}
         <div className="set-grid set-grid-wide">
           <Field
-            label="Webhook URL"
-            hint="Channel settings → Integrations → Webhooks. Stored in the local database only."
+            label="Add a webhook"
+            hint="Channel settings → Integrations → Webhooks. Up to 5, each receives every notification. Stored in the local database only."
           >
-            <input
-              type="password"
-              placeholder={
-                data.discord.webhookSet
-                  ? "webhook configured ✓ (paste to replace, empty to keep)"
-                  : "https://discord.com/api/webhooks/…"
-              }
-              value={webhookUrl ?? ""}
-              onChange={(e) => setWebhookUrl(e.target.value)}
-              autoComplete="off"
-            />
+            <div className="set-webhook-add">
+              <input
+                className="set-webhook-nick"
+                type="text"
+                placeholder="name"
+                title="Display name, to tell your servers apart"
+                value={webhookName}
+                onChange={(e) => setWebhookName(e.target.value)}
+                maxLength={60}
+              />
+              <input
+                type="password"
+                placeholder="https://discord.com/api/webhooks/…"
+                value={webhookUrl ?? ""}
+                onChange={(e) => setWebhookUrl(e.target.value)}
+                autoComplete="off"
+              />
+              <button
+                disabled={addWebhook.isPending || !webhookUrl}
+                onClick={() => addWebhook.mutate()}
+              >
+                Add
+              </button>
+            </div>
           </Field>
         </div>
         <label className="adv-toggle">
@@ -422,6 +607,11 @@ export function AdvancedSettings({
           />
         )}
 
+        </>
+        )}
+
+        {tabS === "integrations" && (
+        <>
         <h3>Integrations</h3>
         <p className="set-note">
           <a
@@ -463,6 +653,11 @@ export function AdvancedSettings({
           </Field>
         </div>
 
+        </>
+        )}
+
+        {tabS === "maintenance" && (
+        <>
         <h3>Maintenance · {modeName}</h3>
         <p className="set-note">
           These actions apply to the ruleset you are viewing ({modeName});
@@ -641,7 +836,8 @@ export function AdvancedSettings({
           </div>
         </div>
         {maintMsg && <p className="set-note">{maintMsg}</p>}
-        </div>
+        </>
+        )}
         </div>
 
         <div className="adv-actions">

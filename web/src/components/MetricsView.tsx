@@ -170,6 +170,9 @@ function MetricCard({
         : fmtNum;
   // pp metrics: top plays as of a selected period (click the curve or pick)
   const [ppPeriod, setPpPeriod] = useState("");
+  // Months <-> Days switch: a stored "2026-09" is invalid for a date input
+  // (and vice versa), so the pick resets to the granularity's default
+  useEffect(() => setPpPeriod(""), [gran]);
   const nowIso = new Date().toISOString();
   const effPeriod = ppPeriod || (gran === "day" ? nowIso.slice(0, 10) : nowIso.slice(0, 7));
   const { data: ppTop } = useQuery({
@@ -424,8 +427,13 @@ function MetricCard({
                   <span className="pp-top-map">
                     {r.artist} – {r.title} <i>[{r.version}]</i>
                   </span>
-                  {r.mods_list.length > 0 && (
-                    <span className="pp-top-mods">+{r.mods_list.join("")}</span>
+                  {(r.mods_list.length > 0 || (r.rate != null && r.rate !== 1)) && (
+                    <span className="pp-top-mods">
+                      {r.mods_list.length > 0 ? `+${r.mods_list.join("")}` : ""}
+                      {r.rate != null && r.rate !== 1
+                        ? `${r.mods_list.length > 0 ? " " : ""}${r.rate}x`
+                        : ""}
+                    </span>
                   )}
                   <span className="pp-top-acc">{(r.accuracy * 100).toFixed(2)}%</span>
                   <span

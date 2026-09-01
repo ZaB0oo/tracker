@@ -351,14 +351,14 @@ h1 { font-size: 21px; margin: 0; }
    window is narrow). One wrapper, one `top: 0`, nothing to keep in sync. */
 .sticky-head {
   position: sticky; top: 0; z-index: 12;
-  display: flex; flex-direction: column; gap: 8px;
+  display: flex; flex-direction: column; gap: 5px;
   /* Reads as a fourth strip of app chrome under the header / tabs / syncbar,
      which are all full-width --bg2 bands with a bottom rule. On the page
      background it was a slab of near-black floating between them. */
   background: var(--bg2);
   border-bottom: 1px solid var(--border);
   margin: 0 calc(-1 * var(--pane-pad)); /* full-bleed: cancels the side padding */
-  padding: 8px var(--pane-pad);
+  padding: 5px var(--pane-pad) 6px;
 }
 /* it is the view's own toolbar, not content: no gap under the syncbar */
 .dashboard > .sticky-head:first-child { margin-top: 0; }
@@ -945,18 +945,20 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
    dashboard column would crush the bar flat to fit the viewport. */
 .dash-tabs {
   display: flex; width: 100%; flex-shrink: 0;
-  background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 8px;
   overflow: hidden;
 }
 .dash-tabs button {
   flex: 1; background: transparent; border: none; border-radius: 0;
-  padding: 11px 0; font-size: 14px; font-weight: 600; color: var(--fg-dim);
+  padding: 8px 0; font-size: 13px; font-weight: 700; color: var(--fg-dim);
+  letter-spacing: 0.02em;
   border-bottom: 3px solid transparent; cursor: pointer;
 }
 .dash-tabs button:hover { color: var(--fg); border-bottom-color: var(--border); }
 .dash-tabs button.active {
-  background: rgba(255, 102, 170, 0.06); color: var(--accent);
+  background: rgba(255, 102, 170, 0.12); color: var(--accent);
   border-color: transparent; border-bottom-color: var(--accent);
+  text-shadow: 0 0 14px rgba(255, 102, 170, 0.45);
 }
 
 /* All-time record plays: one row of cards inside the hero, each drawn on its
@@ -1076,7 +1078,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .sess-chart-seg button { padding: 4px 10px; font-size: 12px; }
 .sess-chart-wrap { position: relative; overflow-x: clip; }
 .sess-chart svg { width: 100%; height: auto; display: block; }
-.sess-dot { fill: var(--accent); opacity: 0.8; cursor: pointer; }
+.sess-dot { fill: var(--accent); opacity: 0.8; cursor: pointer; transition: cy 0.3s ease; }
 /* plays that are NOT the map's current best: neutral grey dots */
 .sess-dot-other { fill: #7d7691; opacity: 0.6; }
 .sess-dot:hover { fill: var(--accent2); opacity: 1; r: 5; }
@@ -1438,9 +1440,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* Time machine slider bar */
 .tm-bar {
-  display: flex; align-items: center; gap: 14px; padding: 8px 16px;
+  display: flex; align-items: center; gap: 12px; padding: 4px 14px;
   background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
-  margin-bottom: 14px;
+  margin-bottom: 0;
   /* stickiness lives on the .sticky-head wrapper it shares with the scope row */
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
@@ -1566,7 +1568,11 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   background: var(--bg2); border: 1px solid var(--border); color: var(--fg);
   border-radius: 6px; padding: 6px 10px; font-size: 12px; font-family: monospace;
 }
-.mb-modal { width: min(640px, 94vw); }
+/* wider since the form went tabbed: each tab breathes on one screen */
+.adv-modal.mb-modal { width: min(780px, 94vw); }
+.mb-tabs { margin-bottom: 10px; }
+/* stable height across tabs: the preview footer must not jump around */
+.mb-body { min-height: 300px; }
 .mb-row { display: flex; gap: 8px; margin-bottom: 8px; }
 .mb-name { flex: 1; }
 .mb-title {
@@ -2048,3 +2054,109 @@ body.overlay-body { background: transparent; }
 }
 .dc-image { margin-top: 16px; max-width: 400px; width: 100%; border-radius: 4px; display: block; }
 .dc-footer { margin-top: 8px; color: #949ba4; font-size: 12px; font-weight: 500; }
+
+/* ------------------------------------------------- Discord webhook list */
+.set-webhooks { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.set-webhook-row {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 6px;
+  padding: 5px 8px;
+}
+.set-webhook-row code {
+  flex: 1; font-size: 12px; color: var(--fg-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.set-webhook-row button { padding: 2px 8px; line-height: 1; }
+.set-webhook-add { display: flex; gap: 6px; }
+.set-webhook-add input { flex: 1; }
+
+/* ------------------------------------------------- year progression curve */
+.year-curve { position: relative; }
+.year-curve-svg { display: block; }
+.year-curve-now { margin-left: auto; font-size: 13px; }
+.year-curve-now b { color: var(--accent); }
+.year-curve-now i { color: var(--fg-dim); font-style: normal; }
+.year-curve-tip {
+  position: absolute; top: 54px; transform: translateX(-50%);
+  pointer-events: none;
+}
+.year-curve-tip > div { display: flex; align-items: center; gap: 5px; }
+
+/* ------------------------------------------------ data-swap animation */
+@keyframes fade-swap {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.fade-swap { animation: fade-swap 0.18s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .fade-swap { animation: none; }
+}
+
+/* the dashboard tab content wrapper keeps the column layout of the page */
+.dash-tab-body {
+  display: flex; flex-direction: column; gap: var(--pane-pad);
+}
+
+/* ------------------------------------------------ settings tabs */
+.set-tabs {
+  display: flex; margin-bottom: 12px;
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 8px;
+  overflow: hidden;
+}
+.set-tabs button {
+  flex: 1; background: transparent; border: none; border-radius: 0;
+  padding: 8px 0; font-size: 13px; font-weight: 700; color: var(--fg-dim);
+  border-bottom: 3px solid transparent; cursor: pointer;
+}
+.set-tabs button:hover { color: var(--fg); border-bottom-color: var(--border); }
+.set-tabs button.active {
+  background: rgba(255, 102, 170, 0.12); color: var(--accent);
+  border-color: transparent; border-bottom-color: var(--accent);
+}
+.set-body { min-height: 320px; }
+.set-webhook-name { font-size: 12px; white-space: nowrap; }
+.set-webhook-nick { width: 120px; flex: 0 0 auto; }
+
+/* --------------------------------------------- main view + modal motion */
+/* the top-level view fills the app column exactly like the bare views did */
+.main-view {
+  display: flex; flex-direction: column; flex: 1; min-height: 0;
+}
+
+/* the standalone `scale` property, NOT transform: several modals center
+   themselves with transform: translate(-50%, -50%), and a keyframe that
+   touched transform overrode the translation for the animation's duration
+   (the modal appeared bottom-right, then jumped to the middle) */
+@keyframes modal-in {
+  from { opacity: 0; scale: 0.97; }
+  to { opacity: 1; scale: 1; }
+}
+@keyframes overlay-in {
+  from { opacity: 0; }
+}
+.map-modal, .adv-modal { animation: modal-in 0.15s ease-out; }
+.modal-overlay { animation: overlay-in 0.15s ease-out; }
+.ctx-menu { animation: modal-in 0.1s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .map-modal, .adv-modal, .modal-overlay, .ctx-menu, .sess-dot { animation: none; transition: none; }
+}
+
+/* --------------------------------------------- webhook table */
+.set-webhook-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; font-size: 12px; }
+.set-webhook-table th {
+  text-align: left; color: var(--fg-dim); font-weight: 600;
+  padding: 3px 8px; border-bottom: 1px solid var(--border);
+}
+.set-webhook-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.set-webhook-table code {
+  color: var(--fg-dim); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; display: block; max-width: 260px;
+}
+.set-wh-check { text-align: center; }
+.set-wh-actions { white-space: nowrap; }
+.set-wh-actions button { padding: 2px 8px; line-height: 1.3; margin-right: 4px; }
+.set-wh-editing input { width: 100%; }
+
+/* hero strip skeleton: label + value shaped blocks */
+.skeleton-strip-label { height: 9px; width: 70%; }
+.skeleton-strip-value { height: 15px; width: 55%; }

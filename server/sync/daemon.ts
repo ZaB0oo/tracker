@@ -36,6 +36,7 @@ import type { SoloScore } from "../osu/types.js";
 import {
   getDiscordSettings,
   notifyBests,
+  updateBestHonors,
   notifyMetricMilestones,
   type BestEvent,
 } from "../notify/discord.js";
@@ -1342,6 +1343,9 @@ export function applyCountryCheck(
            country_seen_at = datetime('now')
      WHERE beatmap_id = ? AND ruleset = ?`
   ).run(isFirst, beatmapId, ruleset);
+  // a recently notified best may have missed this honor (leaderboard lag):
+  // let the Discord module edit the posted message. No-op when unwatched.
+  updateBestHonors(beatmapId, ruleset);
 }
 
 /**
@@ -1509,6 +1513,8 @@ export function applyGlobalCheck(
   db.prepare(
     "UPDATE beatmap_user SET global_rank = ?, global_checked_at = datetime('now'), global_seen = 1 WHERE beatmap_id = ? AND ruleset = ?"
   ).run(pos, beatmapId, ruleset);
+  // same late-honors hook as the country check (see applyCountryCheck)
+  updateBestHonors(beatmapId, ruleset);
 }
 
 /**

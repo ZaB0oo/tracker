@@ -145,6 +145,7 @@ export default function App() {
 
       <SyncBar ruleset={ruleset} pool={filters.pool} keys={filters.keys} />
 
+      <div className="main-view fade-swap" key={view}>
       {view === "table" && (
         <>
           <PresetBar filters={filters} sort={sort} onApply={drillDown} />
@@ -224,6 +225,7 @@ export default function App() {
           }}
         />
       )}
+      </div>
     </div>
   );
 }

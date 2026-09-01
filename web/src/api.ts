@@ -868,6 +868,8 @@ export interface PpTopRow {
   star_rating: number | null;
   artist: string;
   title: string;
+  /** playback rate of the play (1 or null = nomod speed) */
+  rate: number | null;
   /** mod acronyms (CL included — it affects pp) */
   mods_list: string[];
   /** star rating with the play's mods (cached; null until fetched) */
@@ -1175,6 +1177,8 @@ export interface Settings {
   display: DisplayPrefs;
   discord: {
     webhookSet: boolean;
+    /** the configured webhooks, URL masked for display (token hidden) */
+    webhooks: { url: string; name: string; bests: boolean; metrics: boolean }[];
     bests: boolean;
     /** notify each milestone step a custom metric crosses */
     metrics: boolean;
@@ -1235,6 +1239,15 @@ export async function postSettings(payload: {
   display?: Partial<DisplayPrefs>;
   discord?: {
     webhookUrl?: string;
+    /** append one webhook to the list (up to 5, deduplicated) */
+    webhookAdd?: string;
+    /** display name for the webhook being added */
+    webhookAddName?: string;
+    /** remove the webhook at this index of the configured list */
+    webhookRemoveAt?: number;
+    /** edit the webhook at this index (only the given fields change) */
+    webhookUpdateAt?: number;
+    webhookUpdate?: { name?: string; url?: string; bests?: boolean; metrics?: boolean };
     bests?: boolean;
     metrics?: boolean;
     template?: DiscordTemplate | null;
