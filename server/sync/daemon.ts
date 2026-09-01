@@ -798,7 +798,8 @@ async function pollRecentScoresForMode(mode: number): Promise<number> {
   //   global tops stay current and the notification shows the rank when <= 100;
   // - SR with the play's mods (Discord display only).
   const discord = getDiscordSettings();
-  const discordOn = discord.webhookSet && discord.bests;
+  // any webhook subscribed to bests: the per-webhook flags are the routing
+  const discordOn = discord.webhooks.some((w) => w.bests);
   if (bestEvents.length > 0) {
     for (const e of bestEvents) {
       if (discordOn) {

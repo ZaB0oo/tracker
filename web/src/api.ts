@@ -1177,11 +1177,9 @@ export interface Settings {
   display: DisplayPrefs;
   discord: {
     webhookSet: boolean;
-    /** the configured webhooks, URL masked for display (token hidden) */
+    /** the configured webhooks, URL masked for display (token hidden);
+     * their bests/metrics flags are the only notification routing */
     webhooks: { url: string; name: string; bests: boolean; metrics: boolean }[];
-    bests: boolean;
-    /** notify each milestone step a custom metric crosses */
-    metrics: boolean;
     template: DiscordTemplate;
     templateDefault: DiscordTemplate;
   };
@@ -1248,8 +1246,6 @@ export async function postSettings(payload: {
     /** edit the webhook at this index (only the given fields change) */
     webhookUpdateAt?: number;
     webhookUpdate?: { name?: string; url?: string; bests?: boolean; metrics?: boolean };
-    bests?: boolean;
-    metrics?: boolean;
     template?: DiscordTemplate | null;
   };
   clientId?: string | number;

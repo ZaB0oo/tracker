@@ -23,11 +23,10 @@ const WEBHOOK_RE = /^https:\/\/(discord\.com|discordapp\.com)\/api\/webhooks\/\d
 
 export interface DiscordSettings {
   webhookSet: boolean;
-  /** the configured webhooks, URL masked for display (token hidden) */
+  /** the configured webhooks, URL masked for display (token hidden). The
+   * per-webhook flags are the ONLY routing truth: the historical global
+   * bests/metrics switches were folded into them (see the migration). */
   webhooks: { url: string; name: string; bests: boolean; metrics: boolean }[];
-  bests: boolean;
-  /** notify each milestone step a custom metric crosses */
-  metrics: boolean;
   template: DiscordTemplate;
 }
 
@@ -95,6 +94,31 @@ export interface WebhookEntry {
   metrics: boolean;
 }
 
+/**
+ * One-shot: the pre-1.28.1 GLOBAL bests/metrics switches duplicated the
+ * per-webhook columns (a webhook could show "Bests ✓" while the hidden
+ * global gate silently dropped everything). A global switch that was OFF is
+ * folded into every entry's flag, then both keys are retired: the table
+ * columns are the single source of truth from here on.
+ */
+let globalsMigrated = false;
+function migrateGlobalToggles(): void {
+  if (globalsMigrated) return;
+  globalsMigrated = true;
+  const offBests = getState("discord_notify_bests") === "0";
+  const offMetrics = getState("discord_notify_metrics") === "0";
+  if (offBests || offMetrics) {
+    const list = getWebhookEntries().map((e) => ({
+      ...e,
+      bests: offBests ? false : e.bests,
+      metrics: offMetrics ? false : e.metrics,
+    }));
+    writeWebhookEntries(list);
+  }
+  setState("discord_notify_bests", "");
+  setState("discord_notify_metrics", "");
+}
+
 export function getWebhookEntries(): WebhookEntry[] {
   const raw = getState("discord_webhook_urls");
   if (raw) {
@@ -146,6 +170,7 @@ const maskWebhook = (u: string): string =>
   u.replace(/(\/api\/webhooks\/\d+\/).+$/, (_m, p: string) => `${p}····${u.slice(-4)}`);
 
 export function getDiscordSettings(): DiscordSettings {
+  migrateGlobalToggles();
   const entries = getWebhookEntries();
   return {
     webhookSet: entries.length > 0,
@@ -155,8 +180,6 @@ export function getDiscordSettings(): DiscordSettings {
       bests: e.bests,
       metrics: e.metrics,
     })),
-    bests: getState("discord_notify_bests") !== "0",
-    metrics: getState("discord_notify_metrics") !== "0",
     template: getDiscordTemplate(),
   };
 }
@@ -172,8 +195,6 @@ export function setDiscordSettings(o: {
   /** edit the webhook at this index (partial: only given fields change) */
   webhookUpdateAt?: number;
   webhookUpdate?: { name?: string; url?: string; bests?: boolean; metrics?: boolean };
-  bests?: boolean;
-  metrics?: boolean;
   /** null resets to the default layout */
   template?: {
     title?: unknown;
@@ -234,9 +255,6 @@ export function setDiscordSettings(o: {
     list.splice(i, 1);
     writeWebhookEntries(list);
   }
-  if (o.bests != null) setState("discord_notify_bests", o.bests ? "1" : "0");
-  if (o.metrics != null)
-    setState("discord_notify_metrics", o.metrics ? "1" : "0");
   if (o.template !== undefined) {
     if (o.template === null) setState("discord_template", "");
     else
@@ -1059,14 +1077,10 @@ function metricEmbed(
 }
 
 export function notifyMetricMilestones(): void {
+  migrateGlobalToggles();
   // no metric-subscribed webhook: bail BEFORE stamping cooldowns, otherwise
   // a crossed milestone is consumed by a message that reaches zero channels
-  if (
-    getWebhookUrls().length === 0 ||
-    !getDiscordSettings().metrics ||
-    !hasKindTarget("metric")
-  )
-    return;
+  if (!hasKindTarget("metric")) return;
   try {
     const rows = getDb()
       .prepare("SELECT id, name, params FROM metrics ORDER BY sort_order, id")
@@ -1155,6 +1169,7 @@ const stampCooldown = (key: string): void =>
 const liftCooldown = (key: string): void => setState(key, "");
 
 export function notifyMetricProgress(id: number, conds?: string): string | null {
+  migrateGlobalToggles();
   if (getWebhookUrls().length === 0) return "no webhook URL configured";
   if (!hasKindTarget("metric")) return "no webhook receives metric posts (see the Milestones column)";
   const r = getDb()
@@ -1179,7 +1194,8 @@ export function notifyMetricProgress(id: number, conds?: string): string | null 
 
 /** One message per poll tick (5 embeds max each, Discord allows 10). */
 export function notifyBests(events: BestEvent[]): void {
-  if (events.length === 0 || !getDiscordSettings().bests) return;
+  migrateGlobalToggles();
+  if (events.length === 0 || !hasKindTarget("best")) return;
   void notifyBestsAsync(events);
 }
 
@@ -1291,6 +1307,7 @@ function sampleBestEvent(ruleset: number, honors = false): BestEvent | null {
 }
 
 export async function sendTestBest(ruleset: number): Promise<string | null> {
+  migrateGlobalToggles();
   if (getWebhookUrls().length === 0) return "no webhook URL configured";
   if (!hasKindTarget("best")) return "no webhook receives best notifications (see the Bests column)";
   const wait = cooldownLeft("discord_test_best_at", PROGRESS_COOLDOWN_MS);
