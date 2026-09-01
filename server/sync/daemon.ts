@@ -36,6 +36,8 @@ import type { SoloScore } from "../osu/types.js";
 import {
   getDiscordSettings,
   notifyBests,
+  notifyCountryFirstLost,
+  notifyGlobalTopLost,
   updateBestHonors,
   notifyMetricMilestones,
   type BestEvent,
@@ -764,7 +766,14 @@ async function pollRecentScoresForMode(mode: number): Promise<number> {
           rulesetDef(mode).apiName
         );
         const top = countryScores[0] ?? null;
-        applyCountryCheck(id, top, true, mode);
+        const stillFirst = top != null && top.user_id === config.osuUserId;
+        // The leaderboard can lag behind a fresh submit: right after MY OWN
+        // score it may still show the previous holder. Applying that stale
+        // "not #1" to a held #1 would record a false lost event (and, now
+        // that losses notify, ping Discord with it), then a false "gained"
+        // when the confirmation lands. Keep the held state untouched and let
+        // the deferred confirm below decide whether the loss is real.
+        if (!(wasFirst && !stillFirst)) applyCountryCheck(id, top, true, mode);
         // Discord: mark the best as "country #1 at submit time" (display only,
         // no country event notifications). The runner-up is the previous
         // holder — the player this score just sniped.
@@ -830,13 +839,32 @@ async function pollRecentScoresForMode(mode: number): Promise<number> {
         }
       }
       try {
+        // read BEFORE the check stamps anything: needed by the lag guard below
+        const prevGlobal =
+          (
+            db
+              .prepare(
+                `SELECT global_rank FROM beatmap_user WHERE beatmap_id = ? AND ruleset = ${mode}`
+              )
+              .get(e.beatmapId) as { global_rank: number | null } | undefined
+          )?.global_rank ?? null;
         e.globalRank = await getUserBeatmapPosition(
           e.beatmapId,
           config.osuUserId,
           "high",
           rulesetDef(mode).apiName
         );
-        applyGlobalCheck(e.beatmapId, e.globalRank, true, mode);
+        // Same lag guard as the country check: right after my own score the
+        // leaderboard can still miss it, and a held top-100 position would
+        // read worse (or absent) for a moment. My own new best can only ever
+        // improve my rank, so a worse reading here is stale by definition:
+        // skip the write (a false "lost tier" event would notify now) and
+        // let the deferred confirm below settle it.
+        const lagging =
+          prevGlobal != null &&
+          prevGlobal <= 100 &&
+          (e.globalRank == null || e.globalRank > prevGlobal);
+        if (!lagging) applyGlobalCheck(e.beatmapId, e.globalRank, true, mode);
         // the leaderboard may not include the fresh score yet: confirm later
         scheduleGlobalConfirm(e.beatmapId, mode);
       } catch (err) {
@@ -1337,6 +1365,11 @@ export function applyCountryCheck(
       isFirst ? null : top?.user_id ?? null,
       isFirst ? null : top?.user?.username ?? null
     );
+    // Discord (opt-in per webhook): fires exactly when a "lost" event is
+    // recorded, so it can never disagree with the history. The immediate
+    // post-score check skips this function entirely on a lagging
+    // leaderboard (see the poll), so false losses never get here.
+    if (isFirst === 0) notifyCountryFirstLost(beatmapId, ruleset, top?.user?.username ?? null);
   }
   db.prepare(
     `UPDATE beatmap_user
@@ -1510,6 +1543,10 @@ export function applyGlobalCheck(
           newTier ? `top ${newTier}` : "outside top 100"
         } (${prevRank != null ? `#${prevRank}` : "—"} → ${pos != null ? `#${pos}` : "—"}) (global)`
     );
+    // Discord (opt-in per webhook): only downward tier moves; the notifier
+    // re-derives the tiers and ignores gains by itself
+    if (oldTier != null && (newTier == null || newTier > oldTier))
+      notifyGlobalTopLost(beatmapId, ruleset, prevRank, pos);
   }
   db.prepare(
     "UPDATE beatmap_user SET global_rank = ?, global_checked_at = datetime('now'), global_seen = 1 WHERE beatmap_id = ? AND ruleset = ?"

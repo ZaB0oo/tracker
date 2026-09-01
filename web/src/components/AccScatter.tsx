@@ -100,8 +100,18 @@ export const AccScatterPanel = memo(function AccScatterPanel({
     if (pts.length === 0) return 10;
     const srs = pts.map((p) => p[1]).sort((a, b) => a - b);
     const cap = srs[Math.min(srs.length - 1, Math.floor(srs.length * 0.995))];
-    const top = srs[srs.length - 1];
-    const lim = top <= cap * 3 ? top : cap;
+    // The extent is the highest map still PROPORTIONATE to the bulk (within
+    // 3x the 99.5th percentile). Only the out-of-scale tail (loved aspire
+    // maps in the hundreds of stars) is excluded and piles on the edge, so
+    // the All pool keeps the same axis as Ranked instead of collapsing to
+    // the percentile the moment one aspire map enters the cloud.
+    let lim = cap;
+    for (let i = srs.length - 1; i >= 0; i--) {
+      if (srs[i] <= cap * 3) {
+        lim = srs[i];
+        break;
+      }
+    }
     return Math.max(1, Math.ceil(lim * 2) / 2);
   }, [pts]);
   // the visible domain: the zoom rectangle, or the full extent

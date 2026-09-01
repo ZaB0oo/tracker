@@ -192,7 +192,14 @@ export function AdvancedSettings({
   const updateWebhook = useMutation({
     mutationFn: (p: {
       i: number;
-      u: { name?: string; url?: string; bests?: boolean; metrics?: boolean };
+      u: {
+        name?: string;
+        url?: string;
+        bests?: boolean;
+        metrics?: boolean;
+        snipes?: boolean;
+        topLoss?: boolean;
+      };
     }) => postSettings({ discord: { webhookUpdateAt: p.i, webhookUpdate: p.u } }),
     onSuccess: (_d, vars) => {
       setTestMsg(null);
@@ -438,6 +445,12 @@ export function AdvancedSettings({
                 <th>Webhook</th>
                 <th title="This webhook receives new bests (first clears, improvements)">Bests</th>
                 <th title="This webhook receives metric milestones and progress posts">Milestones</th>
+                <th title="This webhook is notified when one of your country #1s gets sniped">
+                  Country #1 lost
+                </th>
+                <th title="This webhook is notified when a map drops a global top tier (top 1/8/15/25/50/100) or leaves the top 100">
+                  Global top lost
+                </th>
                 <th />
               </tr>
             </thead>
@@ -462,7 +475,7 @@ export function AdvancedSettings({
                         autoComplete="off"
                       />
                     </td>
-                    <td colSpan={2} className="set-wh-actions">
+                    <td colSpan={4} className="set-wh-actions">
                       <button
                         disabled={updateWebhook.isPending}
                         onClick={() =>
@@ -507,6 +520,26 @@ export function AdvancedSettings({
                         }
                       />
                     </td>
+                    <td className="set-wh-check">
+                      <input
+                        type="checkbox"
+                        checked={w.snipes}
+                        disabled={updateWebhook.isPending}
+                        onChange={(e) =>
+                          updateWebhook.mutate({ i, u: { snipes: e.target.checked } })
+                        }
+                      />
+                    </td>
+                    <td className="set-wh-check">
+                      <input
+                        type="checkbox"
+                        checked={w.topLoss}
+                        disabled={updateWebhook.isPending}
+                        onChange={(e) =>
+                          updateWebhook.mutate({ i, u: { topLoss: e.target.checked } })
+                        }
+                      />
+                    </td>
                     <td className="set-wh-actions">
                       <button
                         title="Rename or replace this webhook"
@@ -531,7 +564,7 @@ export function AdvancedSettings({
         <div className="set-grid set-grid-wide">
           <Field
             label="Add a webhook"
-            hint="Channel settings → Integrations → Webhooks. Up to 5, each receives every notification. Stored in the local database only."
+            hint="Channel settings → Integrations → Webhooks. Up to 5; pick what each one receives with the columns above (lost-position posts start unchecked). Stored in the local database only."
           >
             <div className="set-webhook-add">
               <input

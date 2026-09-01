@@ -5,6 +5,7 @@ import { localPp, localStarRating, perfHits } from "../osu/difficulty.js";
 import { evalMetric } from "../logic/metricEval.js";
 import type { MetricParams } from "../logic/metrics.js";
 import { srMods, srModsKey, type ModRef } from "../logic/score.js";
+import { shortModeName } from "../logic/rulesets.js";
 
 const logError = (e: unknown, ctx: string) =>
   console.error(`[${ctx}] ${e instanceof Error ? e.message : String(e)}`);
@@ -26,7 +27,14 @@ export interface DiscordSettings {
   /** the configured webhooks, URL masked for display (token hidden). The
    * per-webhook flags are the ONLY routing truth: the historical global
    * bests/metrics switches were folded into them (see the migration). */
-  webhooks: { url: string; name: string; bests: boolean; metrics: boolean }[];
+  webhooks: {
+    url: string;
+    name: string;
+    bests: boolean;
+    metrics: boolean;
+    snipes: boolean;
+    topLoss: boolean;
+  }[];
   template: DiscordTemplate;
 }
 
@@ -92,6 +100,12 @@ export interface WebhookEntry {
   bests: boolean;
   /** this webhook receives metric milestone / progress posts */
   metrics: boolean;
+  /** this webhook receives "country #1 lost" (sniped) notifications. Opt-in:
+   * defaults to false so existing setups don't suddenly get new posts. */
+  snipes: boolean;
+  /** this webhook receives "global top lost" (left/dropped a top-100 tier)
+   * notifications. Opt-in, same reasoning. */
+  topLoss: boolean;
 }
 
 /**
@@ -128,14 +142,28 @@ export function getWebhookEntries(): WebhookEntry[] {
         return arr
           .map((e): WebhookEntry | null => {
             if (typeof e === "string")
-              return e ? { url: e, name: "", bests: true, metrics: true } : null;
+              return e
+                ? { url: e, name: "", bests: true, metrics: true, snipes: false, topLoss: false }
+                : null;
             if (e && typeof e === "object" && typeof (e as { url?: unknown }).url === "string") {
-              const o = e as { url: string; name?: unknown; bests?: unknown; metrics?: unknown };
+              const o = e as {
+                url: string;
+                name?: unknown;
+                bests?: unknown;
+                metrics?: unknown;
+                snipes?: unknown;
+                topLoss?: unknown;
+              };
               return {
                 url: o.url,
                 name: String(o.name ?? "").slice(0, 60),
                 bests: o.bests !== false,
                 metrics: o.metrics !== false,
+                // strict === true: entries stored before these kinds existed
+                // stay OFF (the flags above default ON for the same reason
+                // they always did: they predate the columns)
+                snipes: o.snipes === true,
+                topLoss: o.topLoss === true,
               };
             }
             return null;
@@ -146,7 +174,9 @@ export function getWebhookEntries(): WebhookEntry[] {
     }
   }
   const legacy = getState("discord_webhook_url");
-  return legacy ? [{ url: legacy, name: "", bests: true, metrics: true }] : [];
+  return legacy
+    ? [{ url: legacy, name: "", bests: true, metrics: true, snipes: false, topLoss: false }]
+    : [];
 }
 
 export function getWebhookUrls(): string[] {
@@ -155,9 +185,15 @@ export function getWebhookUrls(): string[] {
 
 const MAX_WEBHOOKS = 5;
 
+/** message kinds a webhook can subscribe to, column by column */
+export type MessageKind = "best" | "metric" | "snipe" | "toploss";
+
+const kindFlag = (e: WebhookEntry, kind: MessageKind): boolean =>
+  kind === "best" ? e.bests : kind === "metric" ? e.metrics : kind === "snipe" ? e.snipes : e.topLoss;
+
 /** does at least one webhook receive this message kind? */
-function hasKindTarget(kind: "best" | "metric"): boolean {
-  return getWebhookEntries().some((e) => (kind === "best" ? e.bests : e.metrics));
+function hasKindTarget(kind: MessageKind): boolean {
+  return getWebhookEntries().some((e) => kindFlag(e, kind));
 }
 
 function writeWebhookEntries(list: WebhookEntry[]): void {
@@ -179,6 +215,8 @@ export function getDiscordSettings(): DiscordSettings {
       name: e.name,
       bests: e.bests,
       metrics: e.metrics,
+      snipes: e.snipes,
+      topLoss: e.topLoss,
     })),
     template: getDiscordTemplate(),
   };
@@ -194,7 +232,14 @@ export function setDiscordSettings(o: {
   webhookRemoveAt?: number;
   /** edit the webhook at this index (partial: only given fields change) */
   webhookUpdateAt?: number;
-  webhookUpdate?: { name?: string; url?: string; bests?: boolean; metrics?: boolean };
+  webhookUpdate?: {
+    name?: string;
+    url?: string;
+    bests?: boolean;
+    metrics?: boolean;
+    snipes?: boolean;
+    topLoss?: boolean;
+  };
   /** null resets to the default layout */
   template?: {
     title?: unknown;
@@ -208,7 +253,11 @@ export function setDiscordSettings(o: {
     const url = o.webhookUrl.trim();
     if (url !== "" && !WEBHOOK_RE.test(url))
       return "invalid webhook URL (expected https://discord.com/api/webhooks/...)";
-    writeWebhookEntries(url === "" ? [] : [{ url, name: "", bests: true, metrics: true }]);
+    writeWebhookEntries(
+      url === ""
+        ? []
+        : [{ url, name: "", bests: true, metrics: true, snipes: false, topLoss: false }]
+    );
   }
   if (o.webhookAdd != null) {
     const url = o.webhookAdd.trim();
@@ -222,6 +271,8 @@ export function setDiscordSettings(o: {
         name: String(o.webhookAddName ?? "").trim().slice(0, 60),
         bests: true,
         metrics: true,
+        snipes: false,
+        topLoss: false,
       });
       writeWebhookEntries(list);
     }
@@ -243,6 +294,8 @@ export function setDiscordSettings(o: {
     if (u.name != null) list[i].name = u.name.trim().slice(0, 60);
     if (u.bests != null) list[i].bests = u.bests;
     if (u.metrics != null) list[i].metrics = u.metrics;
+    if (u.snipes != null) list[i].snipes = u.snipes;
+    if (u.topLoss != null) list[i].topLoss = u.topLoss;
     writeWebhookEntries(list);
   }
   if (o.webhookRemoveAt != null) {
@@ -336,7 +389,7 @@ interface WebhookMessage {
   embeds: Embed[];
   /** what this message is, so per-webhook filters can route it
    * (undefined: administrative, e.g. a test — goes everywhere) */
-  kind?: "best" | "metric";
+  kind?: MessageKind;
   /** best notifications: the event behind each embed (index-aligned), so a
    * deferred honors confirmation can edit the already-posted message */
   meta?: { events: BestEvent[]; author: Embed["author"] | undefined };
@@ -408,9 +461,7 @@ async function drain(): Promise<void> {
       const message = queue[0];
       // per-webhook routing: each channel only gets the kinds it asked for
       const urls = entries
-        .filter((e) =>
-          message.kind === "best" ? e.bests : message.kind === "metric" ? e.metrics : true
-        )
+        .filter((e) => (message.kind == null ? true : kindFlag(e, message.kind)))
         .map((e) => e.url);
       // every configured webhook receives the same message; one failing
       // channel never blocks the others
@@ -1190,6 +1241,100 @@ export function notifyMetricProgress(id: number, conds?: string): string | null 
   stampCooldown(key);
   enqueue({ kind: "metric", embeds: [metricEmbed(`Metric: ${r.name}`, p, result, { conds })] });
   return null;
+}
+
+// ------------------------------------------------------- lost-position posts
+
+const SNIPE_RED = 0xf25c5c;
+const TOPLOSS_ORANGE = 0xf2a13c;
+
+/** same tiers as the daemon's global tracking (top 1/8/15/25/50/100) */
+const LOSS_TIERS = [1, 8, 15, 25, 50, 100];
+const lossTier = (rank: number | null): number | null => {
+  if (rank == null) return null;
+  for (const t of LOSS_TIERS) if (rank <= t) return t;
+  return null;
+};
+
+/** " · taiko" suffix so a convert's loss reads unambiguously */
+const modeSuffix = (ruleset: number): string =>
+  ruleset === 0 ? "" : ` · ${shortModeName(ruleset)}`;
+
+/**
+ * A held country #1 was sniped. Called by the daemon exactly where the
+ * "lost" country_event is recorded, so the posts mirror the history 1:1.
+ * Only webhooks with the "Country #1 lost" column checked receive it.
+ */
+export function notifyCountryFirstLost(
+  beatmapId: number,
+  ruleset: number,
+  byUsername: string | null
+): void {
+  try {
+    migrateGlobalToggles();
+    if (!hasKindTarget("snipe")) return;
+    const m = mapRow(beatmapId);
+    if (!m) return;
+    const cc = getStoredCountryCode();
+    const t = getDiscordTemplate();
+    enqueue({
+      kind: "snipe",
+      embeds: [
+        {
+          title: `Country #1 lost${cc ? ` (${cc})` : ""}: ${m.artist} - ${m.title} [${m.version}]`,
+          description:
+            (byUsername ? `Sniped by **${byUsername}**` : "No longer the country #1") +
+            modeSuffix(ruleset),
+          color: SNIPE_RED,
+          url: mapUrl(beatmapId),
+          ...(t.cover ? { thumbnail: { url: coverUrl(m.beatmapset_id) } } : {}),
+        },
+      ],
+    });
+  } catch (e) {
+    logError(e, `country-loss notify map ${beatmapId}`);
+  }
+}
+
+/**
+ * A held global top-100 position dropped a tier (or left the top 100).
+ * Called by the daemon exactly where the global_event is recorded.
+ * Only webhooks with the "Global top lost" column checked receive it.
+ */
+export function notifyGlobalTopLost(
+  beatmapId: number,
+  ruleset: number,
+  oldRank: number | null,
+  newRank: number | null
+): void {
+  try {
+    migrateGlobalToggles();
+    if (!hasKindTarget("toploss")) return;
+    const oldTier = lossTier(oldRank);
+    // only losses: a tier change upward is a gain, not this notification's job
+    if (oldTier == null) return;
+    const newTier = lossTier(newRank);
+    if (newTier != null && newTier <= oldTier) return;
+    const m = mapRow(beatmapId);
+    if (!m) return;
+    const t = getDiscordTemplate();
+    const tierTxt = (tier: number | null, rank: number | null) =>
+      tier == null ? "outside top 100" : `top ${tier}${rank != null ? ` (#${rank})` : ""}`;
+    enqueue({
+      kind: "toploss",
+      embeds: [
+        {
+          title: `Global top lost: ${m.artist} - ${m.title} [${m.version}]`,
+          description: `${tierTxt(oldTier, oldRank)} → ${tierTxt(newTier, newRank)}${modeSuffix(ruleset)}`,
+          color: TOPLOSS_ORANGE,
+          url: mapUrl(beatmapId),
+          ...(t.cover ? { thumbnail: { url: coverUrl(m.beatmapset_id) } } : {}),
+        },
+      ],
+    });
+  } catch (e) {
+    logError(e, `global-loss notify map ${beatmapId}`);
+  }
 }
 
 /** One message per poll tick (5 embeds max each, Discord allows 10). */

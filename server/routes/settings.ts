@@ -131,6 +131,8 @@ settingsRouter.post("/settings", (req, res) => {
         url?: unknown;
         bests?: unknown;
         metrics?: unknown;
+        snipes?: unknown;
+        topLoss?: unknown;
       } | null;
       bests?: unknown;
       metrics?: unknown;
@@ -207,6 +209,14 @@ settingsRouter.post("/settings", (req, res) => {
                 body.discord.webhookUpdate.metrics == null
                   ? undefined
                   : Boolean(body.discord.webhookUpdate.metrics),
+              snipes:
+                body.discord.webhookUpdate.snipes == null
+                  ? undefined
+                  : Boolean(body.discord.webhookUpdate.snipes),
+              topLoss:
+                body.discord.webhookUpdate.topLoss == null
+                  ? undefined
+                  : Boolean(body.discord.webhookUpdate.topLoss),
             },
       template: body.discord.template,
     });

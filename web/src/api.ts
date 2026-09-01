@@ -1178,8 +1178,17 @@ export interface Settings {
   discord: {
     webhookSet: boolean;
     /** the configured webhooks, URL masked for display (token hidden);
-     * their bests/metrics flags are the only notification routing */
-    webhooks: { url: string; name: string; bests: boolean; metrics: boolean }[];
+     * their per-kind flags are the only notification routing */
+    webhooks: {
+      url: string;
+      name: string;
+      bests: boolean;
+      metrics: boolean;
+      /** "country #1 lost" (sniped) posts, opt-in */
+      snipes: boolean;
+      /** "global top lost" (dropped a top-100 tier) posts, opt-in */
+      topLoss: boolean;
+    }[];
     template: DiscordTemplate;
     templateDefault: DiscordTemplate;
   };
@@ -1245,7 +1254,14 @@ export async function postSettings(payload: {
     webhookRemoveAt?: number;
     /** edit the webhook at this index (only the given fields change) */
     webhookUpdateAt?: number;
-    webhookUpdate?: { name?: string; url?: string; bests?: boolean; metrics?: boolean };
+    webhookUpdate?: {
+      name?: string;
+      url?: string;
+      bests?: boolean;
+      metrics?: boolean;
+      snipes?: boolean;
+      topLoss?: boolean;
+    };
     template?: DiscordTemplate | null;
   };
   clientId?: string | number;
