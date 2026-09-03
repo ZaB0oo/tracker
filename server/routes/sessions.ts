@@ -35,13 +35,18 @@ interface Session {
   maxPp: number | null;
 }
 
-/** Pool + mania keys + scope condition of the request (shared by both routes). */
-function sessionWhere(req: { query: Record<string, unknown> }, R: number): string {
+/** Pool + mania keys + scope condition alone (alias b), no ruleset guard. */
+function scopeCond(req: { query: Record<string, unknown> }, R: number): string {
   let pool = poolWhere(R, String(req.query.pool ?? ""));
   const keys = keysWhere(R, req.query.keys ? String(req.query.keys) : undefined);
   if (keys) pool = `${pool} AND ${keys}`;
   const statuses = statusIn(String(req.query.scope ?? ""));
-  return `s.ruleset = ${R} AND ${pool} AND b.status IN ${statuses}`;
+  return `(${pool} AND b.status IN ${statuses})`;
+}
+
+/** Full filter of the request (used by the detail route). */
+function sessionWhere(req: { query: Record<string, unknown> }, R: number): string {
+  return `s.ruleset = ${R} AND ${scopeCond(req, R)}`;
 }
 
 // One full scores scan per (ruleset, pool, keys, scope): cached by scores
@@ -52,16 +57,24 @@ const sessionsCache = new Map<string, { version: string; payload: unknown }>();
 
 /**
  * GET /api/sessions — play sessions reconstructed from the score timestamps:
- * consecutive plays (fails included) split whenever more than an hour passes
- * between two of them. All-time, so the client dims it under the time machine.
+ * consecutive plays split whenever more than an hour passes between two of
+ * them. All-time, so the client dims it under the time machine.
+ *
+ * A sitting is a REAL-TIME notion: its bounds and duration come from the
+ * mode's WHOLE activity, whatever pool or status the maps belong to. The
+ * pool/keys/scope filter only decides which plays are counted and listed
+ * inside each sitting (and a sitting with none of them is not shown).
+ * Splitting on the filtered subset instead used to invent sessions: two
+ * loved plays 90 minutes apart INSIDE one long ranked sitting became two
+ * tiny "sessions" under the loved scope, with wrong counts and durations.
  */
 sessionsRouter.get("/sessions", (req, res) => {
   const R = parseRulesetParam(req.query.ruleset);
-  const WHERE = sessionWhere(req, R);
+  const COND = scopeCond(req, R);
   const gapMin = gapMinutes(req);
   const GAP_MS = gapMin * 60_000;
   const version = `${scoresVersion()}|pp${ppLocalVersion()}`;
-  const cacheKey = `${WHERE}|${gapMin}`;
+  const cacheKey = `${R}|${COND}|${gapMin}`;
   const hit = sessionsCache.get(cacheKey);
   if (hit && hit.version === version) {
     // LRU touch: re-insert so a live entry is not first in line for eviction
@@ -79,11 +92,12 @@ sessionsRouter.get("/sessions", (req, res) => {
          CASE WHEN s.passed = 1
            THEN COALESCE(s.classic_total_score, s.total_score) ELSE 0
          END AS classic,
-         CASE WHEN u.best_lazer_score_id = s.id THEN 1 ELSE 0 END AS best
+         CASE WHEN u.best_lazer_score_id = s.id THEN 1 ELSE 0 END AS best,
+         CASE WHEN ${COND} THEN 1 ELSE 0 END AS in_scope
        FROM scores s
        JOIN beatmaps b ON b.id = s.beatmap_id
        LEFT JOIN beatmap_user u ON u.beatmap_id = s.beatmap_id AND u.ruleset = ${R}
-       WHERE ${WHERE} AND s.passed = 1
+       WHERE s.ruleset = ${R} AND s.passed = 1
        ORDER BY s.ended_at, s.id`
     )
     .all() as {
@@ -95,17 +109,19 @@ sessionsRouter.get("/sessions", (req, res) => {
     len: number | null;
     classic: number;
     best: number;
+    in_scope: number;
   }[];
 
-  const sessions: Session[] = [];
+  const sessions: (Session & { endMs: number })[] = [];
   const clearedMaps = new Set<number>();
-  // real seconds spent in maps (each pass at its rate) — the session `sec`
-  // is wall-clock and includes the short pauses
+  // real seconds spent in the FILTERED maps (each pass at its rate) — the
+  // session `sec` is wall-clock over the whole sitting, pauses included
   let playSec = 0;
   let cur: (Session & { endMs: number }) | null = null;
   for (const r of rows) {
-    playSec += Math.round(r.len ?? 0);
     const t = Date.parse(r.at);
+    // EVERY play of the mode advances the sitting (bounds and wall-clock),
+    // scoped or not: the sitting is when he was at the game, not what for
     if (cur == null || t - cur.endMs > GAP_MS) {
       cur = {
         start: r.at, end: r.at, endMs: t,
@@ -118,6 +134,9 @@ sessionsRouter.get("/sessions", (req, res) => {
       cur.end = r.at;
       cur.endMs = t;
     }
+    // ...but only the plays matching the pool/keys/scope filter are counted
+    if (r.in_scope !== 1) continue;
+    playSec += Math.round(r.len ?? 0);
     cur.plays++;
     if (r.best === 1) cur.bests++;
     // ordered scan over every score: the first pass on a map is its clear
@@ -131,11 +150,14 @@ sessionsRouter.get("/sessions", (req, res) => {
       cur.maxPpEst = r.pp_est;
     }
   }
+  // a sitting without a single play in the current scope has nothing to
+  // show or count: it is not part of this view
+  const kept = sessions.filter((s) => s.plays > 0);
 
   let longestSec = 0;
   let totalSec = 0;
   let totalPlays = 0;
-  for (const s of sessions) {
+  for (const s of kept) {
     longestSec = Math.max(longestSec, s.sec);
     totalSec += s.sec;
     totalPlays += s.plays;
@@ -143,15 +165,15 @@ sessionsRouter.get("/sessions", (req, res) => {
   const payload = {
     gapMin,
     summary: {
-      count: sessions.length,
+      count: kept.length,
       longestSec,
-      avgSec: sessions.length ? totalSec / sessions.length : 0,
-      avgPlays: sessions.length ? totalPlays / sessions.length : 0,
+      avgSec: kept.length ? totalSec / kept.length : 0,
+      avgPlays: kept.length ? totalPlays / kept.length : 0,
       totalSec,
       playSec,
     },
     // latest first; endMs was bookkeeping, not payload
-    sessions: sessions
+    sessions: kept
       .reverse()
       .map(({ start, end, sec, plays, bests, newClears, maxPpEst, classic, maxPp }) => ({
         start, end, sec, plays, bests, newClears, maxPpEst, classic, maxPp,
@@ -164,9 +186,11 @@ sessionsRouter.get("/sessions", (req, res) => {
 });
 
 /**
- * GET /api/sessions/scores — every score of one session (bounds from the
- * /sessions list), map identity included, for the detail panel. Small enough
- * (one sitting) to skip caching.
+ * GET /api/sessions/scores — the scores of one session (bounds from the
+ * /sessions list, which spans the whole sitting) matching the current
+ * pool/keys/scope filter, map identity included, for the detail panel:
+ * the list shows exactly the plays the session's counters counted. Small
+ * enough (one sitting) to skip caching.
  */
 sessionsRouter.get("/sessions/scores", (req, res) => {
   const R = parseRulesetParam(req.query.ruleset);

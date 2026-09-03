@@ -1,5 +1,6 @@
 import { config } from "../config.js";
 import { getState, setState } from "../db/db.js";
+import { rulesetDef } from "../logic/rulesets.js";
 import { RateLimiter, RetryableError, type Priority } from "./rateLimiter.js";
 import type {
   ApiBeatmap,
@@ -346,6 +347,34 @@ export function getStoredProfile(ruleset = 0): StoredProfile | null {
 /** Country code of the connected account, read from the stored profile. */
 export function getStoredCountryCode(): string | null {
   return getStoredProfile()?.country_code || null;
+}
+
+// one in-flight refresh per ruleset: the auth route and the poll can both
+// ask at once, a second concurrent call is a no-op
+const profileRefreshInFlight = new Set<number>();
+
+/**
+ * Fetches the connected profile for the mode and stores it, freshness
+ * stamped. Failures leave the stored profile as it was (the auth route's
+ * staleness check retries on its next hit). Requires a connected account.
+ */
+export async function refreshStoredProfile(ruleset = 0): Promise<void> {
+  if (profileRefreshInFlight.has(ruleset)) return;
+  profileRefreshInFlight.add(ruleset);
+  try {
+    const p = await fetchUserProfile(
+      ruleset === 0 ? undefined : rulesetDef(ruleset).apiName
+    );
+    if (p)
+      setState(
+        profileKey(ruleset),
+        JSON.stringify({ ...p, fetched_at: new Date().toISOString() })
+      );
+  } catch {
+    /* keep the stale copy */
+  } finally {
+    profileRefreshInFlight.delete(ruleset);
+  }
 }
 
 /** Log out of the account: forgets refresh token and profile. */

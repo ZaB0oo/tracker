@@ -57,6 +57,8 @@ export interface OverlayMetric {
   descending?: boolean;
   count: number;
   total: number; // maps matching the metric's map filters (0 for ranked_score/pp)
+  /** final goal of the metric (0 = none set) */
+  goal: number;
 }
 
 export async function fetchOverlayMetrics(ids: number[]): Promise<{ metrics: OverlayMetric[] }> {
@@ -961,6 +963,9 @@ export interface MetricParams {
   /** countdown only: conditions describe the GOAL — counts the played maps
    * whose best does not meet it yet (exact complement of the goal count) */
   invert?: boolean;
+  /** optional FINAL goal for the metric's value (e.g. 1T ranked score):
+   * second progress line on the card and the overlay. Ascending only. */
+  goal?: number;
   progressMode: "milestone" | "total";
   step: number;
   /** count metrics: `step` is a PERCENTAGE of the map total, not a map count */

@@ -107,6 +107,25 @@ function RangeRow({
 
 /** Placeholder formatter matching the slider's step — plain digits, no
  * thousands separators (they get cut off and read wrong for years). */
+/** "1T", "500b", "10k", "1000000" -> number (NaN when unreadable) */
+function parseGoal(txt: string): number {
+  const m = /^\s*([\d][\d.,]*)\s*([kmbt]?)\s*$/i.exec(txt);
+  if (!m) return NaN;
+  const n = Number(m[1].replace(/,/g, ""));
+  const mult = { "": 1, k: 1e3, m: 1e6, b: 1e9, t: 1e12 }[m[2].toLowerCase() as "" | "k" | "m" | "b" | "t"];
+  return n * mult;
+}
+
+/** stored goal back to a compact editable text ("1T", "500B", raw digits) */
+function goalToStr(g: number | undefined): string {
+  if (g == null || !(g > 0)) return "";
+  for (const [unit, mult] of [["T", 1e12], ["B", 1e9], ["M", 1e6], ["k", 1e3]] as const)
+    // clean up to 3 decimals in the unit ("1T", "210.5B"), else raw digits
+    if (g >= mult && g / mult < 10000 && Number.isInteger(Math.round((g / mult) * 1e6) / 1e3))
+      return `${+(g / mult).toFixed(3)}${unit}`;
+  return String(g);
+}
+
 function stepFmt(step: number): (v: number) => string {
   const dec = step < 0.1 ? 2 : step < 1 ? 1 : 0;
   return (v) => (dec ? v.toFixed(dec) : String(Math.round(v)));
@@ -207,7 +226,9 @@ export function MetricBuilder({
       : { ...DEFAULT_METRIC_PARAMS, ruleset, pool: "all" as const }
   );
   // the step input is kept as text so it can be emptied while typing
-  const [stepStr, setStepStr] = useState(String(edit?.params.step || 1000));
+  const [stepStr, setStepStr] = useState(goalToStr(edit?.params.step || 1000));
+  // final goal input, as text: accepts k/M/B/T suffixes ("1T", "500B")
+  const [goalStr, setGoalStr] = useState(goalToStr(edit?.params.goal));
   // map-pool text: ids or osu.ppy.sh links, one per line or comma-separated
   const [idsText, setIdsText] = useState(
     edit?.params.map.ids?.length ? edit.params.map.ids.join("\n") : ""
@@ -346,7 +367,7 @@ export function MetricBuilder({
                       : kind === "total_pp"
                         ? 100_000
                         : 1000;
-              setStepStr(String(step));
+              setStepStr(goalToStr(step));
               setP((s) => ({
                 ...s,
                 kind,
@@ -641,12 +662,14 @@ export function MetricBuilder({
             <label>
               every
               <input
-                type="number" min={p.stepPct ? 0.1 : 1} step="any" className="mb-step"
+                type="text" className="mb-step"
+                placeholder={p.stepPct ? "e.g. 0.5" : "e.g. 10B"}
+                title="Plain number, or k / M / B / T suffix (10B, 100k, 0.5M)"
                 value={stepStr}
                 onChange={(e) => {
                   const v = e.target.value;
                   setStepStr(v); // can be emptied while typing
-                  const n = Number(v);
+                  const n = parseGoal(v);
                   if (n > 0) setP((s) => ({ ...s, step: n }));
                 }}
               />
@@ -661,6 +684,27 @@ export function MetricBuilder({
                   <option value="maps">maps</option>
                   <option value="pct">% of pool</option>
                 </select>
+              )}
+            </label>
+          )}
+          {!(isCount && (p.descending ?? false)) && (
+            <label
+              title="Optional: the end of the road for this metric. Adds a second progress line on the card and the overlay. Accepts k / M / B / T suffixes."
+            >
+              Final goal
+              <input
+                type="text" className="mb-step mb-goal"
+                placeholder="none (e.g. 1T)"
+                value={goalStr}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setGoalStr(v);
+                  const n = parseGoal(v);
+                  setP((s) => ({ ...s, goal: v.trim() === "" ? undefined : n > 0 ? n : s.goal }));
+                }}
+              />
+              {goalStr.trim() !== "" && !(parseGoal(goalStr) > 0) && (
+                <span className="mb-goal-err">unreadable</span>
               )}
             </label>
           )}
@@ -691,7 +735,15 @@ export function MetricBuilder({
             >
               <input
                 type="checkbox" checked={p.descending ?? false}
-                onChange={(e) => setP((s) => ({ ...s, descending: e.target.checked }))}
+                onChange={(e) => {
+                  // a countdown's final goal is 0 by definition: drop the custom one
+                  if (e.target.checked) setGoalStr("");
+                  setP((s) => ({
+                    ...s,
+                    descending: e.target.checked,
+                    goal: e.target.checked ? undefined : s.goal,
+                  }));
+                }}
               />
               Countdown: maps to fix (goal 0)
             </label>

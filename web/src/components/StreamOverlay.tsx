@@ -230,6 +230,12 @@ export function StreamOverlay() {
                       {" "}/ {f(m.total)} ({((m.count / m.total) * 100).toFixed(1)}%)
                     </span>
                   )}
+                  {m.goal > 0 && (
+                    <span className="ov-dim">
+                      {" "}· goal {f(m.goal)} (
+                      {Math.min((m.count / m.goal) * 100, 100).toFixed(1)}%)
+                    </span>
+                  )}
                   {gainTag(gain, f, m.descending === true)}
                 </span>
               );

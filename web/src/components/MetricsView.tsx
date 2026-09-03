@@ -326,6 +326,21 @@ function MetricCard({
         <div className="goal-bar-fill" style={{ width: `${Math.min(pct, 100)}%` }} />
         <span>{label}</span>
       </div>
+      {/* optional second line: the FINAL goal (Arith's request), with the
+          overall progress toward it. Ascending metrics only. */}
+      {(m.params.goal ?? 0) > 0 && !isDesc && (
+        <div className="goal-bar metric-bar metric-final" title="Final goal">
+          <div
+            className="goal-bar-fill goal-final-fill"
+            style={{ width: `${Math.min((m.count / m.params.goal!) * 100, 100)}%` }}
+          />
+          <span>
+            {m.count >= m.params.goal!
+              ? `goal ${fmtV(m.params.goal!)} reached!`
+              : `goal: ${fmtV(m.params.goal!)} (${((m.count / m.params.goal!) * 100).toFixed(1)}%)`}
+          </span>
+        </div>
+      )}
 
       <div className="metric-content">
       <div className="metric-body">
@@ -383,6 +398,7 @@ function MetricCard({
             fmtY={fmtV}
             bare
             onPick={isWeightedPp ? setPpPeriod : undefined}
+            goal={!isDesc ? m.params.goal : undefined}
           />
         </div>
       )}

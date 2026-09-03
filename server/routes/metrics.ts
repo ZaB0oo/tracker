@@ -187,6 +187,13 @@ metricsRouter.get("/overlay-metrics", (req, res) => {
         descending: params.kind === "count" && params.descending === true,
         count,
         total: total !== whole ? total : 0,
+        // final goal second line (ascending metrics only, 0 = none)
+        goal:
+          typeof params.goal === "number" &&
+          params.goal > 0 &&
+          !(params.kind === "count" && params.descending === true)
+            ? params.goal
+            : 0,
       }];
     }),
   });
@@ -221,6 +228,12 @@ metricsRouter.post("/metrics", (req, res) => {
       .json({ ok: false, error: "percent steps are for count metrics" });
   if (params.stepPct === true && !(Number(params.step) <= 100))
     return res.status(400).json({ ok: false, error: "invalid step (1-100%)" });
+  if (params.goal != null && !(Number(params.goal) > 0))
+    return res.status(400).json({ ok: false, error: "invalid final goal" });
+  if (params.goal != null && params.kind === "count" && params.descending === true)
+    return res
+      .status(400)
+      .json({ ok: false, error: "a countdown already has a final goal: 0" });
   try {
     previewMetric(params); // validates the conditions compile
   } catch (e) {
@@ -252,6 +265,12 @@ metricsRouter.put("/metrics/:id", (req, res) => {
       .json({ ok: false, error: "percent steps are for count metrics" });
   if (params.stepPct === true && !(Number(params.step) <= 100))
     return res.status(400).json({ ok: false, error: "invalid step (1-100%)" });
+  if (params.goal != null && !(Number(params.goal) > 0))
+    return res.status(400).json({ ok: false, error: "invalid final goal" });
+  if (params.goal != null && params.kind === "count" && params.descending === true)
+    return res
+      .status(400)
+      .json({ ok: false, error: "a countdown already has a final goal: 0" });
   try {
     previewMetric(params);
   } catch (e) {

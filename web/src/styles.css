@@ -2160,3 +2160,54 @@ body.overlay-body { background: transparent; }
 /* hero strip skeleton: label + value shaped blocks */
 .skeleton-strip-label { height: 9px; width: 70%; }
 .skeleton-strip-value { height: 15px; width: 55%; }
+
+/* ------------------------------------------------ new-best toasts + glow */
+.best-toast-stack {
+  position: fixed; right: 14px; bottom: 16px; z-index: 220;
+  display: flex; flex-direction: column; gap: 8px; max-width: 380px;
+}
+.best-toast {
+  display: flex; gap: 10px; align-items: center;
+  background: var(--bg2); border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px; padding: 8px 12px 8px 8px; cursor: pointer;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  animation: toast-in 0.25s ease-out;
+}
+.best-toast img {
+  width: 64px; height: 36px; object-fit: cover; border-radius: 4px;
+  background: var(--bg3); flex: none;
+}
+.best-toast-txt { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.best-toast-txt b {
+  font-size: 10px; color: var(--accent);
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.best-toast-txt span {
+  font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.best-toast-txt i { font-size: 11px; color: var(--fg-dim); font-style: normal; }
+@keyframes toast-in {
+  from { opacity: 0; translate: 24px 0; }
+  to { opacity: 1; translate: 0 0; }
+}
+
+/* a strip tile whose value just moved: one glow, then back to normal */
+.strip-tile-flash b { animation: strip-glow 1.4s ease-out; }
+@keyframes strip-glow {
+  0% { color: var(--accent); text-shadow: 0 0 14px rgba(255, 102, 170, 0.8); }
+  55% { color: var(--accent); text-shadow: 0 0 6px rgba(255, 102, 170, 0.35); }
+  100% { text-shadow: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .best-toast { animation: none; }
+  .strip-tile-flash b { animation: none; }
+}
+
+/* second progress line of a metric card: the FINAL goal */
+.metric-final { height: 18px; border-radius: 9px; margin-top: -6px; }
+.metric-final span { line-height: 18px; font-size: 11px; }
+.goal-final-fill { background: linear-gradient(90deg, #2a4a6a, var(--accent2)); }
+.mb-goal { width: 110px; }
+.mb-goal-err { color: #f25c5c; font-size: 11px; margin-left: 6px; }

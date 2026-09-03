@@ -1267,11 +1267,9 @@ export function Dashboard({
           countryLabel={firstPlaceLabel(country)}
         />
       </div>
-      {/* sessions are all-time: the slider has nothing to steer there, so it
-          hides rather than sitting around only to dim the panel */}
-      {points.length > 1 && tab !== "sessions" && (
-        <TimeMachineBar points={points} idx={tmIdx} onChange={setTmIdx} />
-      )}
+      {/* tabs ABOVE the time machine: the slider hides on the sessions tab
+          (all-time, nothing to steer), and were it first, its disappearance
+          would shift the tab buttons right as they are being clicked */}
       <div className="dash-tabs">
         {DASH_TABS.map(([id, label]) => (
           <button
@@ -1283,6 +1281,9 @@ export function Dashboard({
           </button>
         ))}
       </div>
+      {points.length > 1 && tab !== "sessions" && (
+        <TimeMachineBar points={points} idx={tmIdx} onChange={setTmIdx} />
+      )}
       </div>
       <div className="dash-tab-body fade-swap" key={tab}>
       {tab === "overview" && (

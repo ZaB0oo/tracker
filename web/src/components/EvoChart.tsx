@@ -31,6 +31,7 @@ export function EvoChart({
   fmtY = fmtNum,
   bare = false,
   onPick,
+  goal,
 }: {
   title?: string;
   data: { period: string; value: number }[];
@@ -38,6 +39,10 @@ export function EvoChart({
   bare?: boolean;
   /** called on a simple click (no drag) with the clicked point's period */
   onPick?: (period: string) => void;
+  /** final goal: a dashed blue horizontal line (the axis stretches to it
+   * while it stays within 3x the curve's max; farther, the line would
+   * squash the curve into a floor-hugging sliver, so it waits) */
+  goal?: number;
 }) {
   const gradId = useId();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -52,7 +57,10 @@ export function EvoChart({
   const FS = 15; // axis label font size (viewBox units)
   const plotBot = H - MB;
   const x = (i: number) => ML + (n > 1 ? i / (n - 1) : 0.5) * (W - ML - MR);
-  const yMax = niceCeil(Math.max(...view.map((r) => r.value), 1));
+  const dataMax = Math.max(...view.map((r) => r.value), 1);
+  const yMax = niceCeil(
+    Math.max(dataMax, goal != null && goal > 0 && goal <= dataMax * 3 ? goal : 0)
+  );
   const y = (v: number) => MT + (1 - v / yMax) * (plotBot - MT);
   const line = view
     .map((r, i) => `${x(i).toFixed(1)},${y(r.value).toFixed(1)}`)
@@ -142,6 +150,24 @@ export function EvoChart({
           </text>
         ))}
         <polygon points={area} fill={`url(#${gradId})`} />
+        {goal != null && goal > 0 && goal <= yMax && (
+          <g>
+            <line
+              x1={ML} x2={W - MR} y1={y(goal)} y2={y(goal)}
+              stroke="var(--accent2)" strokeWidth={1.5} strokeDasharray="7 5"
+            />
+            <text
+              x={W - MR - 6}
+              // a goal near the axis top has no room above the line: the
+              // label was clipped by the chart edge, so it flips below
+              y={y(goal) - 6 - FS >= 0 ? y(goal) - 6 : y(goal) + FS + 4}
+              textAnchor="end"
+              fill="var(--accent2)" fontSize={FS}
+            >
+              goal {fmtY(goal)}
+            </text>
+          </g>
+        )}
         <polyline points={line} fill="none" stroke="var(--accent)" strokeWidth="2" />
         {drag && (
           <rect

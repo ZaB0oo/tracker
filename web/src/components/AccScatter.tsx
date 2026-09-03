@@ -5,6 +5,13 @@ import { fetchMapNames, fetchScatter, type DashScope, type ScatterPoint } from "
 import { fmtNum } from "../format";
 import { FC_LABELS, GRADE_ORDER, type PoolMode } from "../types";
 import { MapModal } from "./MapModal";
+import {
+  ACC_FLOOR,
+  makeInView,
+  niceStep,
+  scatterExtent,
+  type Zoom,
+} from "../lib/scatterMath";
 
 // logical drawing space: the canvas is sized to the element's real width at
 // devicePixelRatio, so the dots stay crisp at any panel width
@@ -13,8 +20,6 @@ const L = 46;
 const RGT = 12;
 const T = 10;
 const B = 26;
-/** the axis floor: everything below (rare) is drawn on the floor line */
-const ACC_FLOOR = 0.55;
 const HOVER_R = 9;
 
 /** dot colour per FC state (PFC and FC read as one achievement here) */
@@ -27,23 +32,6 @@ const GRADE_COLORS = [
   "#f25c5c", "#f2984e", "#eec04c", "#88e05a",
   "#40d1c0", "#b3f0e8", "#ff66aa", "#ffc2dd",
 ];
-
-/** a 1/2/5×10^k step giving at most `target` gridlines over `span` — the
- * loved pool holds aspire maps in the hundreds of stars, a fixed 1★ step
- * would paint a wall of labels */
-const niceStep = (span: number, target: number, min: number): number => {
-  const raw = Math.max(span, 1e-9) / target;
-  const pow = 10 ** Math.floor(Math.log10(raw));
-  for (const m of [1, 2, 5, 10]) if (pow * m >= raw) return Math.max(min, pow * m);
-  return Math.max(min, pow * 10);
-};
-
-interface Zoom {
-  x0: number;
-  x1: number;
-  a0: number;
-  a1: number;
-}
 
 /**
  * Accuracy against difficulty, one dot per map (the best score) — the whole
@@ -92,28 +80,10 @@ export const AccScatterPanel = memo(function AccScatterPanel({
   const keyOf = (p: ScatterPoint) => (mode === "grades" ? p[4] : p[3] <= 1 ? 0 : 1);
   const isHidden = (p: ScatterPoint) => hidden.has(keyOf(p));
   // Full extent by default: the hardest ranked maps (13-14★) deserve their
-  // place on the axis instead of piling on the right edge. The percentile
-  // cap only kicks in when the tail is OUT OF SCALE with the bulk (aspire
-  // maps in the hundreds of stars would squash everything into a sliver);
-  // capped-out points still pile on the edge, nothing disappears.
-  const xMax = useMemo(() => {
-    if (pts.length === 0) return 10;
-    const srs = pts.map((p) => p[1]).sort((a, b) => a - b);
-    const cap = srs[Math.min(srs.length - 1, Math.floor(srs.length * 0.995))];
-    // The extent is the highest map still PROPORTIONATE to the bulk (within
-    // 3x the 99.5th percentile). Only the out-of-scale tail (loved aspire
-    // maps in the hundreds of stars) is excluded and piles on the edge, so
-    // the All pool keeps the same axis as Ranked instead of collapsing to
-    // the percentile the moment one aspire map enters the cloud.
-    let lim = cap;
-    for (let i = srs.length - 1; i >= 0; i--) {
-      if (srs[i] <= cap * 3) {
-        lim = srs[i];
-        break;
-      }
-    }
-    return Math.max(1, Math.ceil(lim * 2) / 2);
-  }, [pts]);
+  // place on the axis instead of piling on the right edge; only the
+  // out-of-scale aspire tail is excluded and piles there. The math lives in
+  // lib/scatterMath (unit tested), see scatterExtent for the details.
+  const xMax = useMemo(() => scatterExtent(pts.map((p) => p[1])), [pts]);
   // the visible domain: the zoom rectangle, or the full extent
   const dx0 = zoom?.x0 ?? 0;
   const dx1 = zoom?.x1 ?? xMax;
@@ -126,11 +96,13 @@ export const AccScatterPanel = memo(function AccScatterPanel({
     L + ((Math.min(sr, dx1) - dx0) / (dx1 - dx0)) * (width - L - RGT);
   const y = (acc: number) =>
     T + (1 - (Math.max(acc, da0) - da0) / (da1 - da0)) * (H - T - B);
-  // unzoomed, outliers pile on the edges (right edge / floor line) so every
-  // map stays visible; zoomed, whatever lies outside the window is dropped
-  const inView = (p: ScatterPoint) =>
-    zoom == null ||
-    (p[1] >= dx0 && p[1] <= dx1 && p[2] >= da0 && p[2] <= da1);
+  // Unzoomed, outliers pile on the edges (right edge / floor line) so every
+  // map stays visible. Zoomed, the same pile semantics survive on any window
+  // edge still touching the extent: the 13+ star pile used to vanish the
+  // moment a zoom existed, unreachable by any window since zoom is clamped
+  // to the extent (see makeInView in lib/scatterMath, unit tested).
+  const vis = useMemo(() => makeInView(zoom, xMax), [zoom, xMax]);
+  const inView = (p: ScatterPoint) => vis(p[1], p[2]);
 
   // The element's real width, kept in sync so the canvas never upscales.
   // `ready` matters: the first mount renders the skeleton (no canvas), so an
@@ -371,9 +343,8 @@ export const AccScatterPanel = memo(function AccScatterPanel({
             const { mx, my } = mouseXY(e);
             if (e.button === 1) {
               // middle button: grab the view and pan it. Only when zoomed:
-              // panning the full view would turn it into an explicit zoom of
-              // the same domain, which DROPS the edge-piled outliers (the
-              // full view clamps them onto the edges, a zoom clips them)
+              // the full view has nowhere to pan to (the domain already
+              // covers the whole extent, every clamp is a no-op)
               e.preventDefault();
               if (zoom == null) return;
               panRef.current = { sx: mx, sy: my, z: { x0: dx0, x1: dx1, a0: da0, a1: da1 } };

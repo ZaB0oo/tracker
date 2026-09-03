@@ -12,6 +12,7 @@ import { MetricsView } from "./components/MetricsView";
 import { SyncBar } from "./components/SyncBar";
 import { ActivityWindow } from "./components/ActivityWindow";
 import { StreamOverlay } from "./components/StreamOverlay";
+import { BestToasts } from "./components/BestToasts";
 
 export type SortSpec = { id: string; desc: boolean }[];
 type View = "table" | "metrics" | "history" | "dashboard";
@@ -144,6 +145,7 @@ export default function App() {
       </nav>
 
       <SyncBar ruleset={ruleset} pool={filters.pool} keys={filters.keys} />
+      <BestToasts />
 
       <div className="main-view fade-swap" key={view}>
       {view === "table" && (

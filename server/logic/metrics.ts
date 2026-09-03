@@ -84,6 +84,10 @@ export interface MetricParams {
    * complement of the matching count, even when the goal mixes several hit
    * bounds (impossible to express as direct to-fix ranges: it needs an OR). */
   invert?: boolean;
+  /** optional FINAL goal for the metric's value (e.g. 1T ranked score): the
+   * card and the overlay show a second progress line toward it. Ascending
+   * metrics only (a countdown already heads to its goal, 0). */
+  goal?: number;
   /** "milestone": progress toward the next step. "total": X / all available maps. */
   progressMode: "milestone" | "total";
   step: number;

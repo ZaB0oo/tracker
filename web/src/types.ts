@@ -221,6 +221,23 @@ export interface SyncStatus {
   queue: { high: number; low: number };
   errors: string[];
   activity: { at: string; source: string; text: string }[];
+  /** live feed of the latest best scores (ring buffer, monotone ids):
+   * drives the in-app toast, the stat tile pulse and the desktop
+   * notification. A client only reacts to ids newer than the max it saw. */
+  bests: {
+    id: number;
+    at: string;
+    beatmapId: number;
+    setId: number;
+    ruleset: number;
+    label: string;
+    grade: string;
+    accuracy: number;
+    pp: number | null;
+    firstClear: boolean;
+    countryFirst: boolean;
+    globalRank: number | null;
+  }[];
   sweeps: {
     country: boolean;
     countryChecked: number;

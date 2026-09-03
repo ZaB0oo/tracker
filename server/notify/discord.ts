@@ -599,6 +599,24 @@ export function updateBestHonors(beatmapId: number, ruleset: number): void {
   const w = honorWatch.get(key);
   if (!w) return;
   try {
+    // The watched message must still be the map's CURRENT best. Right after
+    // an improvement on the same map, the new score's country/global check
+    // runs BEFORE its own message is posted (posting is what supersedes the
+    // watch), so the honor it discovers would be edited into the OLD post,
+    // a score that never held it (seen live: "#1 FR" edited into the
+    // pre-snipe score, one minute before the actual snipe). The honor
+    // belongs to the new best's own message: drop the stale watch instead.
+    const cur = getDb()
+      .prepare(
+        `SELECT s.total_score AS std FROM beatmap_user u
+         JOIN scores s ON s.id = u.best_lazer_score_id
+         WHERE u.beatmap_id = ? AND u.ruleset = ?`
+      )
+      .get(beatmapId, ruleset) as { std: number } | undefined;
+    if (cur && w.event.scoreStd != null && cur.std !== w.event.scoreStd) {
+      honorWatch.delete(key);
+      return;
+    }
     const row = getDb()
       .prepare(
         "SELECT global_rank, country_first FROM beatmap_user WHERE beatmap_id = ? AND ruleset = ?"
@@ -1093,6 +1111,14 @@ function metricEmbed(
         ? ` (${((next / r.total) * 100).toFixed(1)}%)`
         : "";
     lines.push(`Next milestone: **${fmtInt(next)}**${pct}`);
+  }
+  // final goal (same webhook option as the milestones: kind "metric")
+  if (!down && typeof p.goal === "number" && p.goal > 0) {
+    lines.push(
+      r.count >= p.goal
+        ? `Final goal: **${fmtInt(p.goal)}**, reached!`
+        : `Final goal: **${fmtInt(p.goal)}** (${Math.min((r.count / p.goal) * 100, 100).toFixed(1)}%)`
+    );
   }
   if (p.kind === "count") {
     const dim = p.breakdown ?? "sr";

@@ -26,6 +26,9 @@ import {
   getRecentScores,
   getUserBeatmapPosition,
   getStoredCountryCode,
+  getStoredProfile,
+  profileKey,
+  refreshStoredProfile,
   getUserBeatmapScores,
   isUserConnected,
   limiter,
@@ -145,6 +148,73 @@ function mapLabel(beatmapId: number): string {
   return r?.label ?? `map ${beatmapId}`;
 }
 
+/**
+ * Live best feed for the UI (toast, tile pulse, desktop notification): the
+ * same events the Discord path notifies, kept in a small ring buffer served
+ * with the status. Ids are monotone within the process; the client keeps the
+ * last id seen and only reacts to newer entries (and initialises to the
+ * current max on load, so a page refresh never replays old bests).
+ */
+export interface BestFeedEntry {
+  id: number;
+  at: string;
+  beatmapId: number;
+  setId: number;
+  ruleset: number;
+  /** "Artist - Title [Diff]" */
+  label: string;
+  grade: string;
+  accuracy: number;
+  pp: number | null;
+  firstClear: boolean;
+  countryFirst: boolean;
+  globalRank: number | null;
+}
+
+let bestFeedSeq = 0;
+const bestFeed: BestFeedEntry[] = [];
+const BEST_FEED_MAX = 50;
+
+/** feed only carries bests that JUST happened: the toast is a "right now"
+ * signal. After a restart or a long process, the poll catches up on scores
+ * set while the app was busy or closed; toasting those minutes or hours
+ * later reads as notifications firing "at the end of the process". Discord
+ * keeps notifying them (its posts show the score's own timestamp). */
+const BEST_FEED_FRESH_MS = 30 * 60_000;
+
+function pushBestFeed(e: BestEvent): void {
+  try {
+    const age = Date.now() - Date.parse(e.endedAt);
+    if (Number.isFinite(age) && age > BEST_FEED_FRESH_MS) return;
+    const m = getDb()
+      .prepare(
+        `SELECT st.artist || ' - ' || st.title || ' [' || b.version || ']' AS label,
+                b.beatmapset_id AS setId
+         FROM beatmaps b JOIN beatmapsets st ON st.id = b.beatmapset_id
+         WHERE b.id = ?`
+      )
+      .get(e.beatmapId) as { label: string; setId: number } | undefined;
+    bestFeed.push({
+      id: ++bestFeedSeq,
+      at: new Date().toISOString(),
+      beatmapId: e.beatmapId,
+      setId: m?.setId ?? 0,
+      ruleset: e.ruleset,
+      label: m?.label ?? `map ${e.beatmapId}`,
+      grade: e.grade,
+      accuracy: e.accuracy,
+      pp: e.pp ?? e.ppLocal ?? null,
+      firstClear: e.firstClear,
+      countryFirst: e.countryFirst === true,
+      globalRank: e.globalRank ?? null,
+    });
+    if (bestFeed.length > BEST_FEED_MAX)
+      bestFeed.splice(0, bestFeed.length - BEST_FEED_MAX);
+  } catch (err) {
+    logError(err, `best feed map ${e.beatmapId}`);
+  }
+}
+
 // Every write to `status.message` is timestamped automatically: the UI can
 // hide stale messages.
 const status = new Proxy(statusData, {
@@ -206,6 +276,7 @@ export function getDaemonStatus(): DaemonStatus & {
     globalPending: number;
   };
   rulesets: RulesetProgress[];
+  bests: BestFeedEntry[];
 } {
   const db = getDb();
   if (!countersMemo || Date.now() - countersMemo.at > 5000) {
@@ -284,6 +355,7 @@ export function getDaemonStatus(): DaemonStatus & {
     backfillPausedModes,
     backfillPassRuleset: status.backfill.running ? backfillPassRuleset : null,
     rulesets,
+    bests: bestFeed,
     sweeps: {
       country: countryRunning,
       global: globalRunning,
@@ -876,8 +948,29 @@ async function pollRecentScoresForMode(mode: number): Promise<number> {
       }
     }
   }
+  // UI feed first (independent of any webhook config), then Discord
+  for (const e of bestEvents) pushBestFeed(e);
   notifyBests(bestEvents);
   if (newCount > 0) notifyMetricMilestones();
+  if (newCount > 0) {
+    // New plays move the profile figures (play count, play time, total
+    // score, pp, medals). Drop the stored profile's freshness stamp (so a
+    // failed refresh is retried by the next /auth/status hit) AND refresh
+    // it right now in the background: by the time the UI learns about the
+    // best (status poll, up to 5 s), the fresh numbers are already stored,
+    // and the profile tiles count up in the SAME wave as the aggregates
+    // instead of one minute behind them.
+    try {
+      const p = getStoredProfile(mode);
+      if (p?.fetched_at) {
+        delete p.fetched_at;
+        setState(profileKey(mode), JSON.stringify(p));
+      }
+      if (isUserConnected()) void refreshStoredProfile(mode);
+    } catch {
+      /* cosmetic freshness only: never let it break the poll */
+    }
+  }
   status.lastPollAt = new Date().toISOString();
   status.lastPollNewScores = newCount;
   setState("last_poll_at", status.lastPollAt);

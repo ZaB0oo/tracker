@@ -8,9 +8,10 @@ import {
   isUserConnected,
   logoutUser,
   profileKey,
+  refreshStoredProfile,
   type StoredProfile,
 } from "../osu/api.js";
-import { parseRulesetParam, rulesetDef } from "../logic/rulesets.js";
+import { parseRulesetParam } from "../logic/rulesets.js";
 import { runCountrySweep } from "../sync/daemon.js";
 
 // User OAuth (country leaderboards, requires supporter)
@@ -44,10 +45,6 @@ authRouter.get("/auth/callback", async (req, res) => {
   }
 });
 
-// one in-flight fetch per ruleset: the profile stats (pp, ranks, accuracy) are
-// per mode, so each mode has its own cached copy
-const profileFetchInFlight = new Set<number>();
-
 authRouter.get("/auth/status", (req, res) => {
   const R = parseRulesetParam(req.query.ruleset);
   const connected = isUserConnected();
@@ -65,21 +62,8 @@ authRouter.get("/auth/status", (req, res) => {
       profile.daily_challenge === undefined ||
       profile.fetched_at == null ||
       Date.now() - Date.parse(profile.fetched_at) > 60 * 60_000;
-    if (stale && !profileFetchInFlight.has(R)) {
-      profileFetchInFlight.add(R);
-      void fetchUserProfile(R === 0 ? undefined : rulesetDef(R).apiName)
-        .then((p) => {
-          if (p)
-            setState(
-              profileKey(R),
-              JSON.stringify({ ...p, fetched_at: new Date().toISOString() })
-            );
-        })
-        .catch(() => undefined)
-        .finally(() => {
-          profileFetchInFlight.delete(R);
-        });
-    }
+    // shared with the poll's post-score refresh (in-flight guard inside)
+    if (stale) void refreshStoredProfile(R);
   }
   res.json({ connected, profile, ruleset: R });
 });
