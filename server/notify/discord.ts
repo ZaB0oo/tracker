@@ -477,6 +477,8 @@ async function drain(): Promise<void> {
             const postUrl = message.meta
               ? `${url}${url.includes("?") ? "&" : "?"}wait=true`
               : url;
+            // deadline: a hung webhook connection kept `draining` true
+            // forever and silently froze every later notification
             const res = await fetch(postUrl, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -484,6 +486,7 @@ async function drain(): Promise<void> {
                 content: message.content,
                 embeds: message.embeds,
               }),
+              signal: AbortSignal.timeout(30_000),
             });
             if (res.status === 429) {
               // capped: a webhook permanently answering 429 must not hold
@@ -649,6 +652,7 @@ async function editWebhookMessage(msg: SentBestMessage): Promise<void> {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ embeds: msg.embeds }),
+          signal: AbortSignal.timeout(30_000),
         });
         if (res.status === 429) {
           if (attempts >= 6) {
@@ -1544,6 +1548,7 @@ export async function sendTest(): Promise<string | null> {
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(30_000),
         body: JSON.stringify({
           embeds: [
             {

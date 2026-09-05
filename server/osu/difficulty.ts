@@ -53,8 +53,11 @@ async function osuFile(beatmapId: number): Promise<Buffer | null> {
     const late = cached(beatmapId);
     if (late) return late;
     try {
+      // the poll awaits this computation for Discord SR display: a hung
+      // download with no deadline used to freeze score ingestion entirely
       const res = await fetch(`https://osu.ppy.sh/osu/${beatmapId}`, {
         headers: { "User-Agent": config.userAgent },
+        signal: AbortSignal.timeout(60_000),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body = Buffer.from(await res.arrayBuffer());

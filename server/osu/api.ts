@@ -42,9 +42,17 @@ export function resetAuthTokens(): void {
  * failed") into a RetryableError with the URL: the rate limiter retries with
  * backoff instead of failing outright, and the logged error says on what.
  */
+/** Hard deadline on every API request: Node's fetch has none by default,
+ * and the limiter runs its jobs ONE at a time, so a single hung connection
+ * (Cloudflare stall, network drop mid-request) froze the entire queue and
+ * the app looked dead for hours (seen live: 2 h without one DB write). A
+ * timed-out request becomes a retryable network error like any other: the
+ * limiter backs off and the queue keeps moving. */
+const FETCH_TIMEOUT_MS = 30_000;
+
 async function netFetch(url: string, init?: RequestInit): Promise<Response> {
   try {
-    return await fetch(url, init);
+    return await fetch(url, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     throw new RetryableError(`network: ${msg} (${url})`);
@@ -478,11 +486,27 @@ export async function getUserBeatmapPosition(
   modeName = "osu"
 ): Promise<number | null> {
   try {
-    const res = await apiGet<{ position?: number | null }>(
-      `/beatmaps/${beatmapId}/scores/users/${userId}?mode=${modeName}`,
-      priority
-    );
-    return res.position ?? null;
+    for (let attempt = 1; ; attempt++) {
+      const res = await apiGet<{ position?: number | null; score?: unknown }>(
+        `/beatmaps/${beatmapId}/scores/users/${userId}?mode=${modeName}`,
+        priority
+      );
+      if (res.position != null) return res.position;
+      if (res.score == null) return null; // no score at all: genuinely unranked
+      // A 200 that carries the SCORE but no position: osu! could not compute
+      // the leaderboard right then (transient on their side). This is NOT
+      // "outside the top 100": the endpoint reports the absolute position
+      // (#4523 included), so a real drop out of the top 100 still comes back
+      // as a number. Treating this null as a result recorded false losses
+      // (seen live: two held #29 "dropped" to outside-top-100 in one sweep
+      // pass, three seconds apart, Discord announced both). Retry a couple
+      // of times through the limiter, then fail so the caller requeues.
+      if (attempt >= 3)
+        throw new RetryableError(
+          `beatmap ${beatmapId}: score present but no position (leaderboard not computed)`
+        );
+      await new Promise((r) => setTimeout(r, 2000 * attempt));
+    }
   } catch (e) {
     if (e instanceof NotFoundError) return null;
     throw e;

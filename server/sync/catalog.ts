@@ -159,9 +159,20 @@ export async function fetchBeatmapsetFromWeb(
   setId: number
 ): Promise<ApiBeatmapset | null> {
   return limiter.schedule(async () => {
-    const res = await fetch(`https://osu.ppy.sh/beatmapsets/${setId}`, {
-      headers: { "User-Agent": config.userAgent, Accept: "text/html" },
-    });
+    // no-timeout fetch inside the serialized limiter = one hung connection
+    // freezes every API job behind it; the deadline turns a stall into a
+    // retryable error instead
+    let res: Response;
+    try {
+      res = await fetch(`https://osu.ppy.sh/beatmapsets/${setId}`, {
+        headers: { "User-Agent": config.userAgent, Accept: "text/html" },
+        signal: AbortSignal.timeout(60_000),
+      });
+    } catch (e) {
+      throw new RetryableError(
+        `web network: ${e instanceof Error ? e.message : String(e)}`
+      );
+    }
     if (res.status === 404) return null;
     if (res.status === 429 || res.status >= 500)
       throw new RetryableError(`web ${res.status}`);

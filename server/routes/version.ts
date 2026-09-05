@@ -32,6 +32,7 @@ const CHECK_TTL_MS = 24 * 3600 * 1000;
 async function fetchLatest(): Promise<{ tag: string; url: string } | null> {
   try {
     const res = await fetch(`https://github.com/${REPO}/releases/latest`, {
+      signal: AbortSignal.timeout(20_000),
       redirect: "manual",
     });
     const loc = res.headers.get("location");

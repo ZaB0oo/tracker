@@ -84,7 +84,7 @@ let imgCache: { at: number; data: { avatar: string | null; cover: string | null 
 async function toDataUrl(url: string | undefined): Promise<string | null> {
   if (!url) return null;
   try {
-    const r = await fetch(url);
+    const r = await fetch(url, { signal: AbortSignal.timeout(20_000) });
     if (!r.ok) return null;
     const buf = Buffer.from(await r.arrayBuffer());
     if (buf.length > 8_000_000) return null; // keep the SVG payload sane

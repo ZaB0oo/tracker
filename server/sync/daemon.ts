@@ -1280,6 +1280,23 @@ export function startCatalogRefresh(): void {
                AND country_checked_at < datetime('now', '-' || ? || ' hours')`
           )
           .run(getCountryRecheckHours());
+        // Heal false snipes recorded before the empty-leaderboard guard: a
+        // real snipe names the sniper, so a recent "lost" WITHOUT a sniper
+        // is the degraded-fetch signature. Requeue those maps: the re-check
+        // either restores the #1 (gained event) or confirms the loss with
+        // its author. Window-bounded, so a genuine oddity cannot churn
+        // forever.
+        getDb().exec(
+          `UPDATE beatmap_user SET country_checked_at = NULL
+           WHERE ruleset IN (${sqlIn(getStartedRulesets())})
+             AND country_first = 0 AND country_checked_at IS NOT NULL
+             AND EXISTS (
+               SELECT 1 FROM country_events e
+               WHERE e.beatmap_id = beatmap_user.beatmap_id
+                 AND e.ruleset = beatmap_user.ruleset
+                 AND e.event = 'lost' AND e.by_user_id IS NULL
+                 AND e.at > datetime('now', '-7 days'))`
+        );
         void runCountrySweep();
       }
       // global tops: re-check held top-100 positions older than the delay,
@@ -1306,6 +1323,24 @@ export function startCatalogRefresh(): void {
                AND s.ruleset = beatmap_user.ruleset
                AND datetime(s.ended_at) >= datetime('now', '-2 days')
                AND datetime(beatmap_user.global_checked_at) <= datetime(s.ended_at, '+15 minutes'))`
+        );
+        // Heal false "outside top 100" drops recorded before the missing-
+        // position guard: a rank that fell to NULL leaves the 48 h re-check
+        // rotation (it only requeues ranks <= 100), so without this the
+        // false state was permanent until a new score on the map. Requeue
+        // every NULL rank with a recent drop-to-null event: the re-check
+        // restores the real position (or stores the real one, a number,
+        // which leaves this condition). Window-bounded.
+        gdb.exec(
+          `UPDATE beatmap_user SET global_checked_at = NULL
+           WHERE ruleset IN (${sqlIn(getStartedRulesets())})
+             AND global_rank IS NULL AND global_checked_at IS NOT NULL
+             AND EXISTS (
+               SELECT 1 FROM global_events e
+               WHERE e.beatmap_id = beatmap_user.beatmap_id
+                 AND e.ruleset = beatmap_user.ruleset
+                 AND e.new_rank IS NULL AND e.old_rank IS NOT NULL
+                 AND e.at > datetime('now', '-7 days'))`
         );
         void runGlobalSweep();
       }
@@ -1440,6 +1475,21 @@ export function applyCountryCheck(
   const isFirst = top && top.user_id === config.osuUserId ? 1 : 0;
   const wasChecked = prev?.country_checked_at != null;
   const prevFirst = prev?.country_first ?? 0;
+  // A held #1 with an EMPTY leaderboard is never a real snipe: my own
+  // eligible score was on that leaderboard, and a genuine snipe returns
+  // the sniper's score on top, not nothing. An empty response is a
+  // degraded fetch: keep the held state, requeue the map for a retry, and
+  // record nothing (a false "lost" would now notify a phantom snipe).
+  if (top == null && prevFirst === 1) {
+    db.prepare(
+      "UPDATE beatmap_user SET country_checked_at = NULL WHERE beatmap_id = ? AND ruleset = ?"
+    ).run(beatmapId, ruleset);
+    logActivity(
+      "country #1",
+      () => `${mapLabel(beatmapId)} · empty leaderboard on a held #1, retrying later`
+    );
+    return;
+  }
 
   // Losing a held #1 is ALWAYS logged (country_first=1 implies a check had
   // established it, even if country_checked_at was reset to NULL for the re-check).
@@ -1619,6 +1669,22 @@ export function applyGlobalCheck(
       }
     | undefined;
   const prevRank = prev?.global_rank ?? null;
+  // Belt matching the API-side guard: the position endpoint reports the
+  // ABSOLUTE rank, so a real drop below 100 arrives as a number (#4523),
+  // never as null. A null landing on a map with a KNOWN rank means the
+  // check could not see the leaderboard (or the score vanished, which is
+  // extraordinary): keep the known state and requeue instead of recording
+  // a false "outside top 100".
+  if (pos == null && prevRank != null) {
+    db.prepare(
+      "UPDATE beatmap_user SET global_checked_at = NULL WHERE beatmap_id = ? AND ruleset = ?"
+    ).run(beatmapId, ruleset);
+    logActivity(
+      "global tops",
+      () => `${mapLabel(beatmapId)} · no position on a ranked map (held #${prevRank}), retrying later`
+    );
+    return;
+  }
   // "known" = a previous check happened — global_seen survives the re-queues
   // that reset global_checked_at, so re-check transitions are always logged
   const wasKnown =
