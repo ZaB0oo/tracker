@@ -1344,6 +1344,9 @@ export function startCatalogRefresh(): void {
         );
         void runGlobalSweep();
       }
+      // the maps those healing passes just requeued jump the queue: direct
+      // high-priority re-check instead of waiting behind the whole backlog
+      void confirmRepairedChecks().catch((e) => logError(e, "repair re-checks"));
       if (!status.backfill.running && !catalogRunning)
         void fillConvertAttrs().catch((e) => logError(e, "convert attrs"));
       // Self-heal: a STARTED mode whose initial enumeration never finished
@@ -1415,6 +1418,81 @@ function scheduleCountryConfirm(beatmapId: number, ruleset = 0): void {
  * would only reach these maps at low priority behind the whole queue. Runs at
  * each periodic tick (1 min after startup, then every 6 h); cheap when empty.
  */
+/**
+ * HIGH-priority re-check of the maps the healing passes just requeued (a
+ * global rank that fell to null, a country #1 "lost" to nobody): the sweeps
+ * would eventually reach them, but BEHIND tens of thousands of pending
+ * checks, hours away at the rate limit. A repair must land within the next
+ * minute, not tomorrow. Capped per tick; the sweeps stay the safety net.
+ */
+export async function confirmRepairedChecks(): Promise<void> {
+  const db = getDb();
+  const modes = sqlIn(getStartedRulesets());
+  if (config.hasCredentials) {
+    const glo = db
+      .prepare(
+        `SELECT u.beatmap_id AS id, u.ruleset AS r FROM beatmap_user u
+         WHERE u.ruleset IN (${modes}) AND u.global_checked_at IS NULL
+           AND u.global_rank IS NULL AND u.global_seen = 1
+           AND EXISTS (SELECT 1 FROM global_events e
+                       WHERE e.beatmap_id = u.beatmap_id AND e.ruleset = u.ruleset
+                         AND e.new_rank IS NULL AND e.old_rank IS NOT NULL
+                         AND e.at > datetime('now', '-7 days'))
+         LIMIT 50`
+      )
+      .all() as { id: number; r: number }[];
+    for (const { id, r } of glo) {
+      try {
+        await lbSweepGate();
+        const pos = await getUserBeatmapPosition(
+          id,
+          config.osuUserId,
+          "high",
+          rulesetDef(r).apiName
+        );
+        applyGlobalCheck(id, pos, true, r);
+        logActivity(
+          "global tops",
+          () =>
+            `${mapLabel(id)} · repair re-check: ${pos != null ? `#${pos}` : "outside top 100"}`
+        );
+      } catch (e) {
+        logError(e, `repair global check map ${id}`);
+      }
+    }
+  }
+  if (!isUserConnected()) return;
+  const cty = db
+    .prepare(
+      `SELECT u.beatmap_id AS id, u.ruleset AS r FROM beatmap_user u
+       WHERE u.ruleset IN (${modes}) AND u.country_checked_at IS NULL
+         AND u.country_first = 0
+         AND EXISTS (SELECT 1 FROM country_events e
+                     WHERE e.beatmap_id = u.beatmap_id AND e.ruleset = u.ruleset
+                       AND e.event = 'lost' AND e.by_user_id IS NULL
+                       AND e.at > datetime('now', '-7 days'))
+       LIMIT 50`
+    )
+    .all() as { id: number; r: number }[];
+  for (const { id, r } of cty) {
+    try {
+      await lbSweepGate();
+      const top = await getCountryTop(id, "high", rulesetDef(r).apiName);
+      applyCountryCheck(id, top, true, r);
+      logActivity(
+        "country #1",
+        () =>
+          `${mapLabel(id)} · repair re-check: ${
+            top && top.user_id === config.osuUserId ? "#1 ✓" : "not #1"
+          }`
+      );
+    } catch (e) {
+      logError(e, `repair country check map ${id}`);
+      if (isCountryAuthError(e)) break;
+    }
+  }
+}
+
 export async function confirmRecentCountryChecks(): Promise<void> {
   if (!isUserConnected()) return;
   const modes = sqlIn(getStartedRulesets()); // sqlIn: "IN ()" is a syntax error
