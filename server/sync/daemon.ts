@@ -1355,6 +1355,7 @@ export function startCatalogRefresh(): void {
       // the maps those healing passes just requeued jump the queue: direct
       // high-priority re-check instead of waiting behind the whole backlog
       void confirmRepairedChecks().catch((e) => logError(e, "repair re-checks"));
+      void healNeverCheckedMaps().catch((e) => logError(e, "never-checked heal"));
       if (!status.backfill.running && !catalogRunning)
         void fillConvertAttrs().catch((e) => logError(e, "convert attrs"));
       // Self-heal: a STARTED mode whose initial enumeration never finished
@@ -1497,6 +1498,69 @@ export async function confirmRepairedChecks(): Promise<void> {
     } catch (e) {
       logError(e, `repair country check map ${id}`);
       if (isCountryAuthError(e)) break;
+    }
+  }
+}
+
+/**
+ * Played maps the pipelines never touched AT ALL: a map marked played (delta
+ * import, most-played pass) whose score fetch never ran, and a best that
+ * never got a single global position check. A handful slips through, and
+ * nothing ever picked them up again: the backfill only reruns on demand and
+ * the sweeps only requeue what they already stamped once. Direct and high
+ * priority, capped per tick; the sets are a few rows, then empty.
+ */
+export async function healNeverCheckedMaps(): Promise<void> {
+  if (!config.hasCredentials) return;
+  const db = getDb();
+  const modes = sqlIn(getStartedRulesets());
+  // never score-imported: fetch directly (the country/global sweeps then
+  // reach the map through its still-NULL check stamps)
+  const unfetched = db
+    .prepare(
+      `SELECT u.beatmap_id AS id, u.ruleset AS r FROM beatmap_user u
+       JOIN beatmaps b ON b.id = u.beatmap_id
+       WHERE u.ruleset IN (${modes}) AND u.played = 1 AND u.fetched_at IS NULL
+         AND (b.ruleset = u.ruleset OR b.ruleset = 0)
+       LIMIT 50`
+    )
+    .all() as { id: number; r: number }[];
+  for (const { id, r } of unfetched) {
+    const scores = await backfillMap(id, "high", `healing fetch map ${id}`, r);
+    if (scores)
+      logActivity(
+        "healing",
+        () => `${mapLabel(id)} · first score import (${scores.length} score(s))`
+      );
+  }
+  // a stored best but not one global check ever (the immediate post-score
+  // check failed and nothing retried it: global_checked_at NULL queues it
+  // behind the whole sweep, this jumps the line)
+  const unseen = db
+    .prepare(
+      `SELECT u.beatmap_id AS id, u.ruleset AS r FROM beatmap_user u
+       WHERE u.ruleset IN (${modes}) AND u.played = 1 AND u.global_seen = 0
+         AND u.best_lazer_score_id IS NOT NULL
+       LIMIT 25`
+    )
+    .all() as { id: number; r: number }[];
+  for (const { id, r } of unseen) {
+    try {
+      await lbSweepGate();
+      const pos = await getUserBeatmapPosition(
+        id,
+        config.osuUserId,
+        "high",
+        rulesetDef(r).apiName
+      );
+      applyGlobalCheck(id, pos, true, r);
+      logActivity(
+        "global tops",
+        () =>
+          `${mapLabel(id)} · first check: ${pos != null ? `#${pos}` : "outside top 100"}`
+      );
+    } catch (e) {
+      logError(e, `first global check map ${id}`);
     }
   }
 }
