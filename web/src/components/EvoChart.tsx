@@ -58,10 +58,29 @@ export function EvoChart({
   const plotBot = H - MB;
   const x = (i: number) => ML + (n > 1 ? i / (n - 1) : 0.5) * (W - ML - MR);
   const dataMax = Math.max(...view.map((r) => r.value), 1);
-  const yMax = niceCeil(
+  const dataMin = Math.min(...view.map((r) => r.value));
+  // Full view: honest 0 baseline (and room for the goal line while it stays
+  // in scale). Zoomed: the axis hugs the visible window instead — a
+  // cumulative curve zoomed on a recent stretch used to be a flat ribbon
+  // pinned to the top of a 0-based axis, unreadable.
+  let yMin = 0;
+  let yMax = niceCeil(
     Math.max(dataMax, goal != null && goal > 0 && goal <= dataMax * 3 ? goal : 0)
   );
-  const y = (v: number) => MT + (1 - v / yMax) * (plotBot - MT);
+  if (zoom) {
+    if (dataMax > dataMin) {
+      const pad = (dataMax - dataMin) * 0.08;
+      // snap the bounds to a quarter of a nice step: round labels, tight fit
+      const q = niceCeil((dataMax - dataMin) / 4) / 4;
+      yMin = Math.max(0, Math.floor((dataMin - pad) / q) * q);
+      yMax = Math.ceil((dataMax + pad) / q) * q;
+    } else {
+      // flat window: give it a sliver of room so the line sits mid-chart
+      yMin = Math.max(0, dataMax * 0.99);
+      yMax = dataMax === 0 ? 1 : dataMax * 1.01;
+    }
+  }
+  const y = (v: number) => MT + (1 - (v - yMin) / (yMax - yMin)) * (plotBot - MT);
   const line = view
     .map((r, i) => `${x(i).toFixed(1)},${y(r.value).toFixed(1)}`)
     .join(" ");
@@ -127,20 +146,23 @@ export function EvoChart({
             <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
           </linearGradient>
         </defs>
-        {[0.25, 0.5, 0.75, 1].map((f) => (
-          <g key={f}>
-            <line
-              x1={ML} x2={W - MR} y1={y(yMax * f)} y2={y(yMax * f)}
-              stroke="var(--border)" strokeDasharray="3 4"
-            />
-            <text
-              x={ML - 10} y={y(yMax * f) + FS / 3} textAnchor="end"
-              fill="var(--fg-dim)" fontSize={FS}
-            >
-              {fmtY(yMax * f)}
-            </text>
-          </g>
-        ))}
+        {(yMin > 0 ? [0, 0.25, 0.5, 0.75, 1] : [0.25, 0.5, 0.75, 1]).map((f) => {
+          const v = yMin + f * (yMax - yMin);
+          return (
+            <g key={f}>
+              <line
+                x1={ML} x2={W - MR} y1={y(v)} y2={y(v)}
+                stroke="var(--border)" strokeDasharray="3 4"
+              />
+              <text
+                x={ML - 10} y={y(v) + FS / 3} textAnchor="end"
+                fill="var(--fg-dim)" fontSize={FS}
+              >
+                {fmtY(v)}
+              </text>
+            </g>
+          );
+        })}
         {xLabels.map((i) => (
           <text
             key={i} x={x(i)} y={H - 10} textAnchor="middle"
@@ -150,7 +172,7 @@ export function EvoChart({
           </text>
         ))}
         <polygon points={area} fill={`url(#${gradId})`} />
-        {goal != null && goal > 0 && goal <= yMax && (
+        {goal != null && goal > 0 && goal >= yMin && goal <= yMax && (
           <g>
             <line
               x1={ML} x2={W - MR} y1={y(goal)} y2={y(goal)}

@@ -94,7 +94,17 @@ export class RateLimiter {
       } catch (e) {
         attempt++;
         if (!(e instanceof RetryableError) || attempt > this.maxRetries) throw e;
-        if (e.message.includes("429"))
+        // An explicit, substantial Retry-After is the server saying exactly
+        // when to come back: honoring the wait IS the compliance, and
+        // doubling the pace penalty on top only crippled the queue for
+        // minutes after the window cleared. The adaptive slowdown stays
+        // for the rapid-fire 429s WITHOUT honest guidance (Cloudflare
+        // 1015), where resuming at full speed re-triggered the block
+        // every ~40 s.
+        if (
+          e.message.includes("429") &&
+          !(e.retryAfterMs != null && e.retryAfterMs >= 60_000)
+        )
           this.slowFactor = Math.min(this.slowFactor * 2, 16);
         const backoff =
           e.retryAfterMs ??

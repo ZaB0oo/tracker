@@ -278,7 +278,9 @@ export interface Filters {
   fcState: string[];
   statuses: string[];
   mods: string;
-  countryFirst: boolean;
+  /** country #1 filter: "" = off, "yes" = maps I hold, "no" = played maps
+   * I do NOT hold (the snipe hunting list) */
+  countryFirst: "" | "yes" | "no";
   /** my global leaderboard position range (empty = unbounded) */
   globalTopMin: string; globalTopMax: string;
   /** playback rate of the best (lazer 0.5x-2.0x) */
@@ -323,7 +325,7 @@ export const DEFAULT_FILTERS: Filters = {
   fcState: [],
   statuses: [],
   mods: "",
-  countryFirst: false,
+  countryFirst: "",
   globalTopMin: "", globalTopMax: "",
   rateMin: "", rateMax: "",
   scoreMin: "", scoreMax: "",
@@ -368,6 +370,13 @@ export function normalizeFilters(f: Filters): Filters {
   return {
     ...DEFAULT_FILTERS,
     ...f,
+    // presets saved when the country filter was a boolean toggle
+    countryFirst:
+      (f.countryFirst as unknown) === true
+        ? "yes"
+        : (f.countryFirst as unknown) === false
+          ? ""
+          : f.countryFirst ?? "",
     hits: f.hits ?? {},
     metricMissing:
       f.metricMissing == null

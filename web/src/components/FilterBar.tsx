@@ -149,8 +149,15 @@ export function FilterBar({
     });
   if (local.mods)
     badges.push({ key: "mods", label: `Mods: ${local.mods}`, clear: () => set("mods", "") });
-  if (local.countryFirst)
-    badges.push({ key: "fr", label: firstPlaceLabel(country), clear: () => set("countryFirst", false) });
+  if (local.countryFirst !== "")
+    badges.push({
+      key: "fr",
+      label:
+        local.countryFirst === "yes"
+          ? firstPlaceLabel(country)
+          : `not ${firstPlaceLabel(country)}`,
+      clear: () => set("countryFirst", ""),
+    });
   if (local.metricMissing)
     badges.push({
       key: "metric",
@@ -513,10 +520,20 @@ export function FilterBar({
             />
             {/* Where it ranks. */}
             <button
-              className={`chip ${local.countryFirst ? "on" : ""}`}
-              title="Only maps where I hold the country #1"
-              onClick={() => set("countryFirst", !local.countryFirst)}
+              className={`chip ${local.countryFirst !== "" ? "on" : ""}${
+                local.countryFirst === "no" ? " chip-not" : ""
+              }`}
+              title="Cycle: off, maps where I hold the country #1, played maps where I do not (the snipe list)"
+              onClick={() =>
+                set(
+                  "countryFirst",
+                  local.countryFirst === "" ? "yes" : local.countryFirst === "yes" ? "no" : ""
+                )
+              }
             >
+              {/* same text in every state (the "no" state is the strike +
+                  red restyle): the chip never changes width, so cycling
+                  cannot wrap the MY BEST row */}
               {firstPlaceLabel(country)}
             </button>
             <Range

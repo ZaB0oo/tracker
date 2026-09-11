@@ -23,6 +23,7 @@ import {
   getConvertAttrs,
   getCountryTop,
   getCountryTopScores,
+  getCurrentRpm,
   getRecentScores,
   getUserBeatmapPosition,
   getStoredCountryCode,
@@ -997,9 +998,16 @@ limiter.onBackoff = (ms, reason) => {
   // keep the throttled endpoint visible: an API-wide block and a rule on one
   // endpoint (oauth!) are different problems
   const short = reason.replace(/\s+/g, " ").slice(0, 90);
-  status.message =
-    `osu! API throttled (${short}): waiting ${Math.ceil(ms / 1000)} s, ` +
-    `slowing to ~${limiter.effectiveRpm} req/min until it clears`;
+  const wait =
+    ms >= 120_000 ? `${Math.ceil(ms / 60_000)} min` : `${Math.ceil(ms / 1000)} s`;
+  // only mention the adaptive slowdown when it actually kicked in: with an
+  // explicit long Retry-After the pace is untouched and "slowing to..."
+  // was just noise on top of the honest wait
+  const slow =
+    limiter.effectiveRpm < getCurrentRpm()
+      ? `, slowing to ~${limiter.effectiveRpm} req/min until it clears`
+      : "";
+  status.message = `osu! API throttled (${short}): waiting ${wait}${slow}`;
   logActivity("api", status.message);
 };
 

@@ -2211,3 +2211,13 @@ body.overlay-body { background: transparent; }
 .goal-final-fill { background: linear-gradient(90deg, #2a4a6a, var(--accent2)); }
 .mb-goal { width: 110px; }
 .mb-goal-err { color: #f25c5c; font-size: 11px; margin-left: 6px; }
+
+/* the inverted state of the cycling country chip: the SAME label struck
+   through in red, so "filter to maps I do NOT hold" reads at a glance and
+   the chip keeps the exact same width in every state (a wider "not ..."
+   text used to wrap the MY BEST row) */
+.chip.chip-not {
+  background: #5a2733; border-color: #f25c5c; color: #ffd7d7;
+  text-decoration: line-through; text-decoration-thickness: 2px;
+  text-decoration-color: #f25c5c;
+}

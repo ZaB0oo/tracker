@@ -120,6 +120,10 @@ function buildFilters(
       AND s2.ruleset = 3 AND s2.passed = 1
       AND COALESCE(s2.nomod_score, s2.total_score) = 1000000)`);
   if (q.countryFirst === "1") where.push("u.country_first = 1");
+  // the snipe list: played maps whose country #1 I do NOT hold (maps the
+  // sweep has not checked yet count as not held: they read 0 until proven)
+  if (q.countryFirst === "0")
+    where.push("u.played = 1 AND COALESCE(u.country_first, 0) = 0");
   // Global top filter: my exact position on the map's global leaderboard
   // (populated by the global tops sweep; any bound excludes unranked maps).
   num("globalTopMin", "u.global_rank", ">=");

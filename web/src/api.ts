@@ -307,7 +307,8 @@ function buildTableQuery(
   if (filters.fcState.length) p.set("fcState", filters.fcState.join(","));
   if (filters.statuses.length) p.set("statuses", filters.statuses.join(","));
   if (filters.mods) p.set("mods", filters.mods);
-  if (filters.countryFirst) p.set("countryFirst", "1");
+  if (filters.countryFirst === "yes") p.set("countryFirst", "1");
+  if (filters.countryFirst === "no") p.set("countryFirst", "0");
   // one id or several (union). The direction (missing / to fix) is derived
   // per metric server-side, so nothing else needs to be sent.
   if (filters.metricMissing?.ids.length)
