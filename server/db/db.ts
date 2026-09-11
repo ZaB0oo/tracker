@@ -607,6 +607,12 @@ function migrate(d: DatabaseSync): void {
        (SELECT id FROM beatmaps WHERE status NOT IN (1, 2, 4))`
   );
   d.exec("DELETE FROM beatmaps WHERE status NOT IN (1, 2, 4)");
+  // rows whose beatmaps row is ALREADY gone slip through the subquery above
+  // (a played marker recreated after the exclusion): same fate as the maps.
+  // Without this they read as eternal never-fetched holes to the healing.
+  d.exec(
+    "DELETE FROM beatmap_user WHERE beatmap_id NOT IN (SELECT id FROM beatmaps)"
+  );
 }
 
 /** Equivalent of better-sqlite3's .transaction(). */

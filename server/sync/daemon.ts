@@ -1276,25 +1276,42 @@ export function startCatalogRefresh(): void {
             enrichCatchupRunning = false;
           });
       }
-      // snipe check: re-check my country #1s older than the configured delay
+      // ---- Check pipeline (see CONTEXT.md, "Check pipeline"). Per side:
+      // 1) REQUEUE what deserves a re-check (stale held states, checks
+      //    stamped too close to a fresh score, suspect events);
+      // 2) FAST LANE: one direct high-priority pass over the data holes,
+      //    ahead of the queue;
+      // 3) SWEEP: the low-priority background queue does the rest.
+      // Never-fetched maps are healed first so their checks exist at all.
+      await healNeverFetchedMaps().catch((e) => logError(e, "never-fetched heal"));
       if (isUserConnected()) {
-        // maps with a fresh score still awaiting their country check: high
-        // priority, ahead of the low-priority sweep
-        await confirmRecentCountryChecks();
-        getDb()
+        const cdb = getDb();
+        // stale held #1s: back into the queue after the configured delay
+        cdb
           .prepare(
             `UPDATE beatmap_user SET country_checked_at = NULL
              WHERE ruleset IN (${sqlIn(getStartedRulesets())}) AND country_first = 1
                AND country_checked_at < datetime('now', '-' || ? || ' hours')`
           )
           .run(getCountryRecheckHours());
-        // Heal false snipes recorded before the empty-leaderboard guard: a
-        // real snipe names the sniper, so a recent "lost" WITHOUT a sniper
-        // is the degraded-fetch signature. Requeue those maps: the re-check
-        // either restores the #1 (gained event) or confirms the loss with
-        // its author. Window-bounded, so a genuine oddity cannot churn
-        // forever.
-        getDb().exec(
+        // a check stamped within 15 min of a recent score may predate the
+        // leaderboard update, and the deferred-confirm timer does not
+        // survive a restart (same rule as the global side)
+        cdb.exec(
+          `UPDATE beatmap_user SET country_checked_at = NULL
+           WHERE ruleset IN (${sqlIn(getStartedRulesets())})
+             AND country_checked_at IS NOT NULL AND EXISTS (
+             SELECT 1 FROM scores s
+             WHERE s.beatmap_id = beatmap_user.beatmap_id
+               AND s.ruleset = beatmap_user.ruleset
+               AND datetime(s.ended_at) >= datetime('now', '-2 days')
+               AND datetime(beatmap_user.country_checked_at) <= datetime(s.ended_at, '+15 minutes'))`
+        );
+        // a recent "lost" WITHOUT a sniper is the degraded-fetch signature
+        // (a real snipe names its author): requeue for a re-check that
+        // either restores the #1 or confirms the loss with its author.
+        // Window-bounded, so a genuine oddity cannot churn forever.
+        cdb.exec(
           `UPDATE beatmap_user SET country_checked_at = NULL
            WHERE ruleset IN (${sqlIn(getStartedRulesets())})
              AND country_first = 0 AND country_checked_at IS NOT NULL
@@ -1305,12 +1322,12 @@ export function startCatalogRefresh(): void {
                  AND e.event = 'lost' AND e.by_user_id IS NULL
                  AND e.at > datetime('now', '-7 days'))`
         );
+        await runCountryFastLane();
         void runCountrySweep();
       }
-      // global tops: re-check held top-100 positions older than the delay,
-      // then resume the sweep (no-op when the queue is empty)
       if (isGlobalTrackingEnabled()) {
         const gdb = getDb();
+        // stale held top-100 positions: back into the queue
         gdb
           .prepare(
             `UPDATE beatmap_user SET global_checked_at = NULL
@@ -1319,9 +1336,9 @@ export function startCatalogRefresh(): void {
                AND global_checked_at < datetime('now', '-' || ? || ' hours')`
           )
           .run(getGlobalRecheckHours());
-        // Repair pass (mirrors the country one): a position stamped within
-        // 15 min of one of my recent scores may predate the leaderboard
-        // update — and the deferred-confirm timer does not survive a restart.
+        // a position stamped within 15 min of a recent score may predate
+        // the leaderboard update, and the deferred-confirm timer does not
+        // survive a restart
         gdb.exec(
           `UPDATE beatmap_user SET global_checked_at = NULL
            WHERE ruleset IN (${sqlIn(getStartedRulesets())})
@@ -1332,30 +1349,9 @@ export function startCatalogRefresh(): void {
                AND datetime(s.ended_at) >= datetime('now', '-2 days')
                AND datetime(beatmap_user.global_checked_at) <= datetime(s.ended_at, '+15 minutes'))`
         );
-        // Heal false "outside top 100" drops recorded before the missing-
-        // position guard: a rank that fell to NULL leaves the 48 h re-check
-        // rotation (it only requeues ranks <= 100), so without this the
-        // false state was permanent until a new score on the map. Requeue
-        // every NULL rank with a recent drop-to-null event: the re-check
-        // restores the real position (or stores the real one, a number,
-        // which leaves this condition). Window-bounded.
-        gdb.exec(
-          `UPDATE beatmap_user SET global_checked_at = NULL
-           WHERE ruleset IN (${sqlIn(getStartedRulesets())})
-             AND global_rank IS NULL AND global_checked_at IS NOT NULL
-             AND EXISTS (
-               SELECT 1 FROM global_events e
-               WHERE e.beatmap_id = beatmap_user.beatmap_id
-                 AND e.ruleset = beatmap_user.ruleset
-                 AND e.new_rank IS NULL AND e.old_rank IS NOT NULL
-                 AND e.at > datetime('now', '-7 days'))`
-        );
+        await runGlobalFastLane();
         void runGlobalSweep();
       }
-      // the maps those healing passes just requeued jump the queue: direct
-      // high-priority re-check instead of waiting behind the whole backlog
-      void confirmRepairedChecks().catch((e) => logError(e, "repair re-checks"));
-      void healNeverCheckedMaps().catch((e) => logError(e, "never-checked heal"));
       if (!status.backfill.running && !catalogRunning)
         void fillConvertAttrs().catch((e) => logError(e, "convert attrs"));
       // Self-heal: a STARTED mode whose initial enumeration never finished
@@ -1422,129 +1418,93 @@ function scheduleCountryConfirm(beatmapId: number, ruleset = 0): void {
 }
 
 /**
- * HIGH-priority pass over pending country checks on maps with a recent score:
- * the deferred-confirm timer is lost on a restart, and the background sweep
- * would only reach these maps at low priority behind the whole queue. Runs at
- * each periodic tick (1 min after startup, then every 6 h); cheap when empty.
+ * FAST LANES: one direct high-priority pass per side over the data holes,
+ * run at each periodic tick after the requeues and before the sweeps. The
+ * sweeps would eventually reach every pending map, but BEHIND tens of
+ * thousands of queued re-checks, hours away at the rate limit; a hole must
+ * fill within the next minute, not tomorrow. Both are capped per tick and
+ * cheap when empty; the sweeps stay the safety net. All three healing
+ * rules scope to ranked/approved/loved maps: stray rows outside the pool
+ * (graveyard leftovers of an old import) have no leaderboard and would
+ * otherwise read as an eternal hole, re-checked every tick. (These two absorbed
+ * confirmRecentCountry/GlobalChecks, confirmRepairedChecks and the direct
+ * global block of the never-checked healing, which overlapped.)
  */
-/**
- * HIGH-priority re-check of the maps the healing passes just requeued (a
- * global rank that fell to null, a country #1 "lost" to nobody): the sweeps
- * would eventually reach them, but BEHIND tens of thousands of pending
- * checks, hours away at the rate limit. A repair must land within the next
- * minute, not tomorrow. Capped per tick; the sweeps stay the safety net.
- */
-export async function confirmRepairedChecks(): Promise<void> {
-  const db = getDb();
-  const modes = sqlIn(getStartedRulesets());
-  if (config.hasCredentials) {
-    const glo = db
-      .prepare(
-        `SELECT u.beatmap_id AS id, u.ruleset AS r FROM beatmap_user u
-         WHERE u.ruleset IN (${modes}) AND u.global_checked_at IS NULL
-           AND u.global_rank IS NULL AND u.global_seen = 1
-           AND EXISTS (SELECT 1 FROM global_events e
-                       WHERE e.beatmap_id = u.beatmap_id AND e.ruleset = u.ruleset
-                         AND e.new_rank IS NULL AND e.old_rank IS NOT NULL
-                         AND e.at > datetime('now', '-7 days'))
-         LIMIT 50`
-      )
-      .all() as { id: number; r: number }[];
-    for (const { id, r } of glo) {
-      try {
-        await lbSweepGate();
-        const pos = await getUserBeatmapPosition(
-          id,
-          config.osuUserId,
-          "high",
-          rulesetDef(r).apiName
-        );
-        applyGlobalCheck(id, pos, true, r);
-        logActivity(
-          "global tops",
-          () =>
-            `${mapLabel(id)} · repair re-check: ${pos != null ? `#${pos}` : "outside top 100"}`
-        );
-      } catch (e) {
-        logError(e, `repair global check map ${id}`);
-      }
-    }
-  }
+
+/** Country holes: pending checks on maps with a score under 2 days (the
+ * deferred confirm dies with a restart, the 15-min requeue feeds this), or
+ * requeued after a recent "lost" with no sniper (degraded-fetch signature). */
+export async function runCountryFastLane(): Promise<void> {
   if (!isUserConnected()) return;
-  const cty = db
+  const modes = sqlIn(getStartedRulesets()); // sqlIn: "IN ()" is a syntax error
+  const rows = getDb()
     .prepare(
       `SELECT u.beatmap_id AS id, u.ruleset AS r FROM beatmap_user u
-       WHERE u.ruleset IN (${modes}) AND u.country_checked_at IS NULL
-         AND u.country_first = 0
-         AND EXISTS (SELECT 1 FROM country_events e
-                     WHERE e.beatmap_id = u.beatmap_id AND e.ruleset = u.ruleset
-                       AND e.event = 'lost' AND e.by_user_id IS NULL
-                       AND e.at > datetime('now', '-7 days'))
-       LIMIT 50`
+       JOIN beatmaps b ON b.id = u.beatmap_id
+       WHERE u.played = 1 AND u.country_checked_at IS NULL
+         AND u.ruleset IN (${modes})
+         AND (b.ruleset = u.ruleset OR b.ruleset = 0)
+         AND b.status IN (1, 2, 4)
+         AND (
+           EXISTS (
+             SELECT 1 FROM scores s
+             WHERE s.beatmap_id = u.beatmap_id AND s.ruleset = u.ruleset
+               AND datetime(s.ended_at) >= datetime('now', '-2 days'))
+           OR (u.country_first = 0 AND EXISTS (
+             SELECT 1 FROM country_events e
+             WHERE e.beatmap_id = u.beatmap_id AND e.ruleset = u.ruleset
+               AND e.event = 'lost' AND e.by_user_id IS NULL
+               AND e.at > datetime('now', '-7 days')))
+         )
+       LIMIT 100`
     )
     .all() as { id: number; r: number }[];
-  for (const { id, r } of cty) {
+  for (const { id, r } of rows) {
     try {
-      await lbSweepGate();
+      await lbSweepGate(); // same endpoint budget as the sweeps
       const top = await getCountryTop(id, "high", rulesetDef(r).apiName);
       applyCountryCheck(id, top, true, r);
       logActivity(
         "country #1",
         () =>
-          `${mapLabel(id)} · repair re-check: ${
+          `${mapLabel(id)} · fast-lane check: ${
             top && top.user_id === config.osuUserId ? "#1 ✓" : "not #1"
-          }`
+          } (${getStoredCountryCode() ?? "country"})`
       );
     } catch (e) {
-      logError(e, `repair country check map ${id}`);
+      logError(e, `fast-lane country check map ${id}`);
       if (isCountryAuthError(e)) break;
     }
   }
 }
 
-/**
- * Played maps the pipelines never touched AT ALL: a map marked played (delta
- * import, most-played pass) whose score fetch never ran, and a best that
- * never got a single global position check. A handful slips through, and
- * nothing ever picked them up again: the backfill only reruns on demand and
- * the sweeps only requeue what they already stamped once. Direct and high
- * priority, capped per tick; the sets are a few rows, then empty.
- */
-export async function healNeverCheckedMaps(): Promise<void> {
+/** Global holes: any played best whose rank is UNKNOWN (null, stamped or
+ * pending, whatever the history: a rank that fell to null, a check that
+ * failed, a "no position" answer on a map where none was held), plus
+ * pending checks on maps with a score under 2 days. A map that durably
+ * answers "no position" is retried at worst once per tick, capped. */
+export async function runGlobalFastLane(): Promise<void> {
   if (!config.hasCredentials) return;
-  const db = getDb();
   const modes = sqlIn(getStartedRulesets());
-  // never score-imported: fetch directly (the country/global sweeps then
-  // reach the map through its still-NULL check stamps)
-  const unfetched = db
+  const rows = getDb()
     .prepare(
       `SELECT u.beatmap_id AS id, u.ruleset AS r FROM beatmap_user u
        JOIN beatmaps b ON b.id = u.beatmap_id
-       WHERE u.ruleset IN (${modes}) AND u.played = 1 AND u.fetched_at IS NULL
+       WHERE u.played = 1 AND u.best_lazer_score_id IS NOT NULL
+         AND u.ruleset IN (${modes})
          AND (b.ruleset = u.ruleset OR b.ruleset = 0)
-       LIMIT 50`
+         AND b.status IN (1, 2, 4)
+         AND (
+           u.global_rank IS NULL
+           OR (u.global_checked_at IS NULL AND EXISTS (
+             SELECT 1 FROM scores s
+             WHERE s.beatmap_id = u.beatmap_id AND s.ruleset = u.ruleset
+               AND datetime(s.ended_at) >= datetime('now', '-2 days')))
+         )
+       LIMIT 100`
     )
     .all() as { id: number; r: number }[];
-  for (const { id, r } of unfetched) {
-    const scores = await backfillMap(id, "high", `healing fetch map ${id}`, r);
-    if (scores)
-      logActivity(
-        "healing",
-        () => `${mapLabel(id)} · first score import (${scores.length} score(s))`
-      );
-  }
-  // a stored best but not one global check ever (the immediate post-score
-  // check failed and nothing retried it: global_checked_at NULL queues it
-  // behind the whole sweep, this jumps the line)
-  const unseen = db
-    .prepare(
-      `SELECT u.beatmap_id AS id, u.ruleset AS r FROM beatmap_user u
-       WHERE u.ruleset IN (${modes}) AND u.played = 1 AND u.global_seen = 0
-         AND u.best_lazer_score_id IS NOT NULL
-       LIMIT 25`
-    )
-    .all() as { id: number; r: number }[];
-  for (const { id, r } of unseen) {
+  for (const { id, r } of rows) {
     try {
       await lbSweepGate();
       const pos = await getUserBeatmapPosition(
@@ -1557,47 +1517,41 @@ export async function healNeverCheckedMaps(): Promise<void> {
       logActivity(
         "global tops",
         () =>
-          `${mapLabel(id)} · first check: ${pos != null ? `#${pos}` : "outside top 100"}`
+          `${mapLabel(id)} · fast-lane check: ${pos != null ? `#${pos}` : "outside top 100"}`
       );
     } catch (e) {
-      logError(e, `first global check map ${id}`);
+      logError(e, `fast-lane global check map ${id}`);
     }
   }
 }
 
-export async function confirmRecentCountryChecks(): Promise<void> {
-  if (!isUserConnected()) return;
-  const modes = sqlIn(getStartedRulesets()); // sqlIn: "IN ()" is a syntax error
-  const rows = getDb()
+/**
+ * Played maps whose score import never ran AT ALL (a delta/most-played mark
+ * with no backfill pass since): fetch them directly at high priority. Runs
+ * FIRST in the tick so the fetched bests exist before the fast lanes and
+ * sweeps look for their checks. A handful of rows at most, then empty.
+ */
+export async function healNeverFetchedMaps(): Promise<void> {
+  if (!config.hasCredentials) return;
+  const db = getDb();
+  const modes = sqlIn(getStartedRulesets());
+  const unfetched = db
     .prepare(
       `SELECT u.beatmap_id AS id, u.ruleset AS r FROM beatmap_user u
        JOIN beatmaps b ON b.id = u.beatmap_id
-       WHERE u.played = 1 AND u.country_checked_at IS NULL
-         AND u.ruleset IN (${modes})
+       WHERE u.ruleset IN (${modes}) AND u.played = 1 AND u.fetched_at IS NULL
          AND (b.ruleset = u.ruleset OR b.ruleset = 0)
-         AND EXISTS (
-           SELECT 1 FROM scores s
-           WHERE s.beatmap_id = u.beatmap_id AND s.ruleset = u.ruleset
-             AND datetime(s.ended_at) >= datetime('now', '-2 days'))
-       LIMIT 100`
+         AND b.status IN (1, 2, 4)
+       LIMIT 50`
     )
     .all() as { id: number; r: number }[];
-  for (const { id, r } of rows) {
-    try {
-      await lbSweepGate(); // up to 100 maps: same endpoint budget as the sweeps
-      const top = await getCountryTop(id, "high", rulesetDef(r).apiName);
-      applyCountryCheck(id, top, true, r);
+  for (const { id, r } of unfetched) {
+    const scores = await backfillMap(id, "high", `healing fetch map ${id}`, r);
+    if (scores)
       logActivity(
-        "country #1",
-        () =>
-          `${mapLabel(id)} · fresh-score recheck: ${
-            top && top.user_id === config.osuUserId ? "#1 ✓" : "not #1"
-          } (${getStoredCountryCode() ?? "country"})`
+        "healing",
+        () => `${mapLabel(id)} · first score import (${scores.length} score(s))`
       );
-    } catch (e) {
-      logError(e, `fresh-score country check map ${id}`);
-      if (isCountryAuthError(e)) break;
-    }
   }
 }
 
