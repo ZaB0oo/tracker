@@ -56,7 +56,7 @@ function sessionWhere(req: { query: Record<string, unknown> }, R: number): strin
 const sessionsCache = new Map<string, { version: string; payload: unknown }>();
 
 /**
- * GET /api/sessions — play sessions reconstructed from the score timestamps:
+ * GET /api/sessions, play sessions reconstructed from the score timestamps:
  * consecutive plays split whenever more than an hour passes between two of
  * them. All-time, so the client dims it under the time machine.
  *
@@ -114,7 +114,7 @@ sessionsRouter.get("/sessions", (req, res) => {
 
   const sessions: (Session & { endMs: number })[] = [];
   const clearedMaps = new Set<number>();
-  // real seconds spent in the FILTERED maps (each pass at its rate) — the
+  // real seconds spent in the FILTERED maps (each pass at its rate), the
   // session `sec` is wall-clock over the whole sitting, pauses included
   let playSec = 0;
   let cur: (Session & { endMs: number }) | null = null;
@@ -186,7 +186,7 @@ sessionsRouter.get("/sessions", (req, res) => {
 });
 
 /**
- * GET /api/sessions/scores — the scores of one session (bounds from the
+ * GET /api/sessions/scores, the scores of one session (bounds from the
  * /sessions list, which spans the whole sitting) matching the current
  * pool/keys/scope filter, map identity included, for the detail panel:
  * the list shows exactly the plays the session's counters counted. Small
@@ -201,7 +201,7 @@ sessionsRouter.get("/sessions/scores", (req, res) => {
   const SR = R === 0 ? "b.star_rating" : "COALESCE(ca.star_rating, b.star_rating)";
   const MC = R === 0 ? "b.max_combo" : "COALESCE(ca.max_combo, b.max_combo)";
   // this map's scores strictly before the row's score (same instant: lower
-  // id first) — the "state of the map before this play". Ordering by the
+  // id first), the "state of the map before this play". Ordering by the
   // standardised score: present on every row, and classic is monotone in it,
   // so the winner is the same score refreshBest picks, without scale mixing.
   const PRIOR = `s2.beatmap_id = s.beatmap_id AND s2.ruleset = ${R} AND s2.passed = 1

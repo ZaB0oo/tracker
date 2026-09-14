@@ -36,7 +36,7 @@ const ICON = path.join(import.meta.dirname, "icon.png");
 
 const startHidden = process.argv.includes("--hidden");
 
-// Explicit, stable data location (%AppData%\osu-completionist) — otherwise
+// Explicit, stable data location (%AppData%\osu-completionist), otherwise
 // dev runs ("electron desktop/main.js") default to %AppData%\Electron.
 app.setName("osu-completionist");
 app.setPath("userData", path.join(app.getPath("appData"), "osu-completionist"));
@@ -63,7 +63,7 @@ function dataDir() {
 
 /**
  * First launch (no DB yet): offer to import a tracker.db from an existing
- * source install. Copy only — the original stays untouched. Must run BEFORE
+ * source install. Copy only, the original stays untouched. Must run BEFORE
  * the server starts (the file is free).
  */
 function maybeImportDb() {
@@ -77,7 +77,7 @@ function maybeImportDb() {
     message: "Welcome!",
     detail:
       "If you already used the tracker (source install), you can import your " +
-      "existing database — scores, catalog, settings and milestones included. " +
+      "existing database: scores, catalog, settings and milestones included. " +
       "Close the old tracker first.\n\nOtherwise, start fresh: the app will " +
       "rebuild everything from the osu! API.",
     buttons: ["Import an existing tracker.db…", "Start fresh"],
@@ -95,7 +95,7 @@ function maybeImportDb() {
   try {
     fs.copyFileSync(src, target);
     // WAL sidecars hold recent writes when the source app wasn't cleanly
-    // closed — copy them too when present
+    // closed, copy them too when present
     for (const ext of ["-wal", "-shm"])
       if (fs.existsSync(src + ext)) fs.copyFileSync(src + ext, target + ext);
   } catch (e) {
@@ -292,7 +292,7 @@ function refreshTrayMenu() {
 function createTray() {
   const img = nativeImage.createFromPath(ICON).resize({ width: 16, height: 16 });
   tray = new Tray(img);
-  tray.setToolTip(`osu!completionist — http://localhost:${PORT}`);
+  tray.setToolTip(`osu!completionist · http://localhost:${PORT}`);
   tray.on("click", () => showWindow());
   refreshTrayMenu();
 }
@@ -301,7 +301,7 @@ function createTray() {
 /**
  * electron-updater against the GitHub releases of ZaB0oo/tracker (publish
  * config in package.json). Downloads in the background; a single dialog when
- * ready. Packaged builds only — dev runs skip it entirely.
+ * ready. Packaged builds only, dev runs skip it entirely.
  */
 function setupAutoUpdate() {
   if (!app.isPackaged) return;
@@ -316,7 +316,7 @@ function setupAutoUpdate() {
       title: "osu!completionist",
       message: `Update v${info.version} is ready`,
       detail:
-        "It will be applied the next time the app starts — or restart now. " +
+        "It will be applied the next time the app starts, or restart now. " +
         "Your database is never touched by updates.",
       buttons: ["Restart now", "Later"],
       defaultId: 0,
@@ -392,7 +392,23 @@ app.on("window-all-closed", () => {
   /* no quit: close-to-tray */
 });
 
-app.on("before-quit", () => {
+// The server checkpoints and closes its database on the shutdown message
+// (WAL folded into the main file, no -wal/-shm left behind); the quit resumes
+// on its exit, or after 3 s with a plain kill if it hangs.
+let shutdownSent = false;
+app.on("before-quit", (e) => {
   quitting = true;
-  serverProc?.kill();
+  if (shutdownSent || !serverProc) return;
+  shutdownSent = true;
+  e.preventDefault();
+  const proc = serverProc;
+  const timer = setTimeout(() => {
+    proc.kill();
+    app.quit();
+  }, 3000);
+  proc.once("exit", () => {
+    clearTimeout(timer);
+    app.quit();
+  });
+  proc.postMessage({ type: "shutdown" });
 });

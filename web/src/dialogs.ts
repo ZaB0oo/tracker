@@ -1,7 +1,7 @@
 /**
  * confirm/alert wrappers. In Electron, the renderer's native window.confirm /
  * window.alert break keyboard focus (inputs stay dead until the window is
- * refocused — upstream bug), so the desktop bridge routes them to real native
+ * refocused, upstream bug), so the desktop bridge routes them to real native
  * dialogs shown by the main process. Plain browsers use the built-ins.
  */
 

@@ -17,7 +17,7 @@ import { DiscordEditor } from "./DiscordEditor";
 import { useEscape } from "../useEscape";
 
 // Electron bridge (desktop/preload.cjs): native file picker + dialogs.
-// Absent in a plain browser — built-ins are used instead.
+// Absent in a plain browser, built-ins are used instead.
 declare global {
   interface Window {
     desktop?: {
@@ -50,7 +50,7 @@ function Field({
 
 /**
  * Settings modal: sync intervals, osu! OAuth credentials, Discord
- * notifications and display options — one Save button for everything.
+ * notifications and display options, one Save button for everything.
  */
 export function AdvancedSettings({
   onClose,
@@ -788,8 +788,8 @@ export function AdvancedSettings({
                     const counted = (st.ranked ?? 0) + (st.loved ?? 0);
                     setMaintMsg(
                       counted === 0
-                        ? `Set ${r.setId} imported (${r.kind}, +${r.newDiffs ?? 0} diffs): no ranked/loved diff, it will NOT appear in any pool`
-                        : `Set ${r.setId} imported (${r.kind}): +${r.newDiffs ?? 0} new diffs (${st.ranked ?? 0} ranked, ${st.loved ?? 0} loved)`
+                        ? `Set ${r.setId} imported (${r.kind}): no ranked/loved diff, it will NOT appear in any pool`
+                        : `Set ${r.setId} imported (${r.kind}): ${r.added ?? "no new map"} (${st.ranked ?? 0} ranked, ${st.loved ?? 0} loved)`
                     );
                     setSetIdInput("");
                   } catch (e) {

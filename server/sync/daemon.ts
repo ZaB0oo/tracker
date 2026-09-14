@@ -135,7 +135,7 @@ function logActivity(source: string, text: string | (() => string)): void {
 }
 
 /** "Artist - Title [Diff]" for the activity feed. */
-// prepared once: this runs for every backfilled/swept/polled map — one SQL
+// prepared once: this runs for every backfilled/swept/polled map, one SQL
 // parse per API call adds up over hours-long passes
 let mapLabelStmt: ReturnType<DatabaseLike["prepare"]> | null = null;
 type DatabaseLike = ReturnType<typeof getDb>;
@@ -495,7 +495,7 @@ export async function enrichCatalog(): Promise<number> {
 
 /**
  * Backfills one diff for EVERY started ruleset that can play it (its native
- * mode, plus the converts of a std map) — a single-mode fetch would miss the
+ * mode, plus the converts of a std map), a single-mode fetch would miss the
  * other modes' scores on it.
  */
 async function backfillMapAllModes(
@@ -541,7 +541,7 @@ async function backfillMap(
 
 /**
  * Background fill of convert_attrs: per-mode star rating and max combo of the
- * PLAYED converts (1 request each, low priority, resumable — unplayed
+ * PLAYED converts (1 request each, low priority, resumable, unplayed
  * converts keep the std values as approximation until played). Kicked by the
  * periodic tick and after each backfill completion.
  */
@@ -577,7 +577,7 @@ export async function fillConvertAttrs(): Promise<void> {
         if (!a) return; // API down: the next tick retries
         ins.run(id, r, a.starRating, a.maxCombo);
         // the FC reference just arrived: scores stored before it could never
-        // resolve to PERFECT by combo — re-evaluate them now
+        // resolve to PERFECT by combo, re-evaluate them now
         if (a.maxCombo != null) recomputeFcForMap(id, r);
         done++;
       }
@@ -596,7 +596,7 @@ export async function fillConvertAttrs(): Promise<void> {
  * Cloudflare rule (~15-20 req/min tolerated in practice, on an hour-scale
  * bucket): running the sweeps at the full API rate tripped it every minute,
  * and each 429 slowed every other task through the global penalty. The
- * background sweeps therefore space their leaderboard checks — a shared gate,
+ * background sweeps therefore space their leaderboard checks, a shared gate,
  * as the country and global sweeps hit the same endpoint class. 12/min is
  * plenty: re-checking 20k held #1s every 48 h needs ~7/min on average.
  * Immediate post-score checks (1-2 maps) stay unspaced.
@@ -617,7 +617,7 @@ function isCountryAuthError(e: unknown): boolean {
     msg.includes("not connected") ||
     msg.includes("supporter") ||
     // oauth endpoint throttled or refresh cooling down: stop the pass, the
-    // periodic tick will retry — iterating the queue would hammer oauth
+    // periodic tick will retry, iterating the queue would hammer oauth
     msg.includes("user oauth") ||
     msg.includes("backing off")
   );
@@ -642,7 +642,7 @@ export async function pollRecentScores(): Promise<number | null> {
   if (pollRunning) return null;
   pollRunning = true;
   try {
-    // one pass per active ruleset — the recent endpoint is per mode
+    // one pass per active ruleset, the recent endpoint is per mode
     let total = 0;
     for (const mode of getStartedRulesets())
       total += await pollRecentScoresForMode(mode);
@@ -681,7 +681,7 @@ async function pollRecentScoresForMode(mode: number): Promise<number> {
 
   // Snapshot BEFORE any catalog import below: which scores are new, and each
   // map's played/best state. The full-set import of a brand-new map backfills
-  // its scores immediately — without this snapshot, the loop below would see
+  // its scores immediately, without this snapshot, the loop below would see
   // nothing "fresh" on it and its best would never notify.
   const exists = db.prepare("SELECT 1 FROM scores WHERE id = ?");
   const preStateStmt = db.prepare(
@@ -850,7 +850,7 @@ async function pollRecentScoresForMode(mode: number): Promise<number> {
         if (!(wasFirst && !stillFirst)) applyCountryCheck(id, top, true, mode);
         // Discord: mark the best as "country #1 at submit time" (display only,
         // no country event notifications). The runner-up is the previous
-        // holder — the player this score just sniped.
+        // holder, the player this score just sniped.
         if (top && top.user_id === config.osuUserId) {
           const best = bestEvents.find((b) => b.beatmapId === id);
           if (best) {
@@ -877,7 +877,7 @@ async function pollRecentScoresForMode(mode: number): Promise<number> {
   }
   // Per-best enrichment:
   // - global leaderboard position: IMMEDIATE check for every new best (like
-  //   the country one, and regardless of the sweep/tracking state) — the
+  //   the country one, and regardless of the sweep/tracking state), the
   //   global tops stay current and the notification shows the rank when <= 100;
   // - SR with the play's mods (Discord display only).
   const discord = getDiscordSettings();
@@ -984,7 +984,7 @@ function getPollMs(): number {
   return (Number.isFinite(v) && v >= 10 ? v : config.pollIntervalSeconds) * 1000;
 }
 
-/** Delay (hours) before re-checking a held country #1 — configurable in the UI. */
+/** Delay (hours) before re-checking a held country #1, configurable in the UI. */
 export function getCountryRecheckHours(): number {
   const v = Number(getState("country_recheck_hours"));
   // 48h default: with 20k+ #1s a 24h cycle would spend hours/day just
@@ -994,7 +994,7 @@ export function getCountryRecheckHours(): number {
 
 // API backoffs surfaced in the sync bar: during a Cloudflare block (error
 // 1015) every request silently sits out 30 s+ penalties and the whole app
-// looked dead — now it says so.
+// looked dead, now it says so.
 limiter.onBackoff = (ms, reason) => {
   // keep the throttled endpoint visible: an API-wide block and a rule on one
   // endpoint (oauth!) are different problems
@@ -1018,7 +1018,7 @@ export function startPolling(): void {
     // no credentials yet (first launch, UI settings not filled): stay quiet
     // instead of spamming an error every interval
     if (!config.hasCredentials) return;
-    // NB: polling keeps running during the catalog import on purpose — new
+    // NB: polling keeps running during the catalog import on purpose, new
     // scores must never be missed; it is high-priority and cheap.
     void pollRecentScores().catch((e) =>
       logError(e, "poll of recent scores (will retry on the next tick)")
@@ -1112,19 +1112,19 @@ export async function ensureCatalogComplete(
         )
         .get() as { c: number }
     ).c;
-  // Nothing enumerated for ANY catalog mode: leave that to the initial sync —
+  // Nothing enumerated for ANY catalog mode: leave that to the initial sync,
   // unless the caller named the modes it wants (a per-mode "Start initial
   // sync" IS the enumeration entry point on a fresh install).
   if (!modes?.length && rowsOf(catalog) === 0) return 0;
   // Another enumeration is running: a background call steps aside, an
   // explicit per-mode start WAITS for its turn (the rate limit is global, so
   // parallel runs would only interleave). Everything below is decided AFTER
-  // the wait — the run we waited for has just changed the catalog.
+  // the wait, the run we waited for has just changed the catalog.
   if (catalogRunning || status.phase === "catalog") {
     if (!modes?.length) return 0;
     // Shown in the busy list, NOT in status.message: the running import writes
     // there constantly and the two would fight. Without this the second mode
-    // looked dead — its start button gone, nothing happening for an hour.
+    // looked dead, its start button gone, nothing happening for an hour.
     for (const m of modes) queuedEnumModes.add(m);
     try {
       while (catalogRunning || status.phase === "catalog")
@@ -1148,11 +1148,11 @@ export async function ensureCatalogComplete(
     if (modes.length === 0) return 0;
   }
   // std complete but a started mode's enumeration is unfinished: complete
-  // ONLY that mode — never re-run the std slices as a side effect
+  // ONLY that mode, never re-run the std slices as a side effect
   const unfinishedModes = catalog.filter(
     (m) => m !== 0 && getState(`catalog_done_m${m}`) !== "1"
   );
-  // std must be complete whenever it is in the catalog — as a played mode or
+  // std must be complete whenever it is in the catalog, as a played mode or
   // as the convert source of another one
   const stdIncomplete =
     catalog.includes(0) && rowsOf([0]) < MIN_EXPECTED_STD_DIFFS;
@@ -1162,7 +1162,7 @@ export async function ensureCatalogComplete(
   }
   // Starting a non-std mode also needs its CONVERT SOURCE: its pool counts the
   // std maps playable in it, so enumerating the mode alone leaves the pool with
-  // its specifics only. Added only when std is actually behind — a complete std
+  // its specifics only. Added only when std is actually behind, a complete std
   // catalog must not be re-scanned because someone started catch.
   if (modes?.length && stdIncomplete && !modes.includes(0))
     modes = [...modes, 0];
@@ -1263,7 +1263,7 @@ export function startCatalogRefresh(): void {
       // for the collection export on databases enriched before that column.
       // Background: it can run for an hour and nothing else depends on it.
       // Never while the catalog is still being completed (repair, known-sets,
-      // dump check) — that pass settles the map count and comes first.
+      // dump check), that pass settles the map count and comes first.
       if (
         !enrichCatchupRunning &&
         !status.backfill.running &&
@@ -1308,21 +1308,6 @@ export function startCatalogRefresh(): void {
                AND datetime(s.ended_at) >= datetime('now', '-2 days')
                AND datetime(beatmap_user.country_checked_at) <= datetime(s.ended_at, '+15 minutes'))`
         );
-        // a recent "lost" WITHOUT a sniper is the degraded-fetch signature
-        // (a real snipe names its author): requeue for a re-check that
-        // either restores the #1 or confirms the loss with its author.
-        // Window-bounded, so a genuine oddity cannot churn forever.
-        cdb.exec(
-          `UPDATE beatmap_user SET country_checked_at = NULL
-           WHERE ruleset IN (${sqlIn(getStartedRulesets())})
-             AND country_first = 0 AND country_checked_at IS NOT NULL
-             AND EXISTS (
-               SELECT 1 FROM country_events e
-               WHERE e.beatmap_id = beatmap_user.beatmap_id
-                 AND e.ruleset = beatmap_user.ruleset
-                 AND e.event = 'lost' AND e.by_user_id IS NULL
-                 AND e.at > datetime('now', '-7 days'))`
-        );
         await runCountryFastLane().catch((e) => logError(e, "country fast lane"));
         void runCountrySweep();
       }
@@ -1356,7 +1341,7 @@ export function startCatalogRefresh(): void {
       if (!status.backfill.running && !catalogRunning)
         void fillConvertAttrs().catch((e) => logError(e, "convert attrs"));
       // Self-heal: a STARTED mode whose initial enumeration never finished
-      // (restart mid-import — remaining ranked years, the whole loved
+      // (restart mid-import, remaining ranked years, the whole loved
       // category…) is resumed from its persisted slice cursors.
       const unfinished = getStartedRulesets().filter(
         (r) => r !== 0 && getState(`catalog_done_m${r}`) !== "1"
@@ -1443,9 +1428,27 @@ function scheduleCountryConfirm(beatmapId: number, ruleset = 0): void {
  */
 
 /** Country holes: pending checks on maps with a score under 2 days (the
- * deferred confirm dies with a restart, the 15-min requeue feeds this), or
- * requeued after a recent "lost" with no sniper (degraded-fetch signature). */
+ * deferred confirm dies with a restart, the 15-min requeue feeds this). */
 let countryLaneBusy = false;
+
+// Belt counter shared by both check functions: an empty leaderboard answer
+// on a held state requeues the map, until the BELT_MAX-th consecutive empty
+// answer, which parks it: the check is stamped with the held state kept (no false loss, no
+// phantom snipe) and the stale-held requeue retries after the configured
+// delay. ponytail: in-memory, resets on restart; a durably delisted map
+// keeps its held state until then, a "delisted" event would be the upgrade.
+const BELT_MAX = 5;
+const beltHits = new Map<string, number>();
+/** true = requeue again, false = give up for now */
+function beltHit(key: string): boolean {
+  const n = (beltHits.get(key) ?? 0) + 1;
+  if (n < BELT_MAX) {
+    beltHits.set(key, n);
+    return true;
+  }
+  beltHits.delete(key);
+  return false;
+}
 export async function runCountryFastLane(): Promise<void> {
   if (countryLaneBusy || !isUserConnected()) return;
   countryLaneBusy = true;
@@ -1459,17 +1462,10 @@ export async function runCountryFastLane(): Promise<void> {
          AND u.ruleset IN (${modes})
          AND (b.ruleset = u.ruleset OR b.ruleset = 0)
          AND b.status IN (1, 2, 4)
-         AND (
-           EXISTS (
-             SELECT 1 FROM scores s
-             WHERE s.beatmap_id = u.beatmap_id AND s.ruleset = u.ruleset
-               AND datetime(s.ended_at) >= datetime('now', '-2 days'))
-           OR (u.country_first = 0 AND EXISTS (
-             SELECT 1 FROM country_events e
-             WHERE e.beatmap_id = u.beatmap_id AND e.ruleset = u.ruleset
-               AND e.event = 'lost' AND e.by_user_id IS NULL
-               AND e.at > datetime('now', '-7 days')))
-         )
+         AND EXISTS (
+           SELECT 1 FROM scores s
+           WHERE s.beatmap_id = u.beatmap_id AND s.ruleset = u.ruleset
+             AND datetime(s.ended_at) >= datetime('now', '-2 days'))
        LIMIT 100`
     )
     .all() as { id: number; r: number }[];
@@ -1616,15 +1612,26 @@ export function applyCountryCheck(
   // degraded fetch: keep the held state, requeue the map for a retry, and
   // record nothing (a false "lost" would now notify a phantom snipe).
   if (top == null && prevFirst === 1) {
+    if (beltHit(`c${ruleset}:${beatmapId}`)) {
+      db.prepare(
+        "UPDATE beatmap_user SET country_checked_at = NULL WHERE beatmap_id = ? AND ruleset = ?"
+      ).run(beatmapId, ruleset);
+      logActivity(
+        "country #1",
+        () => `${mapLabel(beatmapId)} · empty leaderboard on a held #1, retrying later`
+      );
+      return;
+    }
     db.prepare(
-      "UPDATE beatmap_user SET country_checked_at = NULL WHERE beatmap_id = ? AND ruleset = ?"
+      "UPDATE beatmap_user SET country_checked_at = datetime('now') WHERE beatmap_id = ? AND ruleset = ?"
     ).run(beatmapId, ruleset);
     logActivity(
       "country #1",
-      () => `${mapLabel(beatmapId)} · empty leaderboard on a held #1, retrying later`
+      () => `${mapLabel(beatmapId)} · empty leaderboard ${BELT_MAX} times on a held #1, parked until the stale re-check`
     );
     return;
   }
+  beltHits.delete(`c${ruleset}:${beatmapId}`);
 
   // Losing a held #1 is ALWAYS logged (country_first=1 implies a check had
   // established it, even if country_checked_at was reset to NULL for the re-check).
@@ -1648,6 +1655,8 @@ export function applyCountryCheck(
     // post-score check skips this function entirely on a lagging
     // leaderboard (see the poll), so false losses never get here.
     if (isFirst === 0) notifyCountryFirstLost(beatmapId, ruleset, top?.user?.username ?? null);
+    // the timeline and the time machine count held #1s: invalidate their caches
+    bumpScoresVersion();
   }
   db.prepare(
     `UPDATE beatmap_user
@@ -1671,7 +1680,7 @@ export async function runCountrySweep(force = false): Promise<void> {
   if (force) setState("country_sweep_paused", "0");
   // The full sweep and the backfill both consume the same 60 req/min budget:
   // interleaving them doubles the duration of BOTH. Automatic starts (periodic
-  // tick, auth callback) are deferred while the backfill runs — the sweep is
+  // tick, auth callback) are deferred while the backfill runs, the sweep is
   // launched as soon as the backfill completes. Manual starts (menu) force.
   if (!force && (status.backfill.running || catalogRunning || status.phase === "catalog")) {
     logActivity(
@@ -1686,7 +1695,7 @@ export async function runCountrySweep(force = false): Promise<void> {
     const db = getDb();
     // One shared queue across the active rulesets (specific maps + converts).
     // Priority: 1. maps NEVER checked (the only ones that can still teach us
-    // anything — without this rule the 48h re-check rotation starves them);
+    // anything, without this rule the 48h re-check rotation starves them);
     // 2. held #1s, oldest first (snipe detection); 3. the rest, oldest first.
     // country_seen_at survives the re-queue, country_checked_at does not.
     const nextBatch = db.prepare(
@@ -1780,7 +1789,7 @@ function globalTier(rank: number | null): number | null {
 
 /**
  * Stores a global position check and logs a history event when the map
- * changes TIER (top 1/8/15/25/50/100) — rank moves inside a tier are not
+ * changes TIER (top 1/8/15/25/50/100), rank moves inside a tier are not
  * events. First-ever checks stay silent (initial sweep) unless
  * `recordInitial` is set (immediate check after a NEW score: entering a tier
  * on a never-checked map is a real gain, same rule as the country checks).
@@ -1811,16 +1820,27 @@ export function applyGlobalCheck(
   // extraordinary): keep the known state and requeue instead of recording
   // a false "outside top 100".
   if (pos == null && prevRank != null) {
+    if (beltHit(`g${ruleset}:${beatmapId}`)) {
+      db.prepare(
+        "UPDATE beatmap_user SET global_checked_at = NULL WHERE beatmap_id = ? AND ruleset = ?"
+      ).run(beatmapId, ruleset);
+      logActivity(
+        "global tops",
+        () => `${mapLabel(beatmapId)} · no position on a ranked map (held #${prevRank}), retrying later`
+      );
+      return;
+    }
     db.prepare(
-      "UPDATE beatmap_user SET global_checked_at = NULL WHERE beatmap_id = ? AND ruleset = ?"
+      "UPDATE beatmap_user SET global_checked_at = datetime('now') WHERE beatmap_id = ? AND ruleset = ?"
     ).run(beatmapId, ruleset);
     logActivity(
       "global tops",
-      () => `${mapLabel(beatmapId)} · no position on a ranked map (held #${prevRank}), retrying later`
+      () => `${mapLabel(beatmapId)} · no position ${BELT_MAX} times (held #${prevRank}), parked until the stale re-check`
     );
     return;
   }
-  // "known" = a previous check happened — global_seen survives the re-queues
+  beltHits.delete(`g${ruleset}:${beatmapId}`);
+  // "known" = a previous check happened, global_seen survives the re-queues
   // that reset global_checked_at, so re-check transitions are always logged
   const wasKnown =
     prevRank != null || prev?.global_checked_at != null || prev?.global_seen === 1;
@@ -1835,12 +1855,14 @@ export function applyGlobalCheck(
       () =>
         `${mapLabel(beatmapId)} · ${oldTier ? `top ${oldTier}` : "outside top 100"} → ${
           newTier ? `top ${newTier}` : "outside top 100"
-        } (${prevRank != null ? `#${prevRank}` : "—"} → ${pos != null ? `#${pos}` : "—"}) (global)`
+        } (${prevRank != null ? `#${prevRank}` : "-"} → ${pos != null ? `#${pos}` : "-"}) (global)`
     );
     // Discord (opt-in per webhook): only downward tier moves; the notifier
     // re-derives the tiers and ignores gains by itself
     if (oldTier != null && (newTier == null || newTier > oldTier))
       notifyGlobalTopLost(beatmapId, ruleset, prevRank, pos);
+    // tier counts feed the timeline and the time machine: invalidate caches
+    bumpScoresVersion();
   }
   db.prepare(
     "UPDATE beatmap_user SET global_rank = ?, global_checked_at = datetime('now'), global_seen = 1 WHERE beatmap_id = ? AND ruleset = ?"
@@ -1851,7 +1873,7 @@ export function applyGlobalCheck(
 
 /**
  * Deferred confirmation after a new best: like the country leaderboard, the
- * global one can lag behind a fresh submit — the immediate check may return
+ * global one can lag behind a fresh submit, the immediate check may return
  * the OLD position (or none) and, when it lands outside the top 100, nothing
  * would ever re-check it. One re-check a few minutes later catches it.
  */
@@ -1883,7 +1905,7 @@ export function getGlobalRecheckHours(): number {
  * (global_checked_at NULL). Same architecture as the country sweep: resumable,
  * low priority, deferred while the backfill runs. Uses the client-credentials
  * API (no connected account required). Previously-ranked maps (re-checks) go
- * first — losing a top spot matters more than discovering a new #4000.
+ * first, losing a top spot matters more than discovering a new #4000.
  */
 export async function runGlobalSweep(force = false): Promise<void> {
   if (globalRunning) return;
@@ -1961,8 +1983,8 @@ export function pauseGlobalSweep(): void {
 
 /**
  * Known-sets catch-up: seed-sets.json (shipped with the repo) lists every
- * ranked/approved/loved set of a complete reference catalog — including the
- * DMCA/delisted ones /beatmapsets/search never returns — as
+ * ranked/approved/loved set of a complete reference catalog, including the
+ * DMCA/delisted ones /beatmapsets/search never returns, as
  * `{ "<set id>": <ruleset bitmask> }` (1 osu!, 2 taiko, 4 catch, 8 mania).
  * A set is fetched by direct lookup (API then web page) when the seed says it
  * carries diffs for a mode we track and we hold none of that mode: no budget
@@ -1974,7 +1996,7 @@ let seedRunning = false;
 
 /**
  * Reads the shipped seed list. Three shapes, oldest first (see SeedVersion):
- * flat ids, per-mode bitmask, per-mode diff COUNTS — only the last one can spot
+ * flat ids, per-mode bitmask, per-mode diff COUNTS, only the last one can spot
  * a set holding some of a mode's diffs but not all of them.
  */
 function readSeed(): { version: SeedVersion; entries: [number, number][] } | null {
@@ -2120,7 +2142,7 @@ export async function importSetById(
 /**
  * Manual re-fetch of MY scores on every already-fetched diff of a set, all
  * started rulesets. The recent-scores endpoint only covers 24 h, so plays made
- * while the app was off are invisible to polling — this recovers what the
+ * while the app was off are invisible to polling, this recovers what the
  * per-map endpoint exposes (the best score per mod combination; other offline
  * plays are not retrievable, except one by one via their score id).
  */
@@ -2224,7 +2246,7 @@ export async function runDumpVerify(path: string, modes?: number[]): Promise<str
 export async function runCatalogRepair(): Promise<string> {
   const prog = (m: string) => (status.message = `repair: ${m}`);
   // A repair only makes sense on an enumerated catalog (its whole job is the
-  // holes the search cannot see), so wait out any running enumeration —
+  // holes the search cannot see), so wait out any running enumeration,
   // BEFORE claiming the busy label and the pool snapshot, which would
   // otherwise count the enumeration's maps as the repair's own.
   while (catalogRunning || status.phase === "catalog") {
@@ -2236,7 +2258,7 @@ export async function runCatalogRepair(): Promise<string> {
   try {
     // 1. known-sets seed catch-up (sets the search enumeration cannot see)
     await importMissingKnownSets();
-    // 2. re-lookup of the known DMCA sets — only useful with an OLD seed: a
+    // 2. re-lookup of the known DMCA sets, only useful with an OLD seed: a
     // v2 seed carries per-mode diff counts for EVERY set, so the catch-up
     // above already covers this population.
     if (readSeed()?.version === 2)
@@ -2289,7 +2311,7 @@ export async function runPipeline(opts?: { skipCatalog?: boolean }) {
           status.message = m;
           logActivity("catalog", m);
         });
-        // Automatic completeness — no fix button needed: the DMCA/delisted
+        // Automatic completeness, no fix button needed: the DMCA/delisted
         // sets invisible to the search (bundled seed list), then the sets
         // truncated by the ~100-diff payload cap (web page re-fetch).
         status.message = "Completing the catalog (known delisted sets)…";
@@ -2331,7 +2353,7 @@ async function runBackfill(): Promise<void> {
   status.message = "Score backfill in progress (resumable)...";
   try {
     // Queue order: std first, then each active ruleset's SPECIFIC maps, then
-    // the CONVERTS of each active ruleset (std maps played in that mode) —
+    // the CONVERTS of each active ruleset (std maps played in that mode),
     // the cheap high-value passes go before the huge convert grind. Each pass
     // is resumable independently (fetched_at NULL per (map, ruleset) row).
     const passes: { ruleset: number; mapMode: number; label: string }[] = [];
@@ -2415,7 +2437,7 @@ async function runBackfill(): Promise<void> {
 }
 
 /**
- * Recomputes the bests (and best_fc/played flags) of every map with scores —
+ * Recomputes the bests (and best_fc/played flags) of every map with scores,
  * catch-up after a logic change or scores imported by an older server version.
  */
 export function recomputeAllBests(): number {

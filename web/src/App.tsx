@@ -55,7 +55,7 @@ export default function App() {
   const switchRuleset = (r: number) =>
     // filters are pool-specific: switching mode resets them (like a drill-down).
     // The scoring mode and the converts choice describe WHAT you look at, not a
-    // filter on it — they follow you across modes and views.
+    // filter on it, they follow you across modes and views.
     setFilters({
       ...DEFAULT_FILTERS,
       mode: filters.mode,

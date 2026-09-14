@@ -115,7 +115,7 @@ export async function localStarRating(
 /**
  * A stored score's hit counts, translated to rosu's per-ruleset fields.
  * The slider fields are only passed when the score actually tracked them
- * (a stable score has none — passing 0 would count every slider as dropped).
+ * (a stable score has none, passing 0 would count every slider as dropped).
  */
 export function perfHits(
   rulesetId: number,
@@ -156,7 +156,7 @@ export function perfHits(
 /**
  * pp of a play the API leaves without one (loved map, unranked mods),
  * computed like the rating above: real mods and rate, the score's own hit
- * counts. Null when the map cannot be read — or when the score carries no
+ * counts. Null when the map cannot be read, or when the score carries no
  * hit counts at all: generated "best case" hitresults from the accuracy
  * alone were off by 5x on low-accuracy plays, worse than showing nothing.
  */

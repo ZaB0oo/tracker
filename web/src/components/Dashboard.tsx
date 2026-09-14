@@ -19,6 +19,7 @@ import { PoolSeg } from "./PoolSeg";
 import { TimeMachineBar } from "./TimeMachine";
 import { MedalIcon } from "./Icons";
 import { displayGrade, fmtNum } from "../format";
+import { getLocal } from "../lib/storage";
 import {
   EXTRA_GAUGE_KEYS,
   FC_LABELS,
@@ -35,7 +36,7 @@ import {
 const fmtK = (n: number) =>
   n >= 1_000_000 ? `${(n / 1_000_000).toFixed(2)}M` : `${Math.round(n / 1000)}k`;
 
-/** dashboard sub-tabs — "Charts" will also host the future graphs */
+/** dashboard sub-tabs, "Charts" will also host the future graphs */
 const DASH_TABS = [
   ["overview", "Overview"],
   ["sessions", "Sessions"],
@@ -112,7 +113,7 @@ function RateColumn({
       <div className="rate-col-bar-wrap">
         {/* hovered: the bar unfolds to the full height of the chart. The
             layers below are shares of the BUCKET, not of the axis, so they
-            stay exact — only the scale of the drawing changes. */}
+            stay exact, only the scale of the drawing changes. */}
         <div
           className="rate-col-bar"
           style={{ height: `${hover && b.played > 0 ? 100 : heightPct}%` }}
@@ -159,7 +160,7 @@ function RateColumn({
  * Playback-rate histogram: how many maps have their BEST score at each rate
  * (0.1 buckets over lazer's 0.5x-2.0x range, 2.0x on its own). A rate belongs
  * to the SCORE, not to the map, so there is no "available maps" denominator
- * here — the bar height is the map count and the gauge layers are shares OF
+ * here, the bar height is the map count and the gauge layers are shares OF
  * that count.
  */
 const RateHistogram = memo(function RateHistogram({
@@ -186,7 +187,7 @@ const RateHistogram = memo(function RateHistogram({
   const max = Math.max(...buckets.map((b) => b.played), 1);
   // Linear height, so the bars can be compared for what they are: the counts
   // span single digits to tens of thousands, which leaves the small buckets
-  // as a sliver — hovering one grows it to full height (see RateColumn), and
+  // as a sliver, hovering one grows it to full height (see RateColumn), and
   // that is where its gauge breakdown becomes readable.
   const height = (v: number) => (v <= 0 ? 0 : Math.max((v / max) * 100, 0.6));
 
@@ -208,7 +209,7 @@ const RateHistogram = memo(function RateHistogram({
             onView={() =>
               // [rate, rate+0.1), and the 2.0x bar is that exact rate. Rates
               // are stored rounded to 2 decimals, so the inclusive upper
-              // bound of a bucket is simply x.x9 — computed on INTEGERS, or
+              // bound of a bucket is simply x.x9, computed on INTEGERS, or
               // the float noise leaked into the filter (1.0990000000000002).
               onViewRate?.(
                 b.bucket / 10,
@@ -410,7 +411,7 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
     ML + ((q - xMin) / (xMax - xMin || 1)) * (W - ML - MR);
 
   // Hybrid scale: linear up to 1M std, then LOGARITHMIC above (modded bests
-  // > 1M) — otherwise the modded plateau crushes the rest of the curve.
+  // > 1M), otherwise the modded plateau crushes the rest of the curve.
   const SPLIT = 1_000_000;
   const plotBot = H - MB;
   const plotH = plotBot - MT;
@@ -426,7 +427,7 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
   };
 
   // <path> instead of <polyline>: a path's `d` is a CSS property, so the
-  // browser can TRANSITION it — the curve glides when the time machine moves
+  // browser can TRANSITION it, the curve glides when the time machine moves
   // (bands appearing or vanishing still snap: the shapes are not congruent)
   const pts = buckets.flatMap((b) => {
     const yy = y(b.predicted).toFixed(1);
@@ -567,7 +568,7 @@ const SkillCurvePanel = memo(function SkillCurvePanel({
 
 /**
  * Selectable completion gauges (one bar layer each). The legend groups them:
- * grades, global-top tiers (cumulative shades), country #1 — the yellow
+ * grades, global-top tiers (cumulative shades), country #1, the yellow
  * country portion is overlaid on the played portion.
  */
 export const GAUGES = [
@@ -611,7 +612,7 @@ function Bar({
   gaugeHidden: (id: string) => boolean;
   /** hovered-row name shown in the tooltip header ("2008", "4★–5★", "Ranked") */
   label?: string;
-  /** "#1 FR" — tells the country first apart from the global Top 1 */
+  /** "#1 FR", tells the country first apart from the global Top 1 */
   countryLabel?: string;
 }) {
   const played = row.played ?? 0;
@@ -623,7 +624,7 @@ function Bar({
   )
     .map((g) => ({ ...g, v: row[g.id] ?? 0 }))
     .sort((a, b) => b.v - a.v);
-  // The bar itself only carries the main ratio — consistent whatever the
+  // The bar itself only carries the main ratio, consistent whatever the
   // width (gauge counts used to overflow and vanish on narrow bars). The
   // full detail lives in a hover tooltip, one line per visible gauge.
   const [hover, setHover] = useState(false);
@@ -769,7 +770,7 @@ export function Dashboard({
   onViewBucket,
 }: {
   ruleset?: number;
-  /** map pool of the viewed ruleset — same choice as the Maps view */
+  /** map pool of the viewed ruleset, same choice as the Maps view */
   pool?: PoolMode;
   onPoolChange?: (pool: PoolMode) => void;
   /** mania key-count filter, shared with the Maps view */
@@ -795,16 +796,16 @@ export function Dashboard({
   // score-curve panel dimension, persisted; drives both the live fetch and
   // the snapshot reconstruction so the time machine follows the same axis
   const [curveDim, setCurveDimState] = useState<string>(
-    () => localStorage.getItem("curve-dim") ?? "sr"
+    () => getLocal("curve-dim") ?? "sr"
   );
   const setCurveDim = useCallback((d: string) => {
     setCurveDimState(d);
     localStorage.setItem("curve-dim", d);
   }, []);
   // "Ranked only" scope: the WHOLE dashboard drops loved maps (stats,
-  // distributions, snapshot, skill curve) — persisted like the gauges
+  // distributions, snapshot, skill curve), persisted like the gauges
   const [scope, setScope] = useState<DashScope>(() => {
-    const v = localStorage.getItem("dash-scope");
+    const v = getLocal("dash-scope");
     return v === "ranked" || v === "loved" ? v : "all";
   });
   const setScopePersist = (v: DashScope) => {
@@ -814,7 +815,7 @@ export function Dashboard({
   // Dashboard sub-tabs. The scope bar, gauge legend and time machine above
   // stay global: the slider keeps steering whichever tab is open.
   const [tab, setTab] = useState<DashTab>(() => {
-    const v = localStorage.getItem("dash-tab");
+    const v = getLocal("dash-tab");
     return DASH_TABS.some(([id]) => id === v) ? (v as DashTab) : "overview";
   });
   const setTabPersist = (v: DashTab) => {
@@ -837,7 +838,7 @@ export function Dashboard({
   const [hmYear, setHmYear] = useState(new Date().getUTCFullYear());
   // A scope/pool/mode switch swaps the timeline for one with different
   // points: keep the same DAY engaged instead of the same index (a shorter
-  // series — loved has few event days — used to clamp the slider back to
+  // series, loved has few event days, used to clamp the slider back to
   // live and quietly disengage the time machine)
   const prevTlRef = useRef<typeof timeline>(undefined);
   useEffect(() => {
@@ -949,7 +950,7 @@ export function Dashboard({
     }));
   }, [data, snap, snapReady, tmDay != null]);
 
-  // Per-stat panels: memoized so they do NOT re-render on every slider tick —
+  // Per-stat panels: memoized so they do NOT re-render on every slider tick,
   // their rows only change when the (debounced) snapshot or live stats change.
   const dists = useMemo<{ title: string; rows: DistRow[] }[]>(() => {
     if (!data) return [];
@@ -991,7 +992,7 @@ export function Dashboard({
         ...over(dict, b.bucket, liveOf(b)),
       }));
     // Every panel bucket maps back to a filter range. The server buckets by
-    // truncation (CAST AS INTEGER), so a bucket is [b, b+1) — but the table
+    // truncation (CAST AS INTEGER), so a bucket is [b, b+1), but the table
     // filters are inclusive, hence an upper bound a hair short of the next
     // bucket (same epsilon as the skill-curve drill-down). The capped last
     // bucket ("10★+", "2500+") simply drops its upper bound.
@@ -1111,6 +1112,18 @@ export function Dashboard({
     (f: Partial<Filters>) => onViewBucket?.(f, scope),
     [onViewBucket, scope]
   );
+
+  // StatsStrip is memoized: an inline object literal re-rendered the whole
+  // strip (glow and count-up included) on every time-machine tick
+  const completion = useMemo(() => {
+    const t = data?.totals;
+    if (!t) return null;
+    return scope === "ranked"
+      ? { done: t.ranked_played ?? 0, total: t.ranked_total }
+      : scope === "loved"
+        ? { done: t.loved_played ?? 0, total: t.loved_total }
+        : { done: t.played, total: t.total };
+  }, [data, scope]);
 
   if (isLoading)
     return (
@@ -1257,7 +1270,7 @@ export function Dashboard({
           <KeysChips value={keys} onChange={onKeysChange} />
         )}
         {/* The gauges are drawn in the hero, every histogram, the rate columns
-            and all their tooltips — the legend belongs with the scope, not
+            and all their tooltips, the legend belongs with the scope, not
             above one grid it only appeared to control. Pushed right so the
             two families stay told apart on the same line. */}
         <GaugeLegend
@@ -1417,13 +1430,7 @@ export function Dashboard({
           keys={keys}
           scope={scope}
           dimmed={past != null}
-          completion={
-            scope === "ranked"
-              ? { done: t.ranked_played ?? 0, total: t.ranked_total }
-              : scope === "loved"
-                ? { done: t.loved_played ?? 0, total: t.loved_total }
-                : { done: t.played, total: t.total }
-          }
+          completion={completion}
           grades={data.grades}
           rankedClassic={data.scoreSums.classic}
         />

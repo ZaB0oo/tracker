@@ -36,11 +36,11 @@ const fmtDate = (at: string) => {
   const iso = at.includes("T") ? at : at.replace(" ", "T") + "Z";
   return fmtDateTime(iso);
 };
-const fmtInt = (n: number | null | undefined) => (n == null ? "—" : fmtNum(n));
+const fmtInt = (n: number | null | undefined) => (n == null ? "-" : fmtNum(n));
 
 /**
  * Column headers. Rendered by the PANEL rather than by the list, so they sit
- * in the same sticky block as the filters above them — two stacked sticky
+ * in the same sticky block as the filters above them, two stacked sticky
  * rows would need the second to hardcode the first one's height. Side effect:
  * they now stay visible while a list is loading or empty, which is what a
  * table header does anyway.
@@ -290,8 +290,8 @@ function GlobalList({
               {e.old_rank == null
                 ? e.new_rank != null
                   ? `#${fmtNum(e.new_rank)}`
-                  : "—"
-                : `#${fmtNum(e.old_rank)} → ${e.new_rank != null ? `#${fmtNum(e.new_rank)}` : "—"}`}
+                  : "-"
+                : `#${fmtNum(e.old_rank)} → ${e.new_rank != null ? `#${fmtNum(e.new_rank)}` : "-"}`}
             </span>
           </div>
         );

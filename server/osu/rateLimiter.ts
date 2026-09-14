@@ -38,7 +38,7 @@ export class RateLimiter {
    * configured rate (IP reputation, the game's traffic on the same IP…):
    * resuming at full speed after each 30 s penalty just re-triggered the
    * block every ~40 s. Each 429 doubles the request spacing (up to x16),
-   * each success decays it ~5 % — the pace settles just under whatever the
+   * each success decays it ~5 %, the pace settles just under whatever the
    * other side currently tolerates, then drifts back to the configured rate.
    */
   private slowFactor = 1;

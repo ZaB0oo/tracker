@@ -41,7 +41,7 @@ const CLEARS_SELECT = `SELECT s.id, s.ended_at, s.rank, s.accuracy, s.total_scor
    LEFT JOIN beatmap_user u ON u.beatmap_id = s.beatmap_id AND u.ruleset = s.ruleset`;
 
 /**
- * GET /api/clears — history of ALL my scores (not just the bests),
+ * GET /api/clears, history of ALL my scores (not just the bests),
  * newest to oldest.
  */
 historyRouter.get("/clears", (req, res) => {
@@ -104,7 +104,7 @@ historyRouter.get("/clears", (req, res) => {
 });
 
 /**
- * GET /api/country-history — history of country #1s gained/lost.
+ * GET /api/country-history, history of country #1s gained/lost.
  * Params: event=gained|lost (optional), offset, limit.
  */
 historyRouter.get("/country-history", (req, res) => {
@@ -137,7 +137,7 @@ historyRouter.get("/country-history", (req, res) => {
 });
 
 /**
- * GET /api/global-history — global tops tier transitions (top 1/8/15/25/50/100).
+ * GET /api/global-history, global tops tier transitions (top 1/8/15/25/50/100).
  * Params: event=gained|lost (optional), offset, limit.
  * gained = entered a better tier (new rank smaller, or was outside before).
  */

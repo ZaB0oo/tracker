@@ -29,7 +29,7 @@ describe("scoreWhere", () => {
       },
     });
     const inv = scoreWhere(goal, true);
-    // "a passed best that does NOT meet the goal" — the complement is exact
+    // "a passed best that does NOT meet the goal", the complement is exact
     // only if passed stays outside the negation
     expect(inv.startsWith("s.passed = 1 AND NOT (")).toBe(true);
     expect(inv).not.toContain("NOT (s.passed = 1");
@@ -40,7 +40,7 @@ describe("scoreWhere", () => {
   });
 
   it("an empty goal matches nothing once inverted", () => {
-    // NOT(1) — an inverted metric with no condition must not select every map
+    // NOT(1), an inverted metric with no condition must not select every map
     expect(scoreWhere(DEFAULT_SCORE_CONDS, true)).toBe("s.passed = 1 AND NOT (1)");
   });
 
@@ -75,6 +75,18 @@ describe("mapWhere", () => {
 
   it("falls back to every status when none is selected", () => {
     expect(mapWhere(DEFAULT_MAP_CONDS)).toContain("b.status IN (1,2,4)");
+  });
+
+  it("filters SR and combo on the convert's own values outside std", () => {
+    const c = { ...DEFAULT_MAP_CONDS, srMin: 4, comboMax: 1000 };
+    const std = mapWhere(c, { ruleset: 0 });
+    expect(std).toContain("b.star_rating >= 4");
+    expect(std).not.toContain("convert_attrs");
+    const taiko = mapWhere(c, { ruleset: 1 });
+    expect(taiko).toContain("convert_attrs ca");
+    expect(taiko).toContain("ca.ruleset = 1");
+    expect(taiko).toContain("ca.max_combo");
+    expect(taiko).not.toContain("b.star_rating >= 4");
   });
 });
 

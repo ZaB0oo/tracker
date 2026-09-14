@@ -98,7 +98,7 @@ export async function updateCatalogDelta(
   const newBeatmapIds: number[] = [];
   const before = poolCounts();
 
-  // one delta walk per CATALOG ruleset — std included when it only feeds the
+  // one delta walk per CATALOG ruleset, std included when it only feeds the
   // converts of another mode, otherwise newly ranked converts never arrive
   for (const mode of catalogRulesets()) {
     for (const category of ["ranked", "loved"] as const) {
@@ -114,7 +114,7 @@ export async function updateCatalogDelta(
         );
         // "already-known territory" is measured on THIS mode's DIFFS, never on
         // the sets: the walks run one mode after another, so the first walk
-        // already stored every new hybrid set — a set-level test made every
+        // already stored every new hybrid set, a set-level test made every
         // later mode stop on its first page and skip its own new diffs.
         let newInPage = 0;
         transaction(() => {
@@ -227,7 +227,7 @@ function upsertFullSet(set: ApiBeatmapset): number[] {
 
 /**
  * Number of diffs a channel returned that we would store (ranked/approved/loved,
- * any ruleset) — i.e. "did this channel see anything usable for this set?".
+ * any ruleset), i.e. "did this channel see anything usable for this set?".
  */
 export function keptDiffCount(set: ApiBeatmapset | null): number {
   return (set?.beatmaps ?? []).filter(
@@ -248,7 +248,7 @@ export async function importOneSet(
   // The ~100-diff payload cap also hits the LOOKUP: a mega-collab comes back
   // truncated and its cut-off diffs then look like they do not exist at all
   // (they came back "missing" on every dump run). Cross-check the web page
-  // whenever the payload is that big — same threshold as repairOversizedSets.
+  // whenever the payload is that big, same threshold as repairOversizedSets.
   const maybeTruncated = (set?.beatmaps?.length ?? 0) >= TRUNCATION_SUSPECT;
   if (!set || maybeTruncated || keptDiffCount(set) === 0) {
     const webSet = await fetchBeatmapsetFromWeb(setId);
@@ -280,7 +280,7 @@ export async function repairOversizedSets(
 ): Promise<number[]> {
   const db = getDb();
   // the ~100-diff API cap applies to the WHOLE set payload (all modes): a
-  // mixed 60 std + 50 catch set truncates too — suspect anything close
+  // mixed 60 std + 50 catch set truncates too, suspect anything close
   const suspects = db
     .prepare(
       `SELECT beatmapset_id AS id, COUNT(*) n FROM beatmaps
@@ -367,7 +367,7 @@ export async function verifyYear(
   const db = getDb();
   const seen = new Set<number>();
 
-  // IMPORTANT: we enumerate all 4 modes — a taiko/mania/catch-only set does
+  // IMPORTANT: we enumerate all 4 modes, a taiko/mania/catch-only set does
   // not appear in the std search (m=0) and would wrongly be treated as
   // delisted (thousands of useless individual checks).
   const collect = async (
@@ -514,7 +514,7 @@ export async function importCatalogFromApi(
   // IMPORTANT: the osu!web search caps at ~10,000 results per query, cursor
   // included. The cap applies to SETS and no year has ever exceeded ~5.5k
   // sets, so one slice per rank year is always complete. Strategy:
-  //  1) "base" pass with no date filter — catches sets with no ranked_date
+  //  1) "base" pass with no date filter, catches sets with no ranked_date
   //     (within the cap, ranked_asc sort);
   //  2) slices by rank year (`ranked>=Y ranked<Y+1`).
   const START_YEAR = 2007;
@@ -557,7 +557,7 @@ export async function importCatalogFromApi(
       // The base pass has NO date filter: when it stays under the search cap it
       // just enumerated the WHOLE category, and the yearly slices below would
       // re-walk the very same sets (taiko/catch/mania all sit far under the cap
-      // — ~300 duplicate requests per mode per pass). Only std needs slicing.
+      //, ~300 duplicate requests per mode per pass). Only std needs slicing.
       // Any doubt keeps the slices: -1 = base finished on an earlier run (total
       // unknown), and the walked count is checked too so a surprising `total`
       // can never skip them.
@@ -645,7 +645,7 @@ function apiMapToRow(b: ApiBeatmap) {
  * the periodic tick enriches, a dump verify while a delta finishes…). Without
  * this guard each pass pulled the SAME `LIMIT 50` rows and re-fetched them:
  * three concurrent passes = three times the API budget for one job. Skipping is
- * safe — the running pass re-queries every iteration, so it picks up whatever
+ * safe, the running pass re-queries every iteration, so it picks up whatever
  * the caller just imported.
  */
 let enrichRunning = false;
@@ -668,7 +668,7 @@ async function enrichMaxComboInner(
   shouldStop?: () => boolean
 ): Promise<number> {
   const db = getDb();
-  // star_rating: COALESCE — the "id not returned" branch below used to WIPE
+  // star_rating: COALESCE, the "id not returned" branch below used to WIPE
   // the SR of existing maps (they dropped out of every star bucket)
   const update = db.prepare(
     `UPDATE beatmaps SET max_combo = @max_combo,

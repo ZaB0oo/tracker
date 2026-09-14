@@ -3,7 +3,7 @@ import { RULESET_OSU } from "./rulesets.js";
 
 /**
  * pp of a score, locally computed fallback included: loved maps and unranked
- * mod combos have API pp NULL — osu/ppFill.ts fills pp_local for them in the
+ * mod combos have API pp NULL, osu/ppFill.ts fills pp_local for them in the
  * background, and -1 there means "can never have one" (stays NULL here).
  * Lives in this db-free module so the pure logic tests can import it too.
  */
@@ -39,7 +39,7 @@ export const FC_NONE = 2;
  *
  * Wind Up / Wind Down / Adaptive Speed have no speed_change: the rate MOVES
  * over the map, from `initial_rate` to `final_rate`. There is no true single
- * value, so we store the mean of the two — what was played on average, rather
+ * value, so we store the mean of the two, what was played on average, rather
  * than the peak (a 1.0x -> 1.5x wind up is not a 1.5x clear). Adaptive Speed
  * only announces where it starts, so that is what it gets.
  * Defaults come from ppy/osu (ModWindUp/ModWindDown/ModAdaptiveSpeed).
@@ -83,7 +83,7 @@ export function computeRate(
  * Mods that move the star rating (osu! DifficultyAdjustmentMods; HD counts
  * since the 2026 reading rework). The three ramps are here because what they
  * change IS the rate, which is what the difficulty calculator reads. DA
- * overrides CS/AR/OD/HP, and the mania key mods change the convert itself —
+ * overrides CS/AR/OD/HP, and the mania key mods change the convert itself,
  * rosu-pp applies both when they are passed along. The automation mods RX/AP
  * count too: rosu-pp rates them far lower (a relax "12★" is really ~5★), and
  * leaving them out of the key made an RX play borrow the honest rating.
@@ -188,3 +188,40 @@ export function computeFcState(
   return FC_NO_MISS;
 }
 
+
+/**
+ * SQL twin of computeRate(), applied to `scores.mods` by the rate migration in
+ * db/db.ts; the two must stay in sync (tests/twins.test.ts checks it).
+ * ROUND(x * 100) / 100 and NOT ROUND(x, 2): the mean of two rates lands on a
+ * half-cent (0.61 + 0.60 -> 0.605) and the two roundings disagree there,
+ * which would make a re-imported score change bucket.
+ */
+export const RATE_SQL = `ROUND(100.0 * COALESCE(
+        (SELECT json_extract(je.value, '$.settings.speed_change')
+         FROM json_each(scores.mods) je
+         WHERE json_extract(je.value, '$.settings.speed_change') IS NOT NULL
+         LIMIT 1),
+        -- Wind Up / Wind Down / Adaptive Speed: the rate MOVES over the map,
+        -- so we store the mean of where it starts and where it ends. Adaptive
+        -- Speed has no end (it follows your play): its start is the answer.
+        (SELECT (
+           COALESCE(json_extract(je.value, '$.settings.initial_rate'), 1.0)
+           + COALESCE(
+               json_extract(je.value, '$.settings.final_rate'),
+               CASE json_extract(je.value, '$.acronym')
+                 WHEN 'WU' THEN 1.5
+                 WHEN 'WD' THEN 0.75
+                 ELSE COALESCE(json_extract(je.value, '$.settings.initial_rate'), 1.0)
+               END)
+         ) / 2.0
+         FROM json_each(scores.mods) je
+         WHERE json_extract(je.value, '$.acronym') IN ('WU', 'WD', 'AS')
+         LIMIT 1),
+        (SELECT CASE
+           WHEN json_extract(je.value, '$.acronym') IN ('DT', 'NC') THEN 1.5
+           WHEN json_extract(je.value, '$.acronym') IN ('HT', 'DC') THEN 0.75
+         END
+         FROM json_each(scores.mods) je
+         WHERE json_extract(je.value, '$.acronym') IN ('DT', 'NC', 'HT', 'DC')
+         LIMIT 1),
+        1.0)) / 100.0`;

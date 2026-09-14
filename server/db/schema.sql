@@ -114,7 +114,7 @@ CREATE INDEX IF NOT EXISTS idx_bu_fetched ON beatmap_user(ruleset, fetched_at);
 -- Per-ruleset attributes of CONVERTS (std maps played in taiko/catch/mania):
 -- star rating and max combo differ from the original mode. Filled lazily via
 -- the attributes endpoint (played converts first, background trickle for the
--- rest) — predictions/SR filters on a convert need this row.
+-- rest), predictions/SR filters on a convert need this row.
 CREATE TABLE IF NOT EXISTS convert_attrs (
   beatmap_id INTEGER NOT NULL,
   ruleset INTEGER NOT NULL,
@@ -198,7 +198,7 @@ CREATE INDEX IF NOT EXISTS idx_beatmaps_set ON beatmaps (beatmapset_id);
 -- Read paths that were full scans of the biggest table / of beatmap_user.
 -- scores(ruleset, passed, ended_at): the timeline, the daily heatmap, the
 -- snapshot index and every metric replay read "my passed scores of a mode in
--- chronological order" — ruleset was not indexed at all.
+-- chronological order", ruleset was not indexed at all.
 CREATE INDEX IF NOT EXISTS idx_scores_mode_time
   ON scores (ruleset, passed, ended_at);
 -- The sweep queues and their progress counters (polled every few seconds).

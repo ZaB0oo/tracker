@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { setState } from "../db/db.js";
+import { getState, setState } from "../db/db.js";
 import {
   exchangeAuthCode,
   fetchUserProfile,
@@ -22,6 +22,10 @@ authRouter.get("/auth/login", (_req, res) => res.redirect(getAuthorizeUrl()));
 authRouter.get("/auth/callback", async (req, res) => {
   const code = req.query.code as string | undefined;
   if (!code) return res.status(400).send("Missing code");
+  const expected = getState("oauth_state");
+  if (!expected || req.query.state !== expected)
+    return res.status(403).send("Invalid OAuth state: start the login again from the app");
+  setState("oauth_state", "");
   try {
     await exchangeAuthCode(code);
     try {

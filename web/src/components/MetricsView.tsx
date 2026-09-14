@@ -614,7 +614,7 @@ export function MetricsView({
       </div>
 
       {/* Combined list. Only appears once something is ticked, and spells out
-          what the button will show — the word "union" is never used. */}
+          what the button will show, the word "union" is never used. */}
       {(() => {
         const sel = data.metrics.filter(
           (m) => (m.params.ruleset ?? 0) === ruleset && picked.includes(m.id)

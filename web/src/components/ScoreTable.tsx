@@ -26,11 +26,11 @@ interface Col {
 }
 
 const fmtInt = (n: number | null | undefined) =>
-  n == null ? "—" : n.toLocaleString("en-US");
+  n == null ? "-" : n.toLocaleString("en-US");
 const fmtLen = (s: number | null) =>
-  s == null ? "—" : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-const fmtDate = (d: string | null) => (d ? d.slice(0, 10) : "—");
-const grade = (g: string | null) => (g == null ? "—" : displayGrade(g));
+  s == null ? "-" : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+const fmtDate = (d: string | null) => (d ? d.slice(0, 10) : "-");
+const grade = (g: string | null) => (g == null ? "-" : displayGrade(g));
 
 /** Visible detail of the custom rate (DT/NC/HT/DC: speed_change, WU/WD: final_rate). */
 function modLabel(m: { acronym: string; settings?: Record<string, unknown> }): string {
@@ -90,7 +90,7 @@ const COLUMNS: Col[] = [
   },
   {
     id: "fc_state", label: "FC", width: 65, sortable: true,
-    render: (r) => (r.fc_state == null ? "—" : FC_LABELS[r.fc_state]),
+    render: (r) => (r.fc_state == null ? "-" : FC_LABELS[r.fc_state]),
     className: (r) => `fc fc-${r.fc_state ?? "none"}`,
   },
   { id: "score", label: "Score", width: 101, sortable: true, render: (r) => fmtInt(r.score_value) },
@@ -113,7 +113,7 @@ const COLUMNS: Col[] = [
   },
   {
     id: "accuracy", label: "Acc", width: 65, sortable: true,
-    render: (r) => (r.accuracy == null ? "—" : `${(r.accuracy * 100).toFixed(2)}%`),
+    render: (r) => (r.accuracy == null ? "-" : `${(r.accuracy * 100).toFixed(2)}%`),
   },
   { id: "mods_col", label: "Mods", width: 140, render: (r) => <Mods raw={r.mods} /> },
   {
@@ -122,7 +122,7 @@ const COLUMNS: Col[] = [
     // information (Classic is 0.985, and ×0.98 was a lie)
     render: (r) =>
       r.mod_multiplier == null
-        ? "—"
+        ? "-"
         : `×${r.mod_multiplier.toFixed(Math.abs(r.mod_multiplier * 100 - Math.round(r.mod_multiplier * 100)) < 1e-6 ? 2 : 3)}`,
   },
   {
@@ -131,13 +131,13 @@ const COLUMNS: Col[] = [
   },
   {
     id: "global_rank", label: "Global", width: 80, sortable: true,
-    render: (r) => (r.global_rank == null ? "—" : `#${fmtInt(r.global_rank)}`),
+    render: (r) => (r.global_rank == null ? "-" : `#${fmtInt(r.global_rank)}`),
     className: (r) =>
       r.global_rank != null && r.global_rank <= 100 ? "global-rank-top" : "",
   },
   { id: "pp", label: "pp", width: 75, sortable: true,
     render: (r) =>
-      r.pp == null ? "—" : `${r.pp_estimated ? "~" : ""}${r.pp.toFixed(2)}` },
+      r.pp == null ? "-" : `${r.pp_estimated ? "~" : ""}${r.pp.toFixed(2)}` },
   { id: "ended_at", label: "Played on", width: 90, sortable: true, render: (r) => fmtDate(r.ended_at) },
   {
     // sorts on the MAP's max combo: "which maps are long" is the useful
@@ -148,8 +148,8 @@ const COLUMNS: Col[] = [
     render: (r) =>
       r.score_max_combo == null
         ? r.map_max_combo
-          ? <span className="tip-dim">—/{r.map_max_combo}</span>
-          : "—"
+          ? <span className="tip-dim">-/{r.map_max_combo}</span>
+          : "-"
         : `${r.score_max_combo}${r.map_max_combo ? `/${r.map_max_combo}` : ""}`,
   },
   { id: "star_rating", label: "★", width: 88, sortable: true,
@@ -157,7 +157,7 @@ const COLUMNS: Col[] = [
     // the best's modded rating beside it when the mods change it
     render: (r) => (
       <>
-        {r.star_rating?.toFixed(2) ?? "—"}
+        {r.star_rating?.toFixed(2) ?? "-"}
         {r.sr_mods != null && <span className="sr-mod"> {r.sr_mods.toFixed(2)}</span>}
       </>
     ) },
@@ -168,11 +168,11 @@ const COLUMNS: Col[] = [
   },
   { id: "ranked_date", label: "Ranked", width: 90, sortable: true, render: (r) => fmtDate(r.ranked_date) },
   { id: "total_length", label: "Length", width: 60, sortable: true, render: (r) => fmtLen(r.total_length) },
-  { id: "ar", label: "AR", width: 52, sortable: true, render: (r) => r.ar?.toFixed(2) ?? "—" },
-  { id: "od", label: "OD", width: 52, sortable: true, render: (r) => r.od?.toFixed(2) ?? "—" },
-  { id: "cs", label: "CS", width: 52, sortable: true, render: (r) => r.cs?.toFixed(2) ?? "—" },
-  { id: "hp", label: "HP", width: 52, sortable: true, render: (r) => r.hp?.toFixed(2) ?? "—" },
-  { id: "bpm", label: "BPM", width: 75, sortable: true, render: (r) => r.bpm ?? "—" },
+  { id: "ar", label: "AR", width: 52, sortable: true, render: (r) => r.ar?.toFixed(2) ?? "-" },
+  { id: "od", label: "OD", width: 52, sortable: true, render: (r) => r.od?.toFixed(2) ?? "-" },
+  { id: "cs", label: "CS", width: 52, sortable: true, render: (r) => r.cs?.toFixed(2) ?? "-" },
+  { id: "hp", label: "HP", width: 52, sortable: true, render: (r) => r.hp?.toFixed(2) ?? "-" },
+  { id: "bpm", label: "BPM", width: 75, sortable: true, render: (r) => r.bpm ?? "-" },
 ];
 
 export function ScoreTable({
@@ -216,7 +216,7 @@ export function ScoreTable({
                 label: stats.csLabel,
                 // mania key count stays an integer
                 ...(stats.csLabel === "Keys"
-                  ? { render: (r: TableRow) => r.cs ?? "—" }
+                  ? { render: (r: TableRow) => r.cs ?? "-" }
                   : {}),
               }
             : c

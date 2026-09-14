@@ -40,7 +40,7 @@ export const RULESET_HIT_FIELDS: Record<number, { key: string; label: string }[]
 };
 
 // Playable mods per ruleset, grouped by in-game category (source: osu-web
-// database/mods.json, UserPlayable only — AT/CN/SV2 can't submit). "NM" is a
+// database/mods.json, UserPlayable only, AT/CN/SV2 can't submit). "NM" is a
 // virtual chip meaning "no mods" (CL alone still counts as nomod).
 export interface ModGroup { label: string; mods: string[] }
 export const RULESET_MOD_GROUPS: Record<number, ModGroup[]> = {

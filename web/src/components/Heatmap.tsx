@@ -64,7 +64,7 @@ interface DayStats {
 
 /**
  * A day's gains = delta between its cumulative timeline point and the
- * previous one (same data the time machine replays — always consistent).
+ * previous one (same data the time machine replays, always consistent).
  */
 function dayStats(
   points: TimelinePoint[],
@@ -145,7 +145,7 @@ export const HeatmapPanel = memo(function HeatmapPanel({
   const [sortKey, setSortKey] = useState<"time" | "title" | "sr" | "grade" | "acc">("time");
   const [sortDesc, setSortDesc] = useState(false);
   // Hovered day: the numbers come from the timeline already in cache, so the
-  // tooltip costs nothing per cell. The map list stays behind the click — it
+  // tooltip costs nothing per cell. The map list stays behind the click, it
   // is a fetch per day, and sweeping the year would fire one per square.
   const [hoverDay, setHoverDay] = useState<string | null>(null);
   const { setWrap, tipRef, tipStyle, clearTip } = useTipPlacement(hoverDay);
@@ -539,7 +539,7 @@ export const HeatmapPanel = memo(function HeatmapPanel({
                         <td className={`hm-day-map-sr${r.sr_mods != null ? " sr-mod" : ""}`}>
                           {(r.sr_mods ?? r.star_rating) != null
                             ? (r.sr_mods ?? r.star_rating)!.toFixed(2)
-                            : "—"}
+                            : "-"}
                         </td>
                         <td className="hm-day-map-acc">
                           {(r.accuracy * 100).toFixed(2)}%

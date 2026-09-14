@@ -6,7 +6,9 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": "http://localhost:3727",
+      // object form: changeOrigin stays false, so the Host the server sees is
+      // localhost:5173 and matches the Origin (apiGuard refuses a mismatch)
+      "/api": { target: "http://localhost:3727", changeOrigin: false },
     },
   },
 });

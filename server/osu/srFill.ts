@@ -6,7 +6,7 @@ import { hasOsuFile, localStarRating } from "./difficulty.js";
  * Background fill of the modded-SR cache (`modded_sr`): every BEST played
  * with difficulty mods gets its true star rating computed locally, oldest
  * map first. Without this pass the cache only grew when a row was LOOKED AT
- * (a table page, a metric list, a Discord embed) — tens of thousands of
+ * (a table page, a metric list, a Discord embed), tens of thousands of
  * modded bests never displayed anywhere stayed uncomputed forever.
  *
  * Same shape as the pp backfill next door: one slow loop, paced so the .osu

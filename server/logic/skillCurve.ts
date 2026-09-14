@@ -1,5 +1,5 @@
 /**
- * The auto-calibrated skill curve fit. Pure: no database, no SQL — kept on its
+ * The auto-calibrated skill curve fit. Pure: no database, no SQL, kept on its
  * own so it can be tested (and reasoned about) without the rest of scoreSql.
  */
 
@@ -17,10 +17,10 @@ export interface CurveBucket {
 /**
  * Turns raw bests per 0.1★ slice into the retained prediction of every slice.
  * Shared by the live curve and the time machine (which re-fits it on the
- * bests of a past date) — two implementations would drift apart.
+ * bests of a past date), two implementations would drift apart.
  *
  * The value of a slice is the raw median of its own bests when it has at
- * least 5 of them — nothing is forced onto it, the curve follows the scores
+ * least 5 of them, nothing is forced onto it, the curve follows the scores
  * wherever they go. No 1M cap (modded bests). Slices without enough bests
  * inherit from the last one that has a median (and from the first for those
  * below the data).

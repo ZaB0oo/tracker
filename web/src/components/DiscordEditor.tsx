@@ -38,7 +38,7 @@ type DropDst =
 const phLabel = (key: string) =>
   PLACEHOLDERS.find((p) => p.key === key)?.label ?? key;
 
-/** example values shown dimmed when the sampled score has none — so every
+/** example values shown dimmed when the sampled score has none, so every
  * chip stays visible and recognizable (global top, country #1, mods…) */
 const DEMO: Record<string, string> = {
   mods: "HDDT",
@@ -73,8 +73,8 @@ const DEMO: Record<string, string> = {
  * left, the pixel-faithful Discord preview on the right, live against a
  * random REAL best sampled from the database. Chips show the sampled score's
  * actual values (dimmed example when the score has none). Click a chip to
- * toggle bold (body only — Discord titles ignore markdown), × removes it,
- * chips joined by « · » vanish together when their values are empty —
+ * toggle bold (body only, Discord titles ignore markdown), × removes it,
+ * chips joined by « · » vanish together when their values are empty,
  * exactly like the live notification.
  */
 export function DiscordEditor({
@@ -151,7 +151,7 @@ export function DiscordEditor({
       chip = next[drag.li][drag.si][drag.ci];
       next[drag.li][drag.si].splice(drag.ci, 1);
     }
-    // Discord renders no markdown in embed titles — landing there drops bold
+    // Discord renders no markdown in embed titles, landing there drops bold
     if (dst.at !== "new-line" && dst.li === 0 && chip.kind === "ph")
       chip = { ...chip, bold: false };
     const insert = (li: number, si: number, ci: number | null) => {

@@ -1,18 +1,17 @@
-import { getDb, transaction } from "../db/db.js";
+import { getDb, getState, setState, transaction } from "../db/db.js";
 import type { SoloScore } from "../osu/types.js";
-import { classicFromStandardised } from "./rulesets.js";
 import { computeFcState, computeRate } from "./score.js";
 import { multiplierFor, type MultiplierIndex, buildMultiplierIndex } from "./modMultiplier.js";
 import { bumpScoresVersion } from "./scoreSql.js";
 
 /**
  * Insert/update a beatmap's scores and refresh the bests + played state.
- * `markFetched=false` (polling): does NOT stamp fetched_at — that stamp means
+ * `markFetched=false` (polling): does NOT stamp fetched_at, that stamp means
  * "complete list of scores fetched by the backfill". Without it, a score
  * submitted via polling would skip the map in the backfill and an old best
  * would stay forever on osu!'s side.
  *
- * Returns the resulting best (lazer pointer) — used by the polling path for
+ * Returns the resulting best (lazer pointer), used by the polling path for
  * Discord notifications (other callers ignore the return value).
  */
 export function saveScores(
@@ -23,11 +22,11 @@ export function saveScores(
   const ruleset = opts?.ruleset ?? 0;
   const db = getDb();
   // convert plays (ruleset != map's mode): the map's own max_combo is not a
-  // valid reference — use the per-ruleset convert_attrs when known
+  // valid reference, use the per-ruleset convert_attrs when known
   const nativeRow = db
     .prepare("SELECT ruleset, max_combo FROM beatmaps WHERE id = ?")
     .get(beatmapId) as { ruleset: number; max_combo: number | null } | undefined;
-  // `|| null`: 0 is the enrichment's "API returned nothing" sentinel — as an
+  // `|| null`: 0 is the enrichment's "API returned nothing" sentinel, as an
   // FC reference it made EVERY score a perfect FC (combo >= 0)
   let maxCombo = nativeRow?.max_combo || null;
   if (nativeRow && nativeRow.ruleset !== ruleset) {
@@ -112,11 +111,13 @@ export function saveScores(
     }
     refreshBest(beatmapId, opts?.markFetched ?? true, ruleset);
     // A never-seen score (e.g. fetched by a re-backfill after a long absence)
-    // may have taken a country #1: we re-queue the country check.
-    // (Polling re-stamps right after via its immediate check.)
+    // may have taken a country #1 or a global rank: re-queue BOTH checks.
+    // This is the single post-score requeue; the tick's 15-min rules only
+    // cover checks stamped after the score landed. (Polling re-stamps right
+    // after via its immediate checks.)
     if (hasNewScore)
       db.prepare(
-        "UPDATE beatmap_user SET country_checked_at = NULL WHERE beatmap_id = ? AND ruleset = ?"
+        "UPDATE beatmap_user SET country_checked_at = NULL, global_checked_at = NULL WHERE beatmap_id = ? AND ruleset = ?"
       ).run(beatmapId, ruleset);
   });
 
@@ -132,6 +133,33 @@ export function saveScores(
 }
 
 /**
+ * One-shot startup repair (state key): before v1.35.0 refreshBest picked the
+ * best by CLASSIC score, which is not monotone in the standardised one on a
+ * few mod combinations (Strict Tracking). Re-point every map whose stored
+ * best is not the standardised winner. Bumping the key re-runs it.
+ */
+export function repairBestPointers(): number {
+  const KEY = "best_std_repair";
+  if (getState(KEY) === "v1") return 0;
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT u.beatmap_id AS id, u.ruleset AS r
+       FROM beatmap_user u JOIN scores s ON s.id = u.best_lazer_score_id
+       WHERE EXISTS (
+         SELECT 1 FROM scores t
+         WHERE t.beatmap_id = u.beatmap_id AND t.ruleset = u.ruleset AND t.passed = 1
+           AND (t.total_score > s.total_score
+                OR (t.total_score = s.total_score AND t.id < s.id)))`
+    )
+    .all() as { id: number; r: number }[];
+  for (const { id, r } of rows) refreshBest(id, false, r);
+  if (rows.length > 0) bumpScoresVersion();
+  setState(KEY, "v1");
+  return rows.length;
+}
+
+/**
  * Recompute the best pointer from the scores table.
  * `markFetched=false`: preserves the existing fetched_at state (NULL included).
  */
@@ -141,56 +169,20 @@ export function refreshBest(
   ruleset = 0
 ): void {
   const db = getDb();
-  // scores are per ruleset: a convert's taiko scores must never feed the
-  // std best of the same beatmap (and vice versa)
-  const rows = db
-    .prepare(
-      `SELECT id, total_score, classic_total_score FROM scores
-       WHERE beatmap_id = ? AND ruleset = ? AND passed = 1`
-    )
-    .all(beatmapId, ruleset) as {
-    id: number;
-    total_score: number;
-    classic_total_score: number | null;
-  }[];
-
-  // The score that "counts" for a map = the one with the highest CLASSIC
-  // (the tracker's main metric), even if its grade is worse. Rows without a
-  // stored classic are CONVERTED before comparing: mixing a ~1M standardised
-  // value with ~20M classic ones let the wrong score win either way.
-  let n = 0;
-  if (ruleset !== 3 && rows.some((r) => r.classic_total_score == null)) {
-    const m = db
-      .prepare(
-        `SELECT max_combo,
-           (COALESCE(count_circles,0) + COALESCE(count_sliders,0) + COALESCE(count_spinners,0)) AS n
-         FROM beatmaps WHERE id = ?`
-      )
-      .get(beatmapId) as { max_combo: number | null; n: number } | undefined;
-    const caCombo =
-      ruleset !== 0
-        ? (
-            db
-              .prepare(
-                "SELECT max_combo FROM convert_attrs WHERE beatmap_id = ? AND ruleset = ?"
-              )
-              .get(beatmapId, ruleset) as { max_combo: number | null } | undefined
-          )?.max_combo
-        : null;
-    // std: object count; taiko/catch: basic count ≈ (per-mode) max combo
-    n = ruleset === 0 ? m?.n || 0 : caCombo || m?.max_combo || m?.n || 0;
-  }
-  let bestLazer: number | null = null;
-  let bestLazerVal = -1;
-  for (const r of rows) {
-    const v =
-      r.classic_total_score ??
-      classicFromStandardised(ruleset, r.total_score, n);
-    if (v > bestLazerVal) {
-      bestLazerVal = v;
-      bestLazer = r.id;
-    }
-  }
+  // The score that "counts" for a map = the passed score with the highest
+  // STANDARDISED total_score, ties on the lowest id (the rule every replay
+  // and gain loop applies). Scores are per ruleset: a convert's taiko scores
+  // must never feed the std best of the same beatmap (and vice versa).
+  const bestLazer =
+    (
+      db
+        .prepare(
+          `SELECT id FROM scores
+           WHERE beatmap_id = ? AND ruleset = ? AND passed = 1
+           ORDER BY total_score DESC, id ASC LIMIT 1`
+        )
+        .get(beatmapId, ruleset) as { id: number } | undefined
+    )?.id ?? null;
 
   db.prepare(
     `INSERT INTO beatmap_user (beatmap_id, ruleset, fetched_at, played, best_lazer_score_id)
@@ -199,7 +191,7 @@ export function refreshBest(
        fetched_at = COALESCE(excluded.fetched_at, beatmap_user.fetched_at),
        played = MAX(beatmap_user.played, excluded.played),
        best_lazer_score_id = excluded.best_lazer_score_id`
-  ).run(beatmapId, ruleset, markFetched ? 1 : 0, rows.length > 0 ? 1 : 0, bestLazer);
+  ).run(beatmapId, ruleset, markFetched ? 1 : 0, bestLazer != null ? 1 : 0, bestLazer);
 
   // Leaderboard semantics, like the grade and the PFC/SS gauges: the flag
   // describes the score that counts on the leaderboard, so an FC beaten later
@@ -214,7 +206,7 @@ export function refreshBest(
 }
 
 /**
- * Startup cleanup: deletes stored scores that osu! itself does not honor —
+ * Startup cleanup: deletes stored scores that osu! itself does not honor,
  * scores on maps outside ranked/approved/loved, and scores set BEFORE the
  * map's leaderboard existed (played while graveyard, ranked/loved later:
  * osu! wipes those, the map must be replayed). Bests/played are then
@@ -255,7 +247,7 @@ export function cleanupPreLeaderboardScores(): { deleted: number; maps: number }
 }
 
 /**
- * Re-evaluates the fc_state of a map's scores for one ruleset — call when the
+ * Re-evaluates the fc_state of a map's scores for one ruleset, call when the
  * FC reference arrives AFTER the scores were stored (convert_attrs filled in
  * the background): fc_state is frozen at insert time, so a convert backfilled
  * before its per-mode max_combo could never resolve to PERFECT by combo.
@@ -322,7 +314,7 @@ export function recomputeFcForMap(beatmapId: number, ruleset: number): void {
  * Startup repair: maps stamped max_combo = 0 (the enrichment's "API returned
  * nothing" sentinel) made every score on them a PERFECT FC at insert time
  * (score.combo >= 0 is always true). Recompute those scores' fc_state with no
- * combo reference — the statistics-based rules still apply — then refresh the
+ * combo reference, the statistics-based rules still apply, then refresh the
  * affected bests/best_fc. Idempotent, no-op when nothing is wrong.
  */
 export function repairZeroComboFc(): { scores: number; maps: number } {

@@ -9,6 +9,7 @@ import {
 } from "../api";
 import { RULESET_HIT_FIELDS, rulesetStatFields } from "../rulesets";
 import { displayGrade } from "../format";
+import { getLocal } from "../lib/storage";
 import { DEFAULT_FILTERS, GRADE_ORDER, type Filters, type PoolMode } from "../types";
 import { NamePrompt } from "./NamePrompt";
 import { KeysChips } from "./KeysChips";
@@ -74,7 +75,7 @@ export function FilterBar({
   // Collapsed panel: the top row (mode, search, badges, Reset all) never
   // collapses, so a filter can never act while being invisible.
   const [collapsed, setCollapsed] = useState(
-    () => localStorage.getItem("filtersCollapsed") === "1"
+    () => getLocal("filtersCollapsed") === "1"
   );
   const country = useCountryCode();
   useEffect(() => setLocal(filters), [filters]);
@@ -83,10 +84,10 @@ export function FilterBar({
   const [lazerAvailable, setLazerAvailable] = useState(false);
   const [lazerBusy, setLazerBusy] = useState(false);
   // which export is asking for a collection name (window.prompt does not
-  // exist in Electron — this drives the in-app NamePrompt modal instead)
+  // exist in Electron, this drives the in-app NamePrompt modal instead)
   const [naming, setNaming] = useState<"collection" | "lazer" | null>(null);
   // Collections already in lazer, fetched when the prompt opens (the importer
-  // reads the realm, which takes a moment and can fail — never block on it).
+  // reads the realm, which takes a moment and can fail, never block on it).
   const [lazerCollections, setLazerCollections] = useState<LazerCollection[]>([]);
   useEffect(() => {
     void fetchLazerImportStatus().then((s) => setLazerAvailable(s.available));

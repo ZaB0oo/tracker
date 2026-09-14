@@ -6,7 +6,7 @@ import { useCallback, useMemo, useState } from "react";
  *
  * `isHidden` and `toggle` keep a STABLE identity across renders: they are
  * passed to memoized panels, and fresh closures on every render defeated
- * those memos — every dashboard bar re-rendered on each time-machine tick.
+ * those memos, every dashboard bar re-rendered on each time-machine tick.
  */
 export function useHidden(key: string, defaultHidden: string[] = [], knownIds?: string[]) {
   const storeKey = `hidden:${key}`;

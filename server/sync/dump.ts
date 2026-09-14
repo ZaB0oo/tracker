@@ -4,8 +4,8 @@
  * The per-mode search enumeration cannot see delisted/DMCA sets, and the
  * beatmap packs turned out to miss most of them. The monthly dumps
  * (https://data.ppy.sh, e.g. performance_catch_top_1000.tar.bz2) contain the
- * FULL osu_beatmaps table — every ranked/approved/loved diff of every mode,
- * DMCA'd included — so diffing it against the local catalog gives the exact
+ * FULL osu_beatmaps table, every ranked/approved/loved diff of every mode,
+ * DMCA'd included, so diffing it against the local catalog gives the exact
  * per-mode holes. The missing sets are then re-imported by direct lookup
  * (which answers for DMCA'd sets).
  *
@@ -56,7 +56,7 @@ async function openDump(
   // the data listener switched src to flowing: pause until a consumer
   // (pipe/iteration) attaches, so no chunk is emitted into the void
   src.pause();
-  // closeAll: the caller MUST call it when it stops consuming — an aborted
+  // closeAll: the caller MUST call it when it stops consuming, an aborted
   // scan (bad file, parse error) used to leak the fd and the decompression
   // pipeline for the process lifetime, once per failed attempt.
   const withClose = <T extends NodeJS.ReadableStream>(
@@ -101,7 +101,7 @@ async function openDump(
           if (/osu_beatmaps\.sql$/.test(header.name)) {
             // A failure upstream (truncated archive, bzip2 error) reaches nobody
             // once this promise has resolved: the entry would simply never end
-            // and the read would hang for ever — with the sync bar stuck on
+            // and the read would hang for ever, with the sync bar stuck on
             // "dump verification". Forward it onto the stream we hand back.
             const fail = (e: Error) => stream.destroy(e);
             src.on("error", fail);
@@ -167,7 +167,7 @@ export async function verifyCatalogFromDump(
       }
     } finally {
       // an aborted scan (parse error, bad file) must not leak the fd and the
-      // bzip2/tar pipeline — the user typically retries with another file
+      // bzip2/tar pipeline, the user typically retries with another file
       stream.closeAll?.();
     }
     // 0 rows = nothing was read (wrong file, empty archive): saying "complete"
@@ -226,7 +226,7 @@ export async function verifyCatalogFromDump(
         (failed ? `, ${failed} errors` : "")
     );
 
-    // What the run could NOT recover — the honest answer to "why are N maps
+    // What the run could NOT recover, the honest answer to "why are N maps
     // still missing?". Deleted diffs are filtered out of the scan already, so
     // what is left here is a set no channel serves any more.
     const known = db.prepare("SELECT 1 FROM beatmaps WHERE id = ?");

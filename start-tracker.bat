@@ -18,7 +18,7 @@ REM Open the browser once the server is ready (2 s of margin)
 start "" cmd /c "timeout /t 2 >nul & start http://localhost:3727"
 
 echo.
-echo === osu! completionist tracker — http://localhost:3727 ===
+echo === osu! completionist tracker - http://localhost:3727 ===
 echo (closing this window stops the server)
 echo.
 node dist\server\index.js

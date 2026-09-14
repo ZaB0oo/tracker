@@ -60,7 +60,7 @@ export function EvoChart({
   const dataMax = Math.max(...view.map((r) => r.value), 1);
   const dataMin = Math.min(...view.map((r) => r.value));
   // Full view: honest 0 baseline (and room for the goal line while it stays
-  // in scale). Zoomed: the axis hugs the visible window instead — a
+  // in scale). Zoomed: the axis hugs the visible window instead, a
   // cumulative curve zoomed on a recent stretch used to be a flat ribbon
   // pinned to the top of a 0-based axis, unreadable.
   let yMin = 0;

@@ -11,7 +11,7 @@ import { GRADE_ORDER } from "../types";
 import { useEscape } from "../useEscape";
 import { witherLevel, witherXpTotal } from "../wither";
 
-// Layout constants (SVG units) — mirrors the reference card:
+// Layout constants (SVG units), mirrors the reference card:
 // banner header, then 3 big stats, 5 mid stats, 4 wide stats, 8 grade badges.
 const W = 800;
 const HEADER_H = 128;
@@ -74,7 +74,7 @@ export function ShareCard({
 
   // The card needs the stats, the osu! profile and the (proxied) banner and
   // avatar: several seconds on the first open. Rendering null meant the menu
-  // closed and NOTHING appeared — it looked like the button did nothing.
+  // closed and NOTHING appeared, it looked like the button did nothing.
   if (!stats)
     return (
       <>
@@ -107,7 +107,7 @@ export function ShareCard({
     : null;
   const playTime = ps
     ? `${fmtNum(Math.floor(ps.play_time / 3600))}h ${Math.floor((ps.play_time % 3600) / 60)}m`
-    : "—";
+    : "-";
 
   const download = () => {
     const svg = svgRef.current;
@@ -137,21 +137,21 @@ export function ShareCard({
   // Row definitions (label, value, optional color), following the reference.
   const bigRow = [
     { label: `#1 ${country ?? ""}`.trim(), value: fmtNum(t.country_firsts ?? 0), color: "#ffd966" },
-    { label: "Global Rank", value: ps?.global_rank != null ? `#${fmtNum(ps.global_rank)}` : "—", color: "#e8e3f2" },
-    { label: "Country Rank", value: ps?.country_rank != null ? `#${fmtNum(ps.country_rank)}` : "—", color: "#b9a8ee" },
+    { label: "Global Rank", value: ps?.global_rank != null ? `#${fmtNum(ps.global_rank)}` : "-", color: "#e8e3f2" },
+    { label: "Country Rank", value: ps?.country_rank != null ? `#${fmtNum(ps.country_rank)}` : "-", color: "#b9a8ee" },
   ];
   const midRow = [
-    { label: "Medals", value: ps ? fmtNum(ps.medals) : "—" },
-    { label: "pp", value: ps ? fmtNum(Math.round(ps.pp)) : "—" },
+    { label: "Medals", value: ps ? fmtNum(ps.medals) : "-" },
+    { label: "pp", value: ps ? fmtNum(Math.round(ps.pp)) : "-" },
     { label: "Play Time", value: playTime },
-    { label: "Play Count", value: ps ? fmtNum(ps.play_count) : "—" },
-    { label: "Accuracy", value: ps ? `${ps.accuracy.toFixed(2)}%` : "—" },
+    { label: "Play Count", value: ps ? fmtNum(ps.play_count) : "-" },
+    { label: "Accuracy", value: ps ? `${ps.accuracy.toFixed(2)}%` : "-" },
   ];
   const wideRow = [
     // the TRACKER's ranked score (sum of my bests in this mode/pool), not the
     // profile's: the card is about what the tracker measured
     { label: "Ranked Score", value: fmtNum(stats.scoreSums.classic) },
-    { label: "Total Score", value: ps ? fmtNum(ps.total_score) : "—" },
+    { label: "Total Score", value: ps ? fmtNum(ps.total_score) : "-" },
     { label: "Clears", value: fmtNum(played) },
     { label: "Completion", value: `${completion}%` },
   ];
@@ -252,7 +252,7 @@ export function ShareCard({
               )}
             </text>
             {/* mode icon instead of its name: same artwork as the tabs. Top
-                right corner, above the levels — the country badge and both
+                right corner, above the levels, the country badge and both
                 hexagons are shifted down/left to clear it. */}
             {modeIconUrl && (
               <image

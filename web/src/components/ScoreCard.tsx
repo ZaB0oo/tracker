@@ -103,7 +103,7 @@ function effectiveAttrs(
   return { cs, ar, od, hp };
 }
 
-const att = (v: number | null): string => (v == null ? "—" : v.toFixed(2));
+const att = (v: number | null): string => (v == null ? "-" : v.toFixed(2));
 
 /** "Played on 19 August 2026 18:10", the game's wording */
 const MONTHS = [
@@ -124,7 +124,7 @@ const GRADE_TONES: Record<string, string> = {
 /** the game's accuracy circle spans 60%…100% around the full ring */
 const RING_FLOOR = 0.6;
 /** the outer zone ring, clockwise from the top: each coloured segment ends
- * on its grade badge, the top sliver past A is S/SS territory — the same
+ * on its grade badge, the top sliver past A is S/SS territory, the same
  * arrangement as the game's results screen */
 const RING_ZONES: { from: number; to: number; g: string | null; color: string }[] = [
   { from: 0.012, to: 0.32, g: "D", color: "#ff5a5a" },
@@ -135,7 +135,7 @@ const RING_ZONES: { from: number; to: number; g: string | null; color: string }[
 ];
 /** the primary judgement keys get the big boxed row, the rest go below */
 const PRIMARY_HITS = new Set(["perfect", "great", "good", "ok", "meh", "miss"]);
-/** always shown for the ruleset, zeroes included — the game's card shows
+/** always shown for the ruleset, zeroes included, the game's card shows
  * MISS 0, an absent box reads as a missing stat */
 const DEFAULT_HITS: Record<number, string[]> = {
   0: ["great", "ok", "meh", "miss"],
@@ -191,7 +191,7 @@ function AccRing({ acc, grade }: { acc: number; grade: string }) {
         transform={`rotate(-90 ${M} ${M})`}
       />
       {/* the grade zones, a thin ring outside the arc: contiguous segments
-          with clean butt cuts — the joints sit under the badges, only the
+          with clean butt cuts, the joints sit under the badges, only the
           top gap (ring start/end) stays open, like the game */}
       {RING_ZONES.map((z) => (
         <path
@@ -235,7 +235,7 @@ function AccRing({ acc, grade }: { acc: number; grade: string }) {
 }
 
 /**
- * One score, unfolded — osualt-style card: the map's cover behind, grade and
+ * One score, unfolded, osualt-style card: the map's cover behind, grade and
  * score front and center, then the labeled tiles (acc/combo/pp, every hit
  * count against the map's maximums, the difficulty settings as played).
  * Opens from any score row; stacks over the map modal.
@@ -355,7 +355,7 @@ export function ScoreCard({
               }
             >
               <span className="sc-lab">pp</span>
-              <b>{ppText(score) || "—"}</b>
+              <b>{ppText(score) || "-"}</b>
             </div>
           </div>
           {keys.filter((k) => PRIMARY_HITS.has(k)).length > 0 && (
@@ -400,7 +400,7 @@ export function ScoreCard({
               <div key={k} className="sc-col">
                 <span>{k}</span>
                 {/* mania key count stays an integer */}
-                <b>{k === "Keys" ? (v == null ? "—" : String(v)) : att(v)}</b>
+                <b>{k === "Keys" ? (v == null ? "-" : String(v)) : att(v)}</b>
               </div>
             ))}
           </div>

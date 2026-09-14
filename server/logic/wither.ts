@@ -18,7 +18,7 @@ export function witherScore(standardised: number, nObjects: number): number {
   );
 }
 
-/** SQL twin of witherScore — the two MUST stay in sync. */
+/** SQL twin of witherScore, the two MUST stay in sync. */
 export function witherSql(stdExpr: string, nExpr: string): string {
   const x = `(CAST(${stdExpr} AS REAL) / ${FULL_BASE}.0)`;
   return `CAST(ROUND(MIN(${x}, pow(${x}, 1.62)) * (36.49 * ${nExpr} * ${nExpr} + 2095.0 * ${nExpr}) + ${stdExpr} * 0.1) AS INTEGER)`;

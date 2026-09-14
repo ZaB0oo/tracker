@@ -127,7 +127,7 @@ Positions are exact whatever their value (#4523 included); only the periodic re-
 
 ## Discord notifications
 
-Paste a channel **webhook URL** in Settings and every new best gets posted as an embed: star rating with your mods, rate-adjusted BPM, length and map stats, hit counts, pp, mapset cover, your global rank when it is top 100, and the country #1 you took with the sniped player's name. First clears and improvements are batched per poll. A test button checks the setup. The URL stays in the local database, and sending never blocks the sync.
+Add up to five channel **webhook URLs** in Settings, each with its own switches (new bests, milestones, country #1 lost, global top lost), and every new best gets posted as an embed: star rating with your mods, rate-adjusted BPM, length and map stats, hit counts, pp, mapset cover, your global rank when it is top 100, and the country #1 you took with the sniped player's name. First clears and improvements are batched per poll. A test button checks the setup. The URL stays in the local database, and sending never blocks the sync.
 
 ## Rate limiting (osu!api terms of use)
 
@@ -190,7 +190,7 @@ server/
   notify/discord.ts    # webhook notifications (rich embeds, queue, retry)
   routes.ts            # router aggregator
   routes/*.ts          # one module per domain (table, stats, metrics, sync…)
-web/                   # React + Vite + TanStack Query/Table/Virtual
+web/                   # React + Vite + TanStack Query/Virtual
 desktop/               # Electron shell: tray, first-launch DB import, auto-update
 .github/workflows/     # release CI: installers built on every version tag
 ```
@@ -200,7 +200,7 @@ Database: `./data/tracker.db` in source mode, `%AppData%\osu-completionist\data\
 ## Tests
 
 ```bash
-npm test    # rate limiter, FC and best logic, mods, metrics, search
+npm test    # rate limiter, FC logic, mods, metrics, search, SQL/JS twins
 ```
 
 ## Known limits

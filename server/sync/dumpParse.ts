@@ -15,7 +15,7 @@ export interface DumpDiff {
 /**
  * Walks the `(...),(...)` tuples of one INSERT line ('' strings, \' escapes).
  * String CONTENTS are dropped on purpose (we only read numeric columns): a
- * quoted field therefore yields "", while a literal NULL yields "NULL" — that
+ * quoted field therefore yields "", while a literal NULL yields "NULL", that
  * difference is what tells a soft-deleted row from a live one.
  */
 export function* scanTuples(line: string): Generator<string[]> {
@@ -60,7 +60,7 @@ export function* scanTuples(line: string): Generator<string[]> {
  * many it ignored: `osu_beatmaps` uses SoftDeletes (osu-web Beatmap model) and
  * keeps the last `approved` value, so a deleted-from-osu! map still reads as
  * ranked in the dump and used to come back "missing" on every run.
- * Throws when the file carries no `osu_beatmaps` table at all — silently
+ * Throws when the file carries no `osu_beatmaps` table at all, silently
  * yielding nothing reads as "catalog complete", which is the opposite.
  */
 export async function* parseOsuBeatmapsSql(

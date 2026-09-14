@@ -160,7 +160,7 @@ metricsRouter.get("/overlay-metrics", (req, res) => {
     )
     .all() as { id: number; name: string; params: string }[];
   // Total (and %) are only meaningful when the metric restricts its map pool:
-  // for "all maps" metrics the total is just the whole catalog — noise on
+  // for "all maps" metrics the total is just the whole catalog, noise on
   // stream. total: 0 tells the overlay to hide it. Compared against the catalog
   // OF THE METRIC'S OWN mode and pool, not always std's.
   const catalogTotal = (ruleset: number, pool?: string) =>
@@ -307,13 +307,22 @@ metricsRouter.post("/metrics/:id/discord", (req, res) => {
 });
 
 metricsRouter.delete("/metrics/:id", (req, res) => {
-  getDb().prepare("DELETE FROM metrics WHERE id = ?").run(Number(req.params.id));
+  const id = Number(req.params.id);
+  const db = getDb();
+  db.prepare("DELETE FROM metrics WHERE id = ?").run(id);
+  // milestone floor and cooldown stamps of the deleted metric (ids are never
+  // reused: AUTOINCREMENT), otherwise they pile up in sync_state forever
+  db.prepare("DELETE FROM sync_state WHERE key IN (?, ?, ?)").run(
+    `metric_notify_floor_${id}`,
+    `metric_notify_at_${id}`,
+    `metric_button_at_${id}`
+  );
   res.json({ ok: true });
 });
 
 /**
  * Top pp plays of a pp metric, CUMULATIVE from the beginning up to the end
- * of the given period (YYYY-MM or YYYY-MM-DD) — "my top plays as of then".
+ * of the given period (YYYY-MM or YYYY-MM-DD), "my top plays as of then".
  * One score per map, the metric's map/score conditions applied.
  */
 metricsRouter.get("/metrics/:id/pp-top", (req, res) => {

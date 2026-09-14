@@ -39,7 +39,7 @@ describe("classicFromStandardised (ppy/osu ScoreInfoExtensions)", () => {
     );
   });
 
-  it("catch: (std/1M × n)² × 21.62 + std/10 — NON-linear in std", () => {
+  it("catch: (std/1M × n)² × 21.62 + std/10, NON-linear in std", () => {
     expect(classicMax(RULESET_CATCH, 800)).toBe(
       Math.round(800 * 800 * 21.62 + 100_000)
     );

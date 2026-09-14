@@ -55,7 +55,7 @@ export const config = {
   lazerImporterPath: process.env.LAZER_IMPORTER_PATH ?? null,
   dbPath: path.resolve(process.env.DB_PATH ?? "./data/tracker.db"),
   // Default 50 (max 60, the documented osu! limit): the margin leaves room
-  // for the game/website's own traffic on the same IP — running flat out at
+  // for the game/website's own traffic on the same IP, running flat out at
   // 60 for long stretches trips Cloudflare's site-wide rate limit (1015).
   apiRpm: 50,
   pollIntervalSeconds: Number(process.env.POLL_INTERVAL_SECONDS ?? 120),
@@ -65,7 +65,7 @@ export const config = {
   oauthTokenUrl: "https://osu.ppy.sh/oauth/token",
   // "solo score" format (lazer + legacy fields in the same response)
   apiVersion: "20220705",
-  // User OAuth (country leaderboards) — set this as the Application Callback
+  // User OAuth (country leaderboards), set this as the Application Callback
   // URL in your osu! OAuth application settings.
   get authRedirectUri() {
     return `http://localhost:${this.port}/api/auth/callback`;

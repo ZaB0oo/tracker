@@ -95,7 +95,7 @@ export interface MapDetail {
     country_checked_at: string | null;
     fetched_at: string | null;
     global_rank: number | null;
-    /** the score that counts on the leaderboard — flagged in the table */
+    /** the score that counts on the leaderboard, flagged in the table */
     best_lazer_score_id: number | null;
   } | null;
   countryEvents: {
@@ -171,7 +171,7 @@ export interface Stats {
 
 /**
  * The optional per-bucket gauges every completion surface carries on top of
- * total/played/fc/country. ONE list — the dist rows, the snapshot buckets and
+ * total/played/fc/country. ONE list, the dist rows, the snapshot buckets and
  * the widgets all iterate it instead of copying the fields by hand.
  */
 export const EXTRA_GAUGE_KEYS = [
@@ -264,7 +264,7 @@ export interface SyncStatus {
 
 export interface Filters {
   mode: ScoreMode;
-  /** viewed ruleset (0 osu, 1 taiko, 2 catch, 3 mania) — set by the header switcher */
+  /** viewed ruleset (0 osu, 1 taiko, 2 catch, 3 mania), set by the header switcher */
   ruleset: number;
   /** map pool for non-std rulesets: converts included by default */
   pool: PoolMode;
@@ -286,7 +286,7 @@ export interface Filters {
   /** playback rate of the best (lazer 0.5x-2.0x) */
   rateMin: string; rateMax: string;
   /** score of the best AND what is left on the map, both in the unit the
-   * Classic / Standardised toggle displays — same unit as the two columns
+   * Classic / Standardised toggle displays, same unit as the two columns
    * they bound. Sent as classicMin/stdMin by buildTableQuery. */
   scoreMin: string; scoreMax: string;
   ppMin: string; ppMax: string;

@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { config } from "../config.js";
 import { getState, setState } from "../db/db.js";
 import { rulesetDef } from "../logic/rulesets.js";
@@ -86,7 +87,7 @@ async function getToken(): Promise<string> {
   if (!res.ok) {
     const body = await res.text();
     // 429 here is usually Cloudflare (error 1015) blocking the whole zone:
-    // honor Retry-After (30 s typically) — the exponential backoff alone
+    // honor Retry-After (30 s typically), the exponential backoff alone
     // retried too fast and kept the block alive
     if (res.status === 429)
       throw new RetryableError(`oauth 429: ${body}`, retryAfterMs(res));
@@ -112,12 +113,17 @@ export class NotFoundError extends Error {}
 
 let userToken: { value: string; expiresAt: number } | null = null;
 
+// A random state, checked by the callback: without it a crafted callback URL
+// could link a stranger's osu! account to the tracker.
 export function getAuthorizeUrl(): string {
+  const state = randomBytes(16).toString("hex");
+  setState("oauth_state", state);
   const p = new URLSearchParams({
     client_id: config.osuClientId,
     redirect_uri: config.authRedirectUri,
     response_type: "code",
     scope: "public identify",
+    state,
   });
   return `https://osu.ppy.sh/oauth/authorize?${p.toString()}`;
 }
@@ -144,7 +150,7 @@ async function userTokenRequest(body: Record<string, string>): Promise<void> {
     const txt = await res.text();
     if (res.status === 401) setState("user_refresh_token", "");
     // 429 here is Cloudflare guarding the oauth endpoint (its strictest
-    // rule): it MUST back off like any API request — a plain error made the
+    // rule): it MUST back off like any API request, a plain error made the
     // country sweep re-attempt the refresh on every map, which kept the
     // block alive at any request rate.
     if (res.status === 429)
@@ -219,7 +225,7 @@ export interface ProfileStats {
 /** Connected account profile (username, avatar, country, stats), via GET /me. */
 /**
  * Profile of the connected account. `mode` (osu/taiko/fruits/mania) selects the
- * ruleset the `statistics` belong to — /me alone answers for the account's
+ * ruleset the `statistics` belong to, /me alone answers for the account's
  * default mode only, which would put osu! pp on a mania card.
  */
 export async function fetchUserProfile(mode?: string): Promise<{
@@ -321,7 +327,7 @@ export interface DailyChallenge {
   top50p: number;
 }
 
-/** Stored user_profile JSON — the fields the app reads from it. */
+/** Stored user_profile JSON, the fields the app reads from it. */
 export interface StoredProfile {
   /** when this copy was fetched from the API (drives the 1h refresh) */
   fetched_at?: string;
@@ -465,7 +471,7 @@ async function apiGet<T>(pathAndQuery: string, priority: Priority): Promise<T> {
       throw new RetryableError("401, refreshing token");
     }
     if (res.status === 429)
-      // the path names the throttled endpoint in the sync-bar message —
+      // the path names the throttled endpoint in the sync-bar message,
       // essential to tell an API-wide block from a per-endpoint rule
       throw new RetryableError(`429: ${pathAndQuery}`, retryAfterMs(res));
     if (res.status >= 500) throw new RetryableError(`HTTP ${res.status}`);
@@ -599,7 +605,7 @@ export async function getConvertAttrs(
   }
 }
 
-/** Batch beatmap lookup (max 50 ids / request) — used for max_combo/SR enrichment. */
+/** Batch beatmap lookup (max 50 ids / request), used for max_combo/SR enrichment. */
 export interface ApiPack {
   tag: string;
   name: string;
@@ -631,7 +637,7 @@ export async function getPackSets(
   return (j.beatmapsets ?? []).map((s) => s.id);
 }
 
-/** One score by its (lazer) id — used to resolve a pasted score link/id. */
+/** One score by its (lazer) id, used to resolve a pasted score link/id. */
 export async function getScoreById(
   id: number,
   priority: Priority = "high"

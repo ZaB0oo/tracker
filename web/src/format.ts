@@ -18,9 +18,9 @@ export const fmtCompact = (n0: number | null | undefined): string => {
 export const displayGrade = (g: string): string =>
   g === "XH" ? "SSH" : g === "X" ? "SS" : g;
 
-/** yyyy/mm/dd from an ISO date string (or "—" when null). */
+/** yyyy/mm/dd from an ISO date string (or "-" when null). */
 export const fmtDate = (iso: string | null | undefined): string =>
-  iso ? iso.slice(0, 10).replace(/-/g, "/") : "—";
+  iso ? iso.slice(0, 10).replace(/-/g, "/") : "-";
 
 /** yyyy/mm/dd HH:mm from an ISO date string. */
 export const fmtDateTime = (iso: string): string => {

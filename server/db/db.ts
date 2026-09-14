@@ -14,6 +14,7 @@ import {
   type MetricParams,
 } from "../logic/metrics.js";
 import { backfillModMultipliers } from "../logic/modMultiplier.js";
+import { RATE_SQL } from "../logic/score.js";
 import { withConvertSource } from "../logic/rulesets.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -81,7 +82,7 @@ let db: DatabaseSync | null = null;
 /**
  * Staged DB import (Settings → Import database): the uploaded file waits as
  * `tracker.db.import` and is swapped in HERE, because this is the only place
- * that opens the database — and it must happen while nothing holds it. Doing it
+ * that opens the database, and it must happen while nothing holds it. Doing it
  * from index.ts could never work: ESM evaluates every import first, and one of
  * them (osu/api.ts reading its rate limit) already opens the database, so the
  * swap hit its own handle (EBUSY on Windows) and the upload was discarded.
@@ -96,13 +97,13 @@ function applyStagedImport(): void {
     for (const ext of ["", "-wal", "-shm"])
       if (fs.existsSync(config.dbPath + ext))
         fs.copyFileSync(config.dbPath + ext, `${config.dbPath}.bak${ext}`);
-    // Order matters: move the LIVE trio aside FIRST — a lock (antivirus,
+    // Order matters: move the LIVE trio aside FIRST, a lock (antivirus,
     // second instance) then aborts with everything intact. The old sequence
     // deleted the live WAL before the rename, so a locked .db lost its
     // uncheckpointed transactions.
     const old = `${config.dbPath}.old`;
     // A leftover .old means a previous attempt died between the two renames:
-    // THAT file is the real database — restore it instead of deleting it.
+    // THAT file is the real database, restore it instead of deleting it.
     if (fs.existsSync(old) && !fs.existsSync(config.dbPath)) {
       for (const ext of ["", "-wal", "-shm"])
         if (fs.existsSync(old + ext)) fs.renameSync(old + ext, config.dbPath + ext);
@@ -136,7 +137,7 @@ function applyStagedImport(): void {
       `[db] staged import applied (previous database saved as ${path.basename(config.dbPath)}.bak)`
     );
   } catch (e) {
-    // The staged file is KEPT: it is the user's upload — possibly gigabytes —
+    // The staged file is KEPT: it is the user's upload, possibly gigabytes,
     // and the usual cause is a lock, not a bad file (the upload already checked
     // the SQLite header), so the swap retries at the next start. Deleting it
     // here forced a full re-upload for a transient lock.
@@ -159,6 +160,19 @@ function applyStagedImport(): void {
   }
 }
 
+/** Checkpoints the WAL into the main file and closes the handle: called on
+ * the desktop app's shutdown message, so -wal/-shm do not linger. */
+export function closeDb(): void {
+  if (!db) return;
+  try {
+    db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+  } catch (e) {
+    console.error("[db] checkpoint on close failed:", e);
+  }
+  db.close();
+  db = null;
+}
+
 export function getDb(): DatabaseSync {
   if (db) return db;
   fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
@@ -176,7 +190,7 @@ export function getDb(): DatabaseSync {
   fresh.exec("PRAGMA cache_size = -65536");
   fresh.exec("PRAGMA temp_store = MEMORY");
   // Tables first, MIGRATIONS, then indexes. The indexes are written against
-  // today's columns, several of which migrate() is the one to add — running
+  // today's columns, several of which migrate() is the one to add, running
   // schema.sql in one go threw on any database older than them, before a
   // single migration had run. The file is plain DDL, one statement per `;`.
   const schema = fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8");
@@ -263,7 +277,7 @@ function migrate(d: DatabaseSync): void {
     d.exec("ALTER TABLE scores ADD COLUMN rate REAL NOT NULL DEFAULT 1.0");
   // Versioned, because the formula gained the ramp mods after the column
   // shipped: bumping the key recomputes every row. SQL twin of computeRate()
-  // in logic/score.ts — the two must stay in sync.
+  // in logic/score.ts, the two must stay in sync.
   const RATE_KEY = "rate_backfill";
   const rateDone = (
     d.prepare("SELECT value FROM sync_state WHERE key = ?").get(RATE_KEY) as
@@ -271,39 +285,7 @@ function migrate(d: DatabaseSync): void {
       | undefined
   )?.value;
   if (rateDone !== "v3") {
-    // ROUND(x * 100) / 100 and NOT ROUND(x, 2): the mean of two rates lands on
-    // a half-cent (0.61 + 0.60 -> 0.605) and the two roundings disagree there,
-    // which would make a re-imported score change bucket.
-    d.exec(`
-      UPDATE scores SET rate = ROUND(100.0 * COALESCE(
-        (SELECT json_extract(je.value, '$.settings.speed_change')
-         FROM json_each(scores.mods) je
-         WHERE json_extract(je.value, '$.settings.speed_change') IS NOT NULL
-         LIMIT 1),
-        -- Wind Up / Wind Down / Adaptive Speed: the rate MOVES over the map,
-        -- so we store the mean of where it starts and where it ends. Adaptive
-        -- Speed has no end (it follows your play): its start is the answer.
-        (SELECT (
-           COALESCE(json_extract(je.value, '$.settings.initial_rate'), 1.0)
-           + COALESCE(
-               json_extract(je.value, '$.settings.final_rate'),
-               CASE json_extract(je.value, '$.acronym')
-                 WHEN 'WU' THEN 1.5
-                 WHEN 'WD' THEN 0.75
-                 ELSE COALESCE(json_extract(je.value, '$.settings.initial_rate'), 1.0)
-               END)
-         ) / 2.0
-         FROM json_each(scores.mods) je
-         WHERE json_extract(je.value, '$.acronym') IN ('WU', 'WD', 'AS')
-         LIMIT 1),
-        (SELECT CASE
-           WHEN json_extract(je.value, '$.acronym') IN ('DT', 'NC') THEN 1.5
-           WHEN json_extract(je.value, '$.acronym') IN ('HT', 'DC') THEN 0.75
-         END
-         FROM json_each(scores.mods) je
-         WHERE json_extract(je.value, '$.acronym') IN ('DT', 'NC', 'HT', 'DC')
-         LIMIT 1),
-        1.0)) / 100.0`);
+    d.exec(`UPDATE scores SET rate = ${RATE_SQL}`);
     d.prepare(
       "INSERT INTO sync_state (key, value) VALUES (?, 'v3') ON CONFLICT(key) DO UPDATE SET value = 'v3'"
     ).run(RATE_KEY);
@@ -311,11 +293,11 @@ function migrate(d: DatabaseSync): void {
   }
   // Country sweep history (see schema.sql). Backfilled from the current check
   // date: maps re-queued before this migration look never-checked once, which
-  // only means they are swept first — and it fixes itself after that pass.
+  // only means they are swept first, and it fixes itself after that pass.
   if (!buCols2.some((c) => c.name === "country_seen_at")) {
     d.exec("ALTER TABLE beatmap_user ADD COLUMN country_seen_at TEXT");
     // Holding a #1 proves a check established it, even when the date was wiped
-    // by a re-queue — and such a map was almost certainly re-queued by the
+    // by a re-queue, and such a map was almost certainly re-queued by the
     // periodic rotation, i.e. checked very recently. Everything still NULL
     // after this really has never been looked at, and goes first.
     d.exec(
@@ -328,7 +310,7 @@ function migrate(d: DatabaseSync): void {
   // Mod multiplier, materialized like `rate`: the column is sorted and shown,
   // and the value is derived from the whole scores table (not from the row),
   // so computing it per query was out of the question. Re-run whenever rows
-  // are still missing one — a combination becomes known as soon as a single
+  // are still missing one, a combination becomes known as soon as a single
   // lazer score uses it.
   // total_score_without_mods materialized out of the raw JSON (see
   // schema.sql). Must exist before the multiplier backfill below reads it.
@@ -341,10 +323,24 @@ function migrate(d: DatabaseSync): void {
   if (!scCols.some((c) => c.name === "mod_multiplier"))
     d.exec("ALTER TABLE scores ADD COLUMN mod_multiplier REAL");
   // locally computed pp for the scores the API leaves at NULL (loved maps,
-  // unranked mod combos) — filled in the background by osu/ppFill.ts.
+  // unranked mod combos), filled in the background by osu/ppFill.ts.
   // -1 marks a score that cannot have one (relax play, unreadable map).
   if (!scCols.some((c) => c.name === "pp_local"))
     d.exec("ALTER TABLE scores ADD COLUMN pp_local REAL");
+  // Versioned like rate: v2 switched the SQL twin to ROUND(x * 10000) / 10000
+  // (bit for bit with the JS side); bumping the key recomputes every row.
+  const MULT_KEY = "mult_backfill";
+  const multDone = (
+    d.prepare("SELECT value FROM sync_state WHERE key = ?").get(MULT_KEY) as
+      | { value: string }
+      | undefined
+  )?.value;
+  if (multDone !== "v2") {
+    d.exec("UPDATE scores SET mod_multiplier = NULL");
+    d.prepare(
+      "INSERT INTO sync_state (key, value) VALUES (?, 'v2') ON CONFLICT(key) DO UPDATE SET value = 'v2'"
+    ).run(MULT_KEY);
+  }
   const missingMult = (
     d.prepare("SELECT COUNT(*) c FROM scores WHERE mod_multiplier IS NULL").get() as {
       c: number;
@@ -441,14 +437,14 @@ function migrate(d: DatabaseSync): void {
 
   // FC follows leaderboard semantics like every other gauge: the flag now says
   // "my BEST is an FC", not "I FC'd this map once". Renamed rather than
-  // re-purposed — `any_fc` holding a best-only value would be a permanent
+  // re-purposed, `any_fc` holding a best-only value would be a permanent
   // trap, and the rename makes SQLite reject any call site left behind.
   // Runs AFTER the two table rebuilds above, which still speak of any_fc.
   const buCols4 = d.prepare("PRAGMA table_info(beatmap_user)").all() as { name: string }[];
   if (buCols4.some((c) => c.name === "any_fc"))
     d.exec("ALTER TABLE beatmap_user RENAME COLUMN any_fc TO best_fc");
   // Versioned: the rename carries the OLD values over, so every row has to be
-  // recomputed once. SQL twin of the UPDATE in refreshBest() — same predicate.
+  // recomputed once. SQL twin of the UPDATE in refreshBest(), same predicate.
   const FC_KEY = "best_fc_backfill";
   const fcDone = (
     d.prepare("SELECT value FROM sync_state WHERE key = ?").get(FC_KEY) as
@@ -536,7 +532,7 @@ function migrate(d: DatabaseSync): void {
     ).run(PP_KEY, PP_DONE);
   }
   // The game never grants pp on loved maps, but local values used to be
-  // computed for them — and the loved aspire monsters carried six-figure
+  // computed for them, and the loved aspire monsters carried six-figure
   // estimates that drowned every pp total. Purge them (the -1 markers too);
   // the backfill no longer touches non-ranked/approved maps, so they stay out.
   const lovedPp = (
@@ -585,21 +581,9 @@ function migrate(d: DatabaseSync): void {
   }
 
   seedDefaultMetrics(d);
-  // Startup repair: the immediate country check after a new score can race
-  // osu!'s leaderboard update and stamp a false "not #1" (and the deferred
-  // confirmation timer does not survive a restart). Re-queue maps whose
-  // country check happened within 15 min of one of my scores — the background
-  // sweep re-checks them shortly after startup. Cheap and idempotent: a map
-  // leaves the window as soon as a check lands 15 min after its last score.
-  d.exec(
-    `UPDATE beatmap_user SET country_checked_at = NULL
-     WHERE country_first = 0 AND played = 1 AND country_checked_at IS NOT NULL
-       AND EXISTS (
-         SELECT 1 FROM scores s
-         WHERE s.beatmap_id = beatmap_user.beatmap_id
-           AND s.ruleset = beatmap_user.ruleset
-           AND datetime(s.ended_at) >= datetime(country_checked_at, '-15 minutes'))`
-  );
+  // (The startup "checked within 15 min of a score" requeue lived here until
+  // v1.35.0; the maintenance tick applies the same rule to both sides 60 s
+  // after startup, so it was a duplicate.)
   // Graveyard/WIP diffs attached to ranked sets may have been imported by
   // older versions: we only keep ranked(1)/approved(2)/loved(4).
   d.exec(
@@ -631,7 +615,7 @@ export function transaction<T>(fn: () => T): T {
 
 /**
  * Rulesets the tracker is following, opted in/out from Settings (each one has
- * real API cost). std can be disabled like the others — its processes stop,
+ * real API cost). std can be disabled like the others, its processes stop,
  * the views stay readable. At least one ruleset is always kept (the settings
  * route enforces it; empty state falls back to std).
  */
@@ -670,7 +654,7 @@ export function sqlIn(rulesets: number[]): string {
 
 /**
  * Rulesets whose CATALOG must be kept up to date: the started ones plus the
- * convert source (see withConvertSource). Catalog only — scores, polling,
+ * convert source (see withConvertSource). Catalog only, scores, polling,
  * sweeps and views stay on getStartedRulesets().
  */
 export function catalogRulesets(): number[] {

@@ -27,7 +27,7 @@ function classicFromStd(stdExpr: string): string {
 }
 
 // n for taiko/catch = the map's BASIC judgement count (what lazer feeds into
-// convertStandardisedToClassic): NOT circles+sliders+spinners — in catch every
+// convertStandardisedToClassic): NOT circles+sliders+spinners, in catch every
 // juice-stream fruit counts, so that would underestimate marathons ~2x
 // (squared in the formula). Exact when a best score exists (sum of the basic
 // keys of maximum_statistics), else max_combo: exact for taiko (combo = hits),
@@ -81,7 +81,7 @@ export function missingExprs(
   const pred =
     mode === "classic" ? classicFromStdRuleset(ruleset, curve) : curve;
   // classic best: when classic_total_score is NULL, CONVERT the standardised
-  // score instead of using it raw — subtracting a ~1M standardised value from
+  // score instead of using it raw, subtracting a ~1M standardised value from
   // a ~20M classic prediction inflated the missing by the whole prediction
   const best =
     mode === "classic"
@@ -107,7 +107,7 @@ function witherMissingSql(): string {
 let missingStamp = "";
 
 // In-memory version of the scores table: a counter bumped by every writer
-// (single-process, so exact), seeded from a DB scan once per restart — that
+// (single-process, so exact), seeded from a DB scan once per restart, that
 // seed still catches offline edits. Nearly every read endpoint calls this,
 // several times per page load and per slider tick.
 let scoresStamp: string | null = null;

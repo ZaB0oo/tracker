@@ -5,6 +5,7 @@ import type { SoloScore } from "../osu/types.js";
 import { packSeedCounts } from "../logic/rulesets.js";
 import { getActiveRulesets, getDb, getStartedRulesets, setState, sqlIn } from "../db/db.js";
 import { isUserConnected } from "../osu/api.js";
+import { isLoopback } from "../guards.js";
 import {
   clearSyncErrors,
   ensureCatalogComplete,
@@ -73,7 +74,7 @@ syncRouter.post("/sync/global-recheck-all", (req, res) => {
 });
 
 // Targeted pp refresh: re-fetches the scores of the top ~250 maps by LOCAL
-// best pp, plus your OFFICIAL top 100 (users/{id}/scores/best) — after a pp
+// best pp, plus your OFFICIAL top 100 (users/{id}/scores/best), after a pp
 // rework the ordering changes, and a map absent from the local top can surge
 // into the official one.
 syncRouter.post("/sync/refresh-top-pp", async (req, res) => {
@@ -195,7 +196,7 @@ syncRouter.post("/sync/start-ruleset/:r", (req, res) => {
 });
 
 // Downloadable seed list: every set with at least one ranked/approved/loved
-// diff, ANY mode — the format of server/db/seed-sets.json, so a complete
+// diff, ANY mode, the format of server/db/seed-sets.json, so a complete
 // catalog (e.g. after a dump verification) can be shipped as the new seed,
 // DMCA/delisted sets included.
 // `{ v: 2, sets: { "<set id>": <packed counts> } }`: how many ranked/approved/
@@ -229,7 +230,7 @@ syncRouter.post("/sync/clear-errors", (_req, res) => {
 
 syncRouter.get("/sync/status", (_req, res) => res.json(getDaemonStatus()));
 
-// osu!std initial sync — the std counterpart of /sync/start-ruleset/:r: nothing
+// osu!std initial sync, the std counterpart of /sync/start-ruleset/:r: nothing
 // runs for std before this either, so a fresh install stays idle until asked.
 syncRouter.post("/sync/start", (req, res) => {
   if (!config.hasCredentials)
@@ -379,12 +380,12 @@ syncRouter.post("/sync/import-any", async (req, res) => {
     if (typeof r === "string") return res.status(404).json({ ok: false, error: r });
     const result = await importSetById(r.setId, { backfillInBackground: true });
     // Plays made while the app was off are gone from the 24 h recent window:
-    // re-fetch my scores on the set's known diffs (best per mod combo — all
+    // re-fetch my scores on the set's known diffs (best per mod combo, all
     // the API exposes). Background, progress in the sync bar.
     void refetchSetScores(r.setId).catch((e) =>
       console.error(`[sync] re-fetch set ${r.setId}:`, e)
     );
-    // A pasted score id was fetched WHOLE: store that exact score directly —
+    // A pasted score id was fetched WHOLE: store that exact score directly,
     // even an old play the per-map endpoint no longer exposes.
     let scoreSaved = false;
     if (r.score && r.score.user_id === config.osuUserId && r.score.passed) {
@@ -425,7 +426,7 @@ syncRouter.post("/sync/import-set/:id", async (req, res) => {
   try {
     const result = await importSetById(id);
     // status verification: how many of the set's diffs actually count
-    // (ranked/approved/loved) — a graveyard set is stored but never enters
+    // (ranked/approved/loved), a graveyard set is stored but never enters
     // any pool, the UI can tell the user right away
     const rows = getDb()
       .prepare(
@@ -558,8 +559,7 @@ syncRouter.post("/sync/repair-catalog", (_req, res) => {
 // Catalog verification against a local data.ppy.sh dump file (see
 // server/sync/dump.ts). Local file path => loopback only, like the DB import.
 syncRouter.post("/sync/verify-dump", (req, res) => {
-  const ip = req.ip ?? "";
-  if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(ip))
+  if (!isLoopback(req))
     return res.status(403).json({ ok: false, error: "local access only" });
   if (!config.hasCredentials)
     return res.status(400).json({ ok: false, error: "osu! API credentials are not set" });

@@ -12,7 +12,7 @@ import { fillSrMods, queueModdedSr } from "./metrics.js";
 export const tableRouter = Router();
 
 /**
- * GET /api/table — the UI's central query (sort/filters on the SQL side, stays
+ * GET /api/table, the UI's central query (sort/filters on the SQL side, stays
  * smooth even with 150k rows; the frontend virtualizes and paginates by offset).
  *
  * Query params:
@@ -134,7 +134,7 @@ function buildFilters(
   // Score of the best, in BOTH units: the mode toggle picks the displayed
   // column, filtering on the other one has to stay possible. Same expression
   // as that column, so what you filter is what you read. Any bound implies a
-  // played map — s is NULL otherwise, and no comparison against NULL is true.
+  // played map, s is NULL otherwise, and no comparison against NULL is true.
   const CLASSIC = "COALESCE(s.classic_total_score, s.total_score)";
   num("classicMin", CLASSIC, ">="); num("classicMax", CLASSIC, "<=");
   num("stdMin", "s.total_score", ">="); num("stdMax", "s.total_score", "<=");
@@ -146,9 +146,9 @@ function buildFilters(
   num("ppMin", PP_SQL, ">="); num("ppMax", PP_SQL, "<=");
   // Maps of one or more metrics (metricMissing=3 or metricMissing=3,7,9): maps
   // matching a metric's MAP conditions whose BEST score does not match its
-  // SCORE conditions — the missing maps (leaderboard semantics, same rule as
+  // SCORE conditions, the missing maps (leaderboard semantics, same rule as
   // the metric evaluation; the inner alias `s` shadows the outer best-score
-  // join on purpose — scoreWhere targets the subquery row).
+  // join on purpose, scoreWhere targets the subquery row).
   //
   // Several ids = UNION: a map is listed as soon as it is left to do for AT
   // LEAST ONE of them ("what is left for these goals"). Each metric keeps its
@@ -175,7 +175,7 @@ function buildFilters(
       // interpolated into SQL below: coerce whatever the stored JSON says
       p = { ...p, ruleset: parseRulesetParam(p.ruleset) };
       // goal-mode countdown (invert): its "matching" maps are the played maps
-      // whose best FAILS the goal — same inverted predicate as the evaluation
+      // whose best FAILS the goal, same inverted predicate as the evaluation
       const inv = p.kind === "count" && p.descending === true && p.invert === true;
       // A countdown metric counts DOWN, so what is left to do is the maps its
       // conditions SELECT, not the ones they miss. Derived here rather than
@@ -257,7 +257,7 @@ function buildFilters(
           break;
         }
         case "pack": {
-          // maps of an official pack, by tag (pack=S100) — needs the pack
+          // maps of an official pack, by tag (pack=S100), needs the pack
           // definitions imported (Dashboard → Packs)
           where.push(
             `EXISTS (SELECT 1 FROM pack_sets ps
@@ -317,13 +317,13 @@ function buildFilters(
   num("accMin", "s.accuracy * 100", ">="); num("accMax", "s.accuracy * 100", "<=");
   // realistic missing, in the displayed unit (missing_classic / missing_lazer),
   // exactly like the Missing column. Unplayed maps carry their full prediction
-  // here, so they DO match a lower bound — that is the point of the column.
+  // here, so they DO match a lower bound, that is the point of the column.
   num("missingMin", missingSql, ">="); num("missingMax", missingSql, "<=");
   // Hit counts of the best score ({"miss":{"max":0},"ok":{"min":1}}), same
   // expressions as the metric conditions (hitCountExpr) so "1x100" means the
   // same thing in both places. hitCountExpr's COALESCE rightly turns an
   // absent key into 0 on a PLAYED map, but would invent a flawless play on an
-  // unplayed one — hence the explicit played guard below.
+  // unplayed one, hence the explicit played guard below.
   if (q.hits) {
     let h: Record<string, { min?: unknown; max?: unknown }> | null = null;
     try {
@@ -345,7 +345,7 @@ function buildFilters(
       }
     }
     // `s` is the best score, and refreshBest only ever picks among passed
-    // scores — so this says "I have a pass here", exactly what the metric
+    // scores, so this says "I have a pass here", exactly what the metric
     // conditions mean with their own `s.passed = 1`.
     if (bounded) where.push("s.id IS NOT NULL");
   }
@@ -478,7 +478,7 @@ tableRouter.get("/map/:id", (req, res) => {
     mods: string;
   })[];
   // rating of the mods played, for the score card (cache misses fill in the
-  // background and show on the next open) — same idiom as the metric preview
+  // background and show on the next open), same idiom as the metric preview
   const cachedSr = db.prepare(
     "SELECT star_rating FROM modded_sr WHERE beatmap_id = ? AND ruleset = ? AND mods = ?"
   );
@@ -495,7 +495,7 @@ tableRouter.get("/map/:id", (req, res) => {
     }
     s.sr_mods = sr;
     // pp the API left empty and the backfill has not reached yet: compute
-    // this one now, the modal is being looked at — ranked/approved maps
+    // this one now, the modal is being looked at, ranked/approved maps
     // only, the game grants no pp elsewhere (loved included)
     const st = (map as { status: number }).status;
     if (s.pp == null && s.pp_local == null && s.passed && (st === 1 || st === 2))
@@ -542,7 +542,7 @@ function osuString(s: string): Buffer {
  * Builds a legacy collection.db buffer with one collection containing every
  * map matching the given /table filters. Maps are keyed by the .osu MD5
  * (beatmaps.checksum): missing checksums are fetched inline (50/req) up to a
- * cap — beyond that, the background enrichment fills them and the user
+ * cap, beyond that, the background enrichment fills them and the user
  * retries. Shared by the file export and the direct lazer import.
  */
 export async function buildCollectionDb(
@@ -623,7 +623,7 @@ export async function buildCollectionDb(
  * import endpoint below, or any external collection tool).
  */
 tableRouter.get("/export-collection", async (req, res) => {
-  // async handler: Express 4 does not catch async throws — without this the
+  // async handler: Express 4 does not catch async throws, without this the
   // request would hang forever instead of answering 500
   try {
     const built = await buildCollectionDb(req.query as Record<string, string | undefined>);

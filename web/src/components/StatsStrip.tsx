@@ -104,7 +104,7 @@ export const StatsStrip = memo(function StatsStrip({
   completion?: { done: number; total: number } | null;
   /** live grade counts of the bests, for the wither XP composite */
   grades?: { grade: string; c: number }[];
-  /** the tracker's ranked classic sum — same number as the hero, the
+  /** the tracker's ranked classic sum, same number as the hero, the
    * profile's own ranked_score drifts from it (different pool) */
   rankedClassic?: number | null;
 }) {
@@ -171,7 +171,7 @@ export const StatsStrip = memo(function StatsStrip({
   const weighted = prefs.estPerf ? st.weightedPp : st.weightedPpOfficial;
   const pct2 = (x: number) => `${x.toFixed(2)}%`;
   const pct1 = (x: number) => `${x.toFixed(1)}%`;
-  // [label, rendered value, raw signature for the change glow] — EVERY tile
+  // [label, rendered value, raw signature for the change glow], EVERY tile
   // animates: fmt does the rounding, so percentages, durations and decimals
   // count up like the integers do
   const tiles: [string, ReactNode | null, unknown?][] = [
@@ -197,7 +197,7 @@ export const StatsStrip = memo(function StatsStrip({
     ],
     ["Play count", ps ? <CountNum v={ps.play_count} /> : null, ps?.play_count],
     ["Play time", ps ? <CountNum v={ps.play_time} fmt={hours} /> : null, ps?.play_time],
-    // the nomod length of every cleared map, counted once — how much of the
+    // the nomod length of every cleared map, counted once, how much of the
     // catalog's runtime has been cleared, regardless of the mods used
     [
       "Clear time",

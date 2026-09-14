@@ -2,7 +2,7 @@ import type { DiscordTemplate } from "./api";
 
 /**
  * Client-side twin of the server's template engine (server/notify/discord.ts,
- * renderTemplate) — keep the two in sync. The editor renders the template
+ * renderTemplate), keep the two in sync. The editor renders the template
  * locally against a sampled score so the preview needs no round-trip.
  */
 export function renderTemplate(tpl: string, vars: Record<string, string>): string {
@@ -47,7 +47,7 @@ export function renderTemplate(tpl: string, vars: Record<string, string>): strin
 
 // ---------------------------------------------------------------- blocks
 // The editor manipulates the template as blocks: lines of segments (joined
-// by « · ») made of chips — a placeholder (bold or not) or free text.
+// by « · ») made of chips, a placeholder (bold or not) or free text.
 
 export type Chip =
   | { kind: "ph"; key: string; bold: boolean; br?: boolean }
@@ -129,7 +129,7 @@ export const PLACEHOLDERS: { key: string; label: string }[] =
   PALETTE_GROUPS.flatMap((g) => g.items);
 
 /** one segment string -> chips ("**[{x}]**", "[{x}]", "**{x}**", "{x}",
- * free text runs) — [{x}] keeps its brackets glued to the value ("[6.73★]") */
+ * free text runs), [{x}] keeps its brackets glued to the value ("[6.73★]") */
 function parseSegment(seg: string): Segment {
   const chips: Segment = [];
   const re = /\*\*\[\{(\w+)\}\]\*\*|\[\{(\w+)\}\]|\*\*\{(\w+)\}\*\*|\{(\w+)\}/g;

@@ -39,7 +39,7 @@ function packState(p: PackRow): "off" | "part" | "done" | "fc" {
   return "off";
 }
 
-/** suffix of the tooltip's last line — nothing for a pack barely started */
+/** suffix of the tooltip's last line, nothing for a pack barely started */
 const STATE_LABELS: Record<ReturnType<typeof packState>, string> = {
   fc: " · full FC",
   done: " · completed",
@@ -47,7 +47,7 @@ const STATE_LABELS: Record<ReturnType<typeof packState>, string> = {
   off: " · untouched",
 };
 const pct = (v: number, total: number) =>
-  total > 0 ? `${((v / total) * 100).toFixed(1)}%` : "—";
+  total > 0 ? `${((v / total) * 100).toFixed(1)}%` : "-";
 
 type SortKey = "map" | "sr" | "grade" | "acc" | "date";
 const GRADE_RANK: Record<string, number> = {
@@ -208,7 +208,7 @@ function PackModal({
                       title="Double-click: open on osu.ppy.sh · right-click: actions"
                     >
                       <td className="pack-td-grade">
-                        {m.grade ? <GradeBadge grade={m.grade} width={34} /> : <span className="dim">—</span>}
+                        {m.grade ? <GradeBadge grade={m.grade} width={34} /> : <span className="dim">-</span>}
                       </td>
                       <td className="pack-td-fc">
                         {m.fc_state != null && m.fc_state <= 1 ? (
@@ -223,13 +223,13 @@ function PackModal({
                         {m.status === 4 && <span className="pack-map-loved"> ♥</span>}
                       </td>
                       <td className="pack-td-date">
-                        {m.ranked_date ? fmtDate(m.ranked_date) : "—"}
+                        {m.ranked_date ? fmtDate(m.ranked_date) : "-"}
                       </td>
                       <td className="pack-td-acc">
                         {m.accuracy != null ? `${(m.accuracy * 100).toFixed(2)}%` : ""}
                       </td>
                       <td className="pack-td-sr">
-                        {m.star_rating != null ? m.star_rating.toFixed(2) : "—"}
+                        {m.star_rating != null ? m.star_rating.toFixed(2) : "-"}
                       </td>
                     </tr>
                   ))}

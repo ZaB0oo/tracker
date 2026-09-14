@@ -11,14 +11,14 @@ import { useEscape } from "../useEscape";
 import { ScoreCard } from "./ScoreCard";
 
 const mmss = (s: number | null) =>
-  s == null ? "—" : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  s == null ? "-" : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
 function modsText(raw: string): string {
   try {
     const m = JSON.parse(raw) as { acronym: string }[];
     return m.length ? m.map((x) => x.acronym).join(" ") : "nomod";
   } catch {
-    return "—";
+    return "-";
   }
 }
 
@@ -153,7 +153,7 @@ export function MapModal({
                 ] as [string, string | number | null | undefined][]
               ).map(([k, v]) => (
                 <span key={k} className="mm-stat">
-                  <b>{k}</b> {v ?? "—"}
+                  <b>{k}</b> {v ?? "-"}
                 </span>
               ))}
               {data.user?.country_first ? (

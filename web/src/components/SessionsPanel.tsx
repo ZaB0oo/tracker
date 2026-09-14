@@ -10,6 +10,7 @@ import {
 } from "../api";
 import { ctxMenuStyle } from "../ctxmenu";
 import { displayGrade, fmtCompact, fmtDate, fmtNum, fmtTime } from "../format";
+import { getLocal } from "../lib/storage";
 import { mapUrl } from "../rulesets";
 import { FC_LABELS, GRADE_ORDER, type PoolMode } from "../types";
 import { GradeBadge } from "./GradeBadge";
@@ -41,7 +42,7 @@ const GRADE_RANK: Record<string, number> = {
   XH: 7, X: 6, SH: 5, S: 4, A: 3, B: 2, C: 1, D: 0,
 };
 
-/** sortable columns of the session's score list — same idiom as the map
+/** sortable columns of the session's score list, same idiom as the map
  * modal's table (click to sort, click again to flip) */
 const SC_COLS: {
   id: string;
@@ -160,7 +161,7 @@ function SessionDetail({
   const ppMaxEst = sc.some((x) => x.pp != null && x.pp === ppMax && x.pp_est === 1);
   const ppCount = sc.filter((x) => x.pp != null).length;
   // breaks: idle time between one play's end and the next one's start
-  // (next end minus its own length), when it exceeds five minutes — the
+  // (next end minus its own length), when it exceeds five minutes, the
   // spans shade the chart behind the dots
   let breaks = 0;
   let breakSec = 0;
@@ -182,15 +183,15 @@ function SessionDetail({
   const tiles: [string, string][] = [
     ["Duration", dur(session.sec)],
     ["Scores", fmtNum(sc.length)],
-    ["New clears", newClears > 0 ? `+${fmtNum(newClears)}` : "—"],
-    ["FC gained", fcGained !== 0 ? `${fcGained > 0 ? "+" : ""}${fmtNum(fcGained)}` : "—"],
-    ["Classic gained", classicGained > 0 ? `+${fmtNum(classicGained)}` : "—"],
-    ["Standardised gained", stdGained > 0 ? `+${fmtNum(stdGained)}` : "—"],
-    ["Total pp", ppCount ? `${fmtNum(Math.round(ppTotal))}pp` : "—"],
-    ["Avg pp", ppCount ? `${Math.round(ppTotal / ppCount)}pp` : "—"],
-    ["Best pp", ppMax != null ? `${ppMaxEst ? "~" : ""}${ppMax.toFixed(2)}pp` : "—"],
+    ["New clears", newClears > 0 ? `+${fmtNum(newClears)}` : "-"],
+    ["FC gained", fcGained !== 0 ? `${fcGained > 0 ? "+" : ""}${fmtNum(fcGained)}` : "-"],
+    ["Classic gained", classicGained > 0 ? `+${fmtNum(classicGained)}` : "-"],
+    ["Standardised gained", stdGained > 0 ? `+${fmtNum(stdGained)}` : "-"],
+    ["Total pp", ppCount ? `${fmtNum(Math.round(ppTotal))}pp` : "-"],
+    ["Avg pp", ppCount ? `${Math.round(ppTotal / ppCount)}pp` : "-"],
+    ["Best pp", ppMax != null ? `${ppMaxEst ? "~" : ""}${ppMax.toFixed(2)}pp` : "-"],
     ["Breaks", breaks > 0 ? `${breaks} · ${dur(breakSec)}` : "none"],
-    ["Longest break", breaks > 0 ? dur(longestBreak) : "—"],
+    ["Longest break", breaks > 0 ? dur(longestBreak) : "-"],
   ];
   return (
     <div className="sess-detail fade-swap" key={session.start}>
@@ -371,7 +372,7 @@ export const SessionsPanel = memo(function SessionsPanel({
 }) {
   // session split, persisted: how long a silence starts a new sitting
   const [gapMin, setGapMinState] = useState(() => {
-    const v = Number(localStorage.getItem("sess-gap"));
+    const v = Number(getLocal("sess-gap"));
     return Number.isFinite(v) && v > 0 ? v : 60;
   });
   const setGapMin = (v: number) => {
@@ -475,10 +476,10 @@ export const SessionsPanel = memo(function SessionsPanel({
               </span>
               <span className="num">{dur(x.sec)}</span>
               <span className="num">{fmtNum(x.plays)}</span>
-              <span className="num">{x.bests > 0 ? fmtNum(x.bests) : "—"}</span>
-              <span className="num">{x.newClears > 0 ? fmtNum(x.newClears) : "—"}</span>
-              <span className="num">{x.classic > 0 ? fmtCompact(x.classic) : "—"}</span>
-              <span className="num">{x.maxPp != null ? `${x.maxPpEst ? "~" : ""}${x.maxPp.toFixed(2)}pp` : "—"}</span>
+              <span className="num">{x.bests > 0 ? fmtNum(x.bests) : "-"}</span>
+              <span className="num">{x.newClears > 0 ? fmtNum(x.newClears) : "-"}</span>
+              <span className="num">{x.classic > 0 ? fmtCompact(x.classic) : "-"}</span>
+              <span className="num">{x.maxPp != null ? `${x.maxPpEst ? "~" : ""}${x.maxPp.toFixed(2)}pp` : "-"}</span>
             </div>
           ))}
           </div>

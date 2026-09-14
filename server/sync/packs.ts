@@ -4,7 +4,7 @@
  * completionist pack pages) computed from YOUR local scores.
  *
  * The definitions are an opt-in one-off import (~1 request per pack, about an
- * hour for the ~3000 packs at the default rate — resumable per pack via
+ * hour for the ~3000 packs at the default rate, resumable per pack via
  * `synced_at`), then a cheap monthly delta keeps them fresh.
  */
 import { getDb } from "../db/db.js";

@@ -4,7 +4,7 @@ import { hasOsuFile, localPp, perfHits } from "./difficulty.js";
 
 /**
  * Background fill of `scores.pp_local`: every passed score the API left at
- * pp NULL (unranked mod combos) gets a locally computed value, newest first —
+ * pp NULL (unranked mod combos) gets a locally computed value, newest first,
  * what the dashboard shows first is filled first. One score at a time, paced
  * so the map downloads stay a slow background trickle (a full catalog of
  * missing files takes hours, and that is fine). Ranked and approved maps
@@ -23,7 +23,7 @@ const IDLE_MS = 10 * 60_000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // Bumped as values land so the caches built on pp (records totals, scatter,
-// sessions, pp metrics) pick fresh fills up — but only every BUMP_EVERY
+// sessions, pp metrics) pick fresh fills up, but only every BUMP_EVERY
 // stores and at the end of a pass, so a running backfill does not force the
 // heavy aggregates to recompute on every request.
 const BUMP_EVERY = 200;

@@ -47,7 +47,7 @@ function Section({
   );
 }
 
-/** default card background — kept in sync with .ov-card in styles.css */
+/** default card background, kept in sync with .ov-card in styles.css */
 const DEFAULT_BG = "#17131f";
 /** 0-100 -> two hex digits, so the colour travels as one #rrggbbaa token */
 const alphaHex = (pct: number) =>

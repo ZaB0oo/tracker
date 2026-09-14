@@ -60,7 +60,7 @@ packsRouter.get("/packs", (req, res) => {
   // per-pack aggregates over the maps of its sets, seen from this mode's
   // pool: total diffs, played, cleared, FC'd (only ranked/approved/loved).
   // Time machine (at): replayed from the stored scores instead of the live
-  // flags. FC is the state of the BEST score made by that date — the same
+  // flags. FC is the state of the BEST score made by that date, the same
   // definition as best_fc and as the pack detail below, so the counter and
   // the rows of the modal cannot disagree.
   const playedCol = at
@@ -125,7 +125,7 @@ packsRouter.get("/packs/:tag", (req, res) => {
     | undefined;
   if (!pack) return res.status(404).json({ error: "unknown pack" });
 
-  // Time machine: the displayed best is the best score MADE BY the date —
+  // Time machine: the displayed best is the best score MADE BY the date,
   // same definition as the live best pointer (refreshBest): highest CLASSIC
   // score, even if its grade is worse.
   const bestJoin = at

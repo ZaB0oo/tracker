@@ -1,6 +1,6 @@
 /**
  * Per-ruleset rules, sourced from ppy/osu (see file references on each item).
- * The API's `rank`, `accuracy` and `statistics` are stored as-is — this module
+ * The API's `rank`, `accuracy` and `statistics` are stored as-is, this module
  * concentrates everything that must be INTERPRETED per ruleset: hit statistic
  * fields, combo/FC semantics and the classic score conversions.
  *
@@ -9,9 +9,9 @@
  * - base (osu/taiko/mania): X at 100% acc, S >= 95, A >= 90, B >= 80, C >= 70
  *   [ScoreProcessor.RankFromScore]
  * - taiko: S/X demoted to A when any miss  [TaikoScoreProcessor]
- * - catch: own cutoffs — X = 100%, S >= 98, A >= 94, B >= 90, C >= 85
+ * - catch: own cutoffs, X = 100%, S >= 98, A >= 94, B >= 90, C >= 85
  *   [CatchScoreProcessor]
- * - mania: S promoted to X when every object is PERFECT or GREAT — an SS does
+ * - mania: S promoted to X when every object is PERFECT or GREAT, an SS does
  *   NOT require 100% accuracy (Perfect = 305 base vs Great = 300)
  *   [ManiaScoreProcessor.RankFromScore]
  */
@@ -116,7 +116,7 @@ export function parseRulesetParam(v: unknown): RulesetId {
  * Mania key count of a map, matching the lazer ManiaBeatmapConverter exactly:
  * mania-specific = max(1, round(CS)); converts follow the CS/OD/special-object
  * ratio rule. C# Math.Round is banker's rounding (x.5 -> nearest EVEN), hence
- * the bank() expression. This is what mania shows as "Keys" instead of CS —
+ * the bank() expression. This is what mania shows as "Keys" instead of CS,
  * a convert's raw circle size means nothing in that mode.
  */
 export function maniaKeysSql(): string {
@@ -154,7 +154,7 @@ export function keysWhere(ruleset: number, keys: string | undefined): string {
 export type PoolMode = "all" | "specific" | "converts";
 
 /**
- * Status list for the dashboard scope (All / Ranked / Loved) — the single
+ * Status list for the dashboard scope (All / Ranked / Loved), the single
  * definition of what each scope counts. Use as `b.status IN ${statusIn(scope)}`.
  */
 export function statusIn(scope: string | undefined): string {
@@ -176,7 +176,7 @@ export function poolWhere(ruleset: number, pool: string | undefined): string {
 /**
  * The rulesets whose CATALOG is needed to serve these started modes: osu! is
  * added as soon as a non-std mode is started, because a convert IS a std
- * beatmap (poolWhere counts `ruleset = 0` in every non-std pool). Catalog only —
+ * beatmap (poolWhere counts `ruleset = 0` in every non-std pool). Catalog only,
  * scores, polling and views stay on the started modes.
  */
 export function withConvertSource(started: number[]): number[] {
@@ -216,7 +216,7 @@ export function packSeedCounts(counts: number[]): number {
 
 /**
  * Does a seed set need an individual lookup? Counts per ruleset on both sides.
- * A tracked mode holding FEWER diffs than the seed promises is a hole — the
+ * A tracked mode holding FEWER diffs than the seed promises is a hole, the
  * v1 bitmask could only say "has at least one diff of that mode", so a set
  * missing 2 of its 5 catch diffs looked complete and was never fetched.
  * Modes we do not track are ignored: no budget spent on them.
@@ -230,12 +230,12 @@ export function seedNeedsLookup(
 }
 
 /**
- * Per-mode growth of the map pools between two poolCounts() snapshots — what
+ * Per-mode growth of the map pools between two poolCounts() snapshots, what
  * the "+N diffs" reports must show. An importer's own `newIds` cannot answer
  * it: they count every new row of every ACTIVE mode whatever the pools hold,
  * so a set full of taiko diffs reads "+200" while no started pool moved.
  * `total` only answers "did anything move" (a std diff grows every mode's pool
- * via the converts, so it double-counts on purpose) — display `label`.
+ * via the converts, so it double-counts on purpose), display `label`.
  */
 export function poolGrowth(
   before: Map<number, number>,

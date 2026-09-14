@@ -2,10 +2,11 @@ import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { Router, type Request } from "express";
+import { Router } from "express";
 import { config } from "../config.js";
 import { getState } from "../db/db.js";
 import { parseCollectionList } from "../logic/collectionList.js";
+import { isLoopback } from "../guards.js";
 import { buildCollectionDb } from "./table.js";
 
 /**
@@ -15,38 +16,15 @@ import { buildCollectionDb } from "./table.js";
  *
  * Security model:
  * - the executable path comes from the environment (LAZER_IMPORTER_PATH) or
- *   from the Settings UI — and changing it via the API is LOOPBACK-ONLY, so a
+ *   from the Settings UI, and changing it via the API is LOOPBACK-ONLY, so a
  *   LAN client can never point the app at an arbitrary program;
  * - execFile with an argument array (no shell → no injection), and the only
  *   variable argument is a temp file path generated server-side;
  * - loopback-only: writing to the local osu! database is not something a
- *   LAN client should ever be able to trigger.
+ *   LAN client should ever be able to trigger;
+ * - cross-origin POSTs are refused globally by apiGuard (server/guards.ts).
  */
 export const lazerRouter = Router();
-
-function isLoopback(req: Request): boolean {
-  const a = req.socket.remoteAddress;
-  return a === "127.0.0.1" || a === "::1" || a === "::ffff:127.0.0.1";
-}
-
-/**
- * Rejects cross-origin browser requests: the API is unauthenticated, so any
- * website can fire "simple" requests at localhost (CSRF) — and this router
- * spawns a process and writes into the lazer realm. Browsers send
- * Sec-Fetch-Site (and Origin on cross-origin requests); requests without
- * them (curl, the Electron shell, the app's own pages) pass.
- */
-function isSameOrigin(req: Request): boolean {
-  const sfs = req.headers["sec-fetch-site"];
-  if (sfs && sfs !== "same-origin" && sfs !== "none") return false;
-  const origin = req.headers.origin;
-  if (!origin) return true;
-  try {
-    return new URL(origin).host === req.headers.host;
-  } catch {
-    return false;
-  }
-}
 
 // single-flight for the collections listing: concurrent requests await the
 // same child process instead of each spawning one (it opens the lazer realm)
@@ -69,7 +47,7 @@ lazerRouter.get("/lazer-import/status", async (req, res) => {
 });
 
 /**
- * GET /api/lazer-import/collections — the collections already in lazer, so the
+ * GET /api/lazer-import/collections, the collections already in lazer, so the
  * UI can offer to add to (or replace) one instead of guessing its name.
  * Listing only READS the realm and happens before the importer's "osu! is
  * running" check, so it works with the game open. Failures are reported in the
@@ -77,7 +55,7 @@ lazerRouter.get("/lazer-import/status", async (req, res) => {
  * "no list", not break the import button.
  */
 lazerRouter.get("/lazer-import/collections", async (req, res) => {
-  if (!isLoopback(req) || !isSameOrigin(req))
+  if (!isLoopback(req))
     return res.status(403).json({ collections: [], error: "local requests only" });
   const exe = await importerPath();
   if (!exe) return res.json({ collections: [], error: "importer not configured" });
@@ -104,11 +82,11 @@ lazerRouter.get("/lazer-import/collections", async (req, res) => {
  * POST /api/lazer-import?name=...&replace=1&<same filters as /table>
  * Builds the collection.db for the current filters and hands it to the
  * importer. Merge by default (nothing is ever deleted in lazer); `replace=1`
- * empties a same-name collection first — lazer keeps the collection itself,
+ * empties a same-name collection first, lazer keeps the collection itself,
  * only its content is swapped.
  */
 lazerRouter.post("/lazer-import", async (req, res) => {
-  if (!isLoopback(req) || !isSameOrigin(req))
+  if (!isLoopback(req))
     return res.status(403).json({ ok: false, error: "local requests only" });
   const exe = await importerPath();
   if (!exe)

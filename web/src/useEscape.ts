@@ -7,7 +7,7 @@ import { useEffect, useRef } from "react";
  *
  * Modals stack (a pack modal opens a map modal), so a plain window listener
  * per modal would close them all at once: handlers on the same target all
- * fire, in registration order. Hence one shared listener over a stack — only
+ * fire, in registration order. Hence one shared listener over a stack, only
  * the top-most (last mounted) handler runs.
  *
  * The stack holds a STABLE token per mount, not the callback: call sites pass

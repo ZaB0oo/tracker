@@ -37,7 +37,7 @@ export function GradeBadge({
   title?: string;
 }) {
   const url = gradeDataUrl(grade);
-  if (!url) return <>—</>;
+  if (!url) return <>-</>;
   return (
     <img
       className="grade-badge"

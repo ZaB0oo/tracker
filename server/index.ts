@@ -4,12 +4,13 @@ import fs from "node:fs";
 import { gzipSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 import { config } from "./config.js";
-import { getDb } from "./db/db.js";
+import { closeDb, getDb } from "./db/db.js";
 import { router } from "./routes.js";
 import { startCatalogRefresh, startPolling } from "./sync/daemon.js";
 import { startPpBackfill } from "./osu/ppFill.js";
 import { startSrBackfill } from "./osu/srFill.js";
 import { getCurrentRpm } from "./osu/api.js";
+import { apiGuard } from "./guards.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -27,6 +28,9 @@ process.on("uncaughtException", (e) => {
 
 const app = express();
 app.use(express.json());
+// Host allowlist + cross-origin refusal on mutating requests (see guards.ts):
+// the API is unauthenticated, this is what keeps a web page out of it.
+app.use("/api", apiGuard);
 // gzip for the JSON payloads (the timeline alone is ~1MB): plain node:zlib
 // instead of a middleware dependency, applied only above a size floor
 app.use("/api", (req, res, next) => {
@@ -55,12 +59,12 @@ if (fs.existsSync(webDist)) {
 }
 
 // Staged DB import (Settings → Import database) is applied by getDb(), the only
-// place that opens the file — this call also creates the schema on first launch.
+// place that opens the file, this call also creates the schema on first launch.
 getDb();
 
 // Startup repair: drop stored scores osu! does not honor (played while the
 // map had no leaderboard) and recompute the affected bests. No-op when clean.
-import { cleanupPreLeaderboardScores, repairZeroComboFc } from "./logic/repo.js";
+import { cleanupPreLeaderboardScores, repairBestPointers, repairZeroComboFc } from "./logic/repo.js";
 const cleaned = cleanupPreLeaderboardScores();
 if (cleaned.deleted > 0)
   console.log(
@@ -72,6 +76,22 @@ if (fcFix.scores > 0)
   console.log(
     `[db] repair: fc_state of ${fcFix.scores} score(s) on ${fcFix.maps} map(s) without a combo reference recomputed`
   );
+// One-shot: best pointers re-selected on the standardised score.
+const bestFix = repairBestPointers();
+if (bestFix > 0) console.log(`[db] repair: best pointer of ${bestFix} map(s) re-selected`);
+
+// Desktop shell shutdown: checkpoint and close the database before exiting,
+// so the -wal/-shm files do not linger (utilityProcess message channel).
+const parentPort = (
+  process as unknown as {
+    parentPort?: { on(ev: "message", cb: (e: { data: unknown }) => void): void };
+  }
+).parentPort;
+parentPort?.on("message", (e) => {
+  if ((e.data as { type?: string } | null)?.type !== "shutdown") return;
+  closeDb();
+  process.exit(0);
+});
 
 // OAuth settings saved from the UI (take priority over .env)
 import { getState } from "./db/db.js";
@@ -114,7 +134,7 @@ server.on("error", (e: NodeJS.ErrnoException) => {
   if (e.code === "EADDRINUSE") {
     // The desktop app keeps its own server on the same port (tray!): without
     // this, the dev web UI silently proxies to the OTHER instance and its
-    // database — very confusing. Fail loudly instead.
+    // database, very confusing. Fail loudly instead.
     console.error(
       `[server] port ${config.port} is already in use: another osu!completionist ` +
         "is running (check the tray icon of the desktop app, or an old dev " +

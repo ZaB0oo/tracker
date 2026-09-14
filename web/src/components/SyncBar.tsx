@@ -250,7 +250,7 @@ export function SyncBar({
           </span>
         </div>
         <span className="sync-poll">
-          last poll: {s.lastPollAt ? fmtTime(s.lastPollAt) : "—"}
+          last poll: {s.lastPollAt ? fmtTime(s.lastPollAt) : "-"}
           {s.lastPollNewScores > 0 && ` (+${s.lastPollNewScores})`}
         </span>
       </div>

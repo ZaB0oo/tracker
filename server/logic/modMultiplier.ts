@@ -4,7 +4,7 @@ import type { DatabaseSync } from "node:sqlite";
  * Standardised mod multiplier of a score.
  *
  * The API exposes it as `total_score_without_mods`, but only on lazer scores
- * that carry mods — most of a long-time player's history has nothing to
+ * that carry mods, most of a long-time player's history has nothing to
  * divide by. Rather than hardcode ppy's multiplier table (it drifts), values
  * are LEARNED from the scores that do carry the field: exact combination
  * first (settings included, a DT 1.35x is not a DT 1.5x), else the product of
@@ -41,7 +41,7 @@ export function buildMultiplierIndex(db: DatabaseSync): MultiplierIndex {
   for (const r of rows) {
     // not a function of the mods alone (Difficulty Adjust & friends): unknown
     if (!(r.hi - r.lo <= SAME)) continue;
-    const value = Math.round(((r.lo + r.hi) / 2) * 10000) / 10000;
+    const value = roundMult((r.lo + r.hi) / 2);
     byCombo.set(r.mods, value);
     const mods = parseMods(r.mods);
     if (mods.length === 1 && mods[0].settings == null && mods[0].acronym)
@@ -82,8 +82,17 @@ export function multiplierFor(
     if (v == null) return null;
     product *= v;
   }
-  return Math.round(product * 10000) / 10000;
+  return roundMult(product);
 }
+
+/** 4-decimal rounding of a multiplier. JS twin of MULT_SQL: ROUND(x * 10000)
+ * / 10000 and NOT ROUND(x, 4), the two disagree on half-way values. */
+export function roundMult(x: number): number {
+  return Math.round(x * 10000) / 10000;
+}
+/** SQL twin of roundMult(total_score / nomod_score), tested in twins.test.ts */
+export const MULT_SQL =
+  "ROUND(10000.0 * CAST(total_score AS REAL) / nomod_score) / 10000.0";
 
 /**
  * Fills scores.mod_multiplier. Called once by the migration and again whenever
@@ -94,8 +103,7 @@ export function backfillModMultipliers(db: DatabaseSync): number {
   // the value the API hands us, wherever it is available
   db.exec(
     `UPDATE scores
-        SET mod_multiplier = ROUND(CAST(total_score AS REAL)
-              / nomod_score, 4)
+        SET mod_multiplier = ${MULT_SQL}
       WHERE mod_multiplier IS NULL
         AND nomod_score > 0`
   );

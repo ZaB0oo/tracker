@@ -49,7 +49,7 @@ export interface DiscordTemplate {
   author: boolean;
 }
 
-/** the built-in layout — exactly the historical rendering */
+/** the built-in layout, exactly the historical rendering */
 export const DEFAULT_TEMPLATE: DiscordTemplate = {
   title: "{new} {artist} - {title} [{diff}] {srb}",
   body: [
@@ -388,7 +388,7 @@ interface WebhookMessage {
   content?: string;
   embeds: Embed[];
   /** what this message is, so per-webhook filters can route it
-   * (undefined: administrative, e.g. a test — goes everywhere) */
+   * (undefined: administrative, e.g. a test, goes everywhere) */
   kind?: MessageKind;
   /** best notifications: the event behind each embed (index-aligned), so a
    * deferred honors confirmation can edit the already-posted message */
@@ -963,7 +963,7 @@ function bestEmbed(e: BestEvent, author: Embed["author"] | undefined): Embed {
 const AUTOMATION = new Set(["RX", "AP", "AT", "CN"]);
 
 /**
- * Local pp for a best the API left at NULL (unranked mod combo) — display
+ * Local pp for a best the API left at NULL (unranked mod combo), display
  * only. A missing .osu file is downloaded (one map per score, serialized,
  * and it lands in the shared cache for the backfill); rosu then computes in
  * a few tens of ms. Anything unavailable just omits the figure.
@@ -991,7 +991,7 @@ async function tryLocalPp(e: BestEvent): Promise<number | null> {
 }
 
 /**
- * The star rating OF THE MODS PLAYED when the event arrived without one —
+ * The star rating OF THE MODS PLAYED when the event arrived without one,
  * showing the nomod rating on a DT play reads plain wrong. Downloads the
  * map file if needed (like the pp estimate) and feeds the shared modded-SR
  * cache, so the table and records benefit from the computation too.
@@ -1030,8 +1030,8 @@ async function fillComputed(e: BestEvent): Promise<void> {
  *
  * Anti-spam: a metric with a tiny step (one point of ranked score...) would
  * otherwise post on every poll tick, so each metric notifies at most once
- * per cooldown window. Crossings inside the window are absorbed (the floor
- * still advances); the next notification simply shows the newest boundary.
+ * per cooldown window. A crossing inside the window keeps its floor stamp
+ * and is retried at the next poll once the window has passed.
  */
 const MILESTONE_COOLDOWN_MS = 30 * 60_000;
 
@@ -1080,7 +1080,7 @@ function bucketLabel(dim: string, bucket: number | string): string {
 
 /**
  * The embed shared by milestone notifications and the progress button: the
- * metric card in Discord form — overall gauge, next milestone and, for count
+ * metric card in Discord form, overall gauge, next milestone and, for count
  * metrics, the per-bucket completion gauges of the card's breakdown.
  */
 function metricEmbed(
@@ -1195,18 +1195,28 @@ export function notifyMetricMilestones(): void {
       // across steps, so an edited step (or a % step drifting as the pool
       // grows) re-baselines silently instead of posting phantom milestones
       const stamp = `${buck}@${step}`;
-      if (stamp !== prevRaw) setState(key, stamp);
-      if (prevRaw == null || prevRaw === "") continue; // baseline, no replay
+      if (stamp === prevRaw) continue;
+      if (prevRaw == null || prevRaw === "") {
+        setState(key, stamp); // baseline, no replay
+        continue;
+      }
       const [prevBuckRaw, prevStepRaw] = prevRaw.split("@");
       const prev = Number(prevBuckRaw);
-      if (!Number.isFinite(prev)) continue;
-      if (prevStepRaw != null && Number(prevStepRaw) !== step) continue;
-      // only the progress direction notifies
-      if (down ? buck >= prev : buck <= prev) continue;
+      const progressed =
+        Number.isFinite(prev) &&
+        (prevStepRaw == null || Number(prevStepRaw) === step) &&
+        (down ? buck < prev : buck > prev);
+      if (!progressed) {
+        setState(key, stamp); // re-baseline: edited step, or a regression
+        continue;
+      }
       const atKey = `metric_notify_at_${r.id}`;
       const lastAt = Date.parse(getState(atKey) ?? "");
       if (Number.isFinite(lastAt) && Date.now() - lastAt < MILESTONE_COOLDOWN_MS)
-        continue; // absorbed: the bucket moved, the next post shows it
+        continue; // absorbed: the stamp stays put, the next poll retries
+      // the stamp advances only when a post is actually enqueued: a crossing
+      // absorbed by the cooldown used to be shown only if a later one came
+      setState(key, stamp);
       setState(atKey, new Date().toISOString());
       enqueue({
         kind: "metric",
@@ -1405,7 +1415,7 @@ async function notifyBestsAsync(events: BestEvent[]): Promise<void> {
  * "Post a random best" button in the settings: a REAL best sampled from the
  * database, sent through the exact same embed pipeline as a live poll
  * notification (modded SR from cache, local pp estimate when official pp is
- * missing, top/country honors) — the fastest way to see the actual render.
+ * missing, top/country honors), the fastest way to see the actual render.
  */
 /** a random REAL best from the database, ready for the embed pipeline.
  * honors = only bests that are country #1 or global top 100 (falls back to

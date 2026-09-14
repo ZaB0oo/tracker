@@ -4,7 +4,7 @@
  * sets that /beatmapsets/search never returns. Fresh installs use this list to
  * import the sets their search enumeration cannot see.
  *
- * Format: { v: 2, sets: { "<set id>": <packed counts> } } — the number of diffs
+ * Format: { v: 2, sets: { "<set id>": <packed counts> } }, the number of diffs
  * per ruleset, 8 bits each (osu!, taiko, catch, mania). Counts, not flags: that
  * is what lets the catch-up spot a set holding SOME of a mode's diffs but not
  * all of them, and skip the modes the user does not track.

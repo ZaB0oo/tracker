@@ -612,7 +612,8 @@ export async function postImportAny(input: string): Promise<{
   error?: string;
   kind?: string;
   setId?: number;
-  newDiffs?: number;
+  /** pool growth label from the server, e.g. "+3 osu! ranked" or "no new map" */
+  added?: string;
   statuses?: Record<string, number>;
 }> {
   const res = await fetch("/api/sync/import-any", {
@@ -875,7 +876,7 @@ export interface PpTopRow {
   title: string;
   /** playback rate of the play (1 or null = nomod speed) */
   rate: number | null;
-  /** mod acronyms (CL included — it affects pp) */
+  /** mod acronyms (CL included, it affects pp) */
   mods_list: string[];
   /** star rating with the play's mods (cached; null until fetched) */
   sr_mods: number | null;
@@ -963,7 +964,7 @@ export interface MetricParams {
   /** count kind (countdown): the conditions select the maps still TO FIX;
    * the count heads to 0, with downward milestones */
   descending?: boolean;
-  /** countdown only: conditions describe the GOAL — counts the played maps
+  /** countdown only: conditions describe the GOAL, counts the played maps
    * whose best does not meet it yet (exact complement of the goal count) */
   invert?: boolean;
   /** optional FINAL goal for the metric's value (e.g. 1T ranked score):
@@ -1203,7 +1204,7 @@ export interface Settings {
   oauth: { clientId: string; userId: number; secretSet: boolean };
   /** path to LazerCollectionImporter.exe ("" = not configured) */
   lazerImporterPath: string;
-  /** tracked rulesets (0 osu — always present —, 1 taiko, 2 catch, 3 mania) */
+  /** tracked rulesets (0 osu, always present, 1 taiko, 2 catch, 3 mania) */
   activeRulesets: number[];
   info: { port: number };
 }

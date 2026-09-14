@@ -105,7 +105,7 @@ function RangeRow({
   );
 }
 
-/** Placeholder formatter matching the slider's step — plain digits, no
+/** Placeholder formatter matching the slider's step, plain digits, no
  * thousands separators (they get cut off and read wrong for years). */
 /** "1T", "500b", "10k", "1000000" -> number (NaN when unreadable) */
 function parseGoal(txt: string): number {
@@ -544,7 +544,7 @@ export function MetricBuilder({
         <>
         <div className="mb-title">On maps matching…</div>
         {/* Same scope controls as the dashboard: which maps of the mode the
-            metric counts. Saved WITH the metric — a metric is a definition,
+            metric counts. Saved WITH the metric, a metric is a definition,
             not a view, so it must not follow whatever the dashboard shows. */}
         <div className="mb-scope">
           {(p.ruleset ?? 0) !== 0 && (

@@ -1,5 +1,6 @@
 import { getDb } from "../db/db.js";
 import {
+  convertAttr,
   mapWhere,
   scoreWhere,
   type MetricBreakdown,
@@ -10,7 +11,7 @@ import { PP_SQL, scoresVersion } from "./scoreSql.js";
 import { ppLocalVersion } from "../osu/ppFill.js";
 
 /**
- * Params come from the HTTP body (preview) or from persisted JSON — never
+ * Params come from the HTTP body (preview) or from persisted JSON, never
  * trust them: `ruleset` is interpolated into SQL everywhere below, so a
  * non-numeric value would be an SQL injection. Coerced to 0-3, always.
  */
@@ -30,17 +31,22 @@ export interface MetricResult {
   pp?: { bonus: number; scoreCount: number };
 }
 
-/** Bucket SQL per breakdown dimension (same buckets as the dashboard). */
-const BUCKETS: Record<MetricBreakdown, { expr: string; notNull: string }> = {
-  sr: { expr: "MIN(CAST(b.star_rating AS INTEGER), 10)", notNull: "b.star_rating" },
-  year: { expr: "strftime('%Y', st.ranked_date)", notNull: "st.ranked_date" },
-  length: { expr: "MIN(CAST(b.total_length / 60 AS INTEGER), 10)", notNull: "b.total_length" },
-  combo: { expr: "MIN(CAST(b.max_combo / 250 AS INTEGER), 10)", notNull: "b.max_combo" },
-  ar: { expr: "MIN(CAST(b.ar AS INTEGER), 10)", notNull: "b.ar" },
-  od: { expr: "MIN(CAST(b.od AS INTEGER), 10)", notNull: "b.od" },
-  cs: { expr: "MIN(CAST(b.cs AS INTEGER), 10)", notNull: "b.cs" },
-  hp: { expr: "MIN(CAST(b.hp AS INTEGER), 10)", notNull: "b.hp" },
-};
+/** Bucket SQL per breakdown dimension (same buckets as the dashboard); SR
+ * and combo read the convert's own values outside std (convertAttr). */
+function buckets(R: number): Record<MetricBreakdown, { expr: string; notNull: string }> {
+  const SR = convertAttr(R, "star_rating");
+  const COMBO = convertAttr(R, "max_combo");
+  return {
+    sr: { expr: `MIN(CAST(${SR} AS INTEGER), 10)`, notNull: SR },
+    year: { expr: "strftime('%Y', st.ranked_date)", notNull: "st.ranked_date" },
+    length: { expr: "MIN(CAST(b.total_length / 60 AS INTEGER), 10)", notNull: "b.total_length" },
+    combo: { expr: `MIN(CAST(${COMBO} / 250 AS INTEGER), 10)`, notNull: COMBO },
+    ar: { expr: "MIN(CAST(b.ar AS INTEGER), 10)", notNull: "b.ar" },
+    od: { expr: "MIN(CAST(b.od AS INTEGER), 10)", notNull: "b.od" },
+    cs: { expr: "MIN(CAST(b.cs AS INTEGER), 10)", notNull: "b.cs" },
+    hp: { expr: "MIN(CAST(b.hp AS INTEGER), 10)", notNull: "b.hp" },
+  };
+}
 
 const RANKED_CLASSIC = "COALESCE(s.classic_total_score, s.total_score)";
 
@@ -101,7 +107,7 @@ function bucketEvolution(
 /**
  * Base FROM/JOIN + WHERE for a metric's conditions.
  * `bestOnly` (count metrics): score conditions are evaluated against the
- * map's BEST score only — leaderboard semantics: a lower score matching the
+ * map's BEST score only, leaderboard semantics: a lower score matching the
  * conditions does not count when the best does not. The ranked-score replay
  * needs every score (successive bests over time), so it opts out.
  */
@@ -122,7 +128,7 @@ function isInverted(p: MetricParams): boolean {
 
 /**
  * Total maps matching the map conditions (denominator for "total" mode).
- * Achievement-based conditions (country #1, global top) are ignored here —
+ * Achievement-based conditions (country #1, global top) are ignored here,
  * same rule as the per-bucket denominators, so a "global top 8" metric reads
  * "my top 8s / every map in the range" instead of a meaningless 100%.
  */
@@ -144,6 +150,7 @@ function countByBucket(p: MetricParams): MetricResult["byBucket"] {
   const db = getDb();
   const base = baseFrom(p, true);
   // hasOwn: "constructor" as breakdown would reach Object.prototype
+  const BUCKETS = buckets(p.ruleset ?? 0);
   const dim = Object.hasOwn(BUCKETS, p.breakdown ?? "sr")
     ? BUCKETS[p.breakdown ?? "sr"]
     : BUCKETS.sr;
@@ -176,7 +183,7 @@ function countByBucket(p: MetricParams): MetricResult["byBucket"] {
 function evalCount(p: MetricParams, gran: "month" | "day"): MetricResult {
   const db = getDb();
   // Replay of successive bests: at any point in time a map counts iff its
-  // best score AT THAT TIME matched the conditions (leaderboard semantics —
+  // best score AT THAT TIME matched the conditions (leaderboard semantics,
   // a map can leave the metric when a higher score with e.g. a worse grade
   // takes over as best). The final state equals the best-only SQL count.
   const rows = db
@@ -230,7 +237,7 @@ function evalCount(p: MetricParams, gran: "month" | "day"): MetricResult {
   };
 }
 
-/** Score-sum metric: cumulative best score per map — classic for
+/** Score-sum metric: cumulative best score per map, classic for
  * "ranked_score", standardised for "std_score" (same replay, the per-map
  * best is identical either way since classic is monotone in standardised). */
 function evalRankedScore(p: MetricParams, gran: "month" | "day"): MetricResult {
@@ -238,7 +245,7 @@ function evalRankedScore(p: MetricParams, gran: "month" | "day"): MetricResult {
   const R = p.ruleset ?? 0;
   const VAL = p.kind === "std_score" ? "s.total_score" : RANKED_CLASSIC;
   // LEADERBOARD SEMANTICS, like the count metrics: a map contributes the
-  // score that actually counts on it — its BEST — and only if that best
+  // score that actually counts on it, its BEST, and only if that best
   // matches the conditions. Summing the best AMONG the matching scores
   // instead would produce a total that no real ranked score ever had (a
   // beaten DT play is not part of your ranked score).
@@ -258,7 +265,7 @@ function evalRankedScore(p: MetricParams, gran: "month" | "day"): MetricResult {
     .all() as { bid: number; at: string; v: number; ord: number; matches: number }[];
   // Replay: track each map's running best, and what it contributes. The
   // total can go DOWN (a new best that fails the conditions replaces one
-  // that passed) — the same rule the count metrics follow. Best detection
+  // that passed), the same rule the count metrics follow. Best detection
   // runs on the standardised score (never NULL, classic is monotone in it).
   const bestVal = new Map<number, number>();
   const contrib = new Map<number, number>();
@@ -285,8 +292,8 @@ function evalRankedScore(p: MetricParams, gran: "month" | "day"): MetricResult {
 }
 
 /**
- * Total-pp metric: the pp of each map's LEADERBOARD BEST — the classic best,
- * the same score the ranked-score sum keeps — summed. NOT the highest pp
+ * Total-pp metric: the pp of each map's LEADERBOARD BEST, the classic best,
+ * the same score the ranked-score sum keeps, summed. NOT the highest pp
  * among the map's scores: a beaten DT play's pp is not part of the total,
  * exactly like its score is not part of the ranked score.
  */
@@ -308,7 +315,7 @@ function evalTotalPp(p: MetricParams, gran: "month" | "day"): MetricResult {
     )
     .all() as { bid: number; at: string; v: number; pp: number | null; matches: number }[];
   // Same replay as the ranked-score metric: each map contributes through its
-  // running classic best — its pp when the best matches the conditions (0
+  // running classic best, its pp when the best matches the conditions (0
   // when the best has no pp, e.g. a loved map), nothing otherwise. The total
   // can go DOWN: a new best with less pp replaces the old best's pp.
   const bestVal = new Map<number, number>();
@@ -337,8 +344,8 @@ function evalTotalPp(p: MetricParams, gran: "month" | "day"): MetricResult {
 
 /**
  * Weighted-pp metric: the official profile rules applied to the matching set.
- * ONE score per map — the HIGHEST pp, regardless of the tracker's classic
- * best —, descending weights 0.95^i, plus the bonus
+ * ONE score per map, the HIGHEST pp, regardless of the tracker's classic
+ * best, descending weights 0.95^i, plus the bonus
  * 416.6667 × (1 − 0.995^min(n, 1000)) (official wiki formula; n = maps with a
  * pp score in the set, max bonus 413.894). Loved maps drop out naturally
  * (their scores have no pp). Successive pp-bests are replayed chronologically
@@ -448,7 +455,7 @@ export function previewMetric(p: MetricParams): {
   }
   const db = getDb();
   if (p.kind === "total_pp") {
-    // pp of the leaderboard best per map, summed — the best-only base is
+    // pp of the leaderboard best per map, summed, the best-only base is
     // exactly that state, no replay needed for the live number
     const v = (
       db

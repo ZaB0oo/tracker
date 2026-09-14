@@ -1,7 +1,7 @@
 /**
  * Time-machine snapshot replay. Pure: consumes the per-map index cached by
  * routes/stats.ts (SQL side) and a date, returns the full /api/snapshot
- * payload. On its own so vitest can load it, like skillCurve.ts — modules
+ * payload. On its own so vitest can load it, like skillCurve.ts, modules
  * importing node:sqlite cannot run under the test runner.
  */
 import { classicFromStandardised } from "./rulesets.js";
@@ -14,7 +14,7 @@ export interface SnapMap {
   rankedDay: string | null; // day the map entered the catalog
   loved: boolean; // status 4 (vs ranked/approved)
   sr: number;
-  /** 0.1★ slice (star_rating * 10, capped) — the skill curve's own bucket */
+  /** 0.1★ slice (star_rating * 10, capped), the skill curve's own bucket */
   q: number;
   /** basic object count, to convert a predicted standardised score to classic */
   n: number;
@@ -119,8 +119,8 @@ export function replaySnapshot(
   const rateAt = new Int8Array(n); // rate*10 of that best, 0 = not played
   const rankAt = new Int32Array(n);
   const c1At = new Uint8Array(n);
-  // The SR fit is ALWAYS computed — the missing estimates are defined against
-  // it — a second, display-only fit is added for any other selected axis.
+  // The SR fit is ALWAYS computed, the missing estimates are defined against
+  // it, a second, display-only fit is added for any other selected axis.
   const dimIdxOf: ((m: SnapMap) => number) | null =
     Object.prototype.hasOwnProperty.call(SNAP_DIM_INDEX, curveDim)
       ? SNAP_DIM_INDEX[curveDim]

@@ -34,7 +34,7 @@ const GRADE_COLORS = [
 ];
 
 /**
- * Accuracy against difficulty, one dot per map (the best score) — the whole
+ * Accuracy against difficulty, one dot per map (the best score), the whole
  * catalog on a canvas, so ~100k dots stay instant. Coloured by grade (or FC
  * state), each legend chip toggling its dots; hovering lists every map under
  * the cursor, clicking opens the nearest one.

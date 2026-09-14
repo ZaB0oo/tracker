@@ -5,7 +5,7 @@ import { fmtNum, fmtTime } from "../format";
 const hm = (iso: string) => fmtTime(iso).slice(0, 5);
 
 /** metrics of the scatter, one score = one dot. Absolute metrics anchor the
- * axis at zero — a tight auto-fit turned tiny wiggles into cliffs. Accuracy
+ * axis at zero, a tight auto-fit turned tiny wiggles into cliffs. Accuracy
  * gets a 95% floor instead (extended only if a play sits below it). */
 const CHART_METRICS: {
   id: string;

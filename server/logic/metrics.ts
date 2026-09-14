@@ -14,7 +14,7 @@ export interface Range {
 
 export interface MetricScoreConds {
   fc: "none" | "any" | "pfc" | "nonfc";
-  minGrade: string | null; // "A" | "S" (legacy — new metrics use `grades`)
+  minGrade: string | null; // "A" | "S" (legacy, new metrics use `grades`)
   /** exact grades the score must have (subset of XH X SH S A B C D) */
   grades?: string[] | null;
   minScore: number | null;
@@ -79,7 +79,7 @@ export interface MetricParams {
   /** count kind (countdown): the conditions select the maps still TO FIX;
    * the count heads to 0, with downward milestones */
   descending?: boolean;
-  /** countdown only: the conditions describe the GOAL instead — the metric
+  /** countdown only: the conditions describe the GOAL instead, the metric
    * counts the PLAYED maps whose best does not meet them yet. The exact
    * complement of the matching count, even when the goal mixes several hit
    * bounds (impossible to express as direct to-fix ranges: it needs an OR). */
@@ -136,7 +136,7 @@ function range(expr: string, r: Range | undefined, out: string[]): void {
 
 /**
  * SQL conditions on a score row (alias `s`).
- * `invert`: passed stays required, everything else is negated — "a (passed)
+ * `invert`: passed stays required, everything else is negated, "a (passed)
  * best that does NOT meet the goal". No condition at all then matches nothing.
  */
 export function scoreWhere(c: MetricScoreConds, invert = false): string {
@@ -204,9 +204,21 @@ export function scoreWhere(c: MetricScoreConds, invert = false): string {
 }
 
 /**
+ * Star rating / max combo of a map AS PLAYED in ruleset R: a std map played
+ * in another mode is a convert with its own values in `convert_attrs`. Same
+ * rule as the dashboard's COALESCE(ca.x, b.x), as a correlated subquery so
+ * every FROM that embeds mapWhere gets it without a join of its own.
+ */
+export function convertAttr(R: number, col: "star_rating" | "max_combo"): string {
+  if (R === 0) return `b.${col}`;
+  return `COALESCE((SELECT ca.${col} FROM convert_attrs ca
+    WHERE ca.beatmap_id = b.id AND ca.ruleset = ${R} AND b.ruleset != ${R}), b.${col})`;
+}
+
+/**
  * SQL conditions on the map (aliases `b`, `st`, `u`).
  * `ignoreCountry1` drops the achievement-based filters (country #1, global
- * top) — used for the per-bucket denominator, so such metrics show
+ * top), used for the per-bucket denominator, so such metrics show
  * "my tops / all maps in the range".
  */
 export function mapWhere(
@@ -231,14 +243,14 @@ export function mapWhere(
     if (num(lo) != null) w.push(`${expr} >= ${num(lo)}`);
     if (num(hi) != null) w.push(`${expr} <= ${num(hi)}`);
   };
-  r("b.star_rating", c.srMin, c.srMax);
+  r(convertAttr(R, "star_rating"), c.srMin, c.srMax);
   r("CAST(strftime('%Y', st.ranked_date) AS INTEGER)", c.yearMin, c.yearMax);
   r("b.total_length", c.lenMin, c.lenMax);
   r("b.ar", c.arMin, c.arMax);
   r("b.od", c.odMin, c.odMax);
   r("b.cs", c.csMin, c.csMax);
   r("b.hp", c.hpMin, c.hpMax);
-  r("b.max_combo", c.comboMin, c.comboMax);
+  r(convertAttr(R, "max_combo"), c.comboMin, c.comboMax);
   r("b.bpm", c.bpmMin, c.bpmMax);
   if (c.country1 && !opts.ignoreCountry1)
     w.push("COALESCE(u.country_first, 0) = 1");

@@ -1,7 +1,7 @@
 import type { ProfileStats } from "./api";
 
 /**
- * "Wither level" — the level rework proposal from ppy/osu#17124 (revised):
+ * "Wither level", the level rework proposal from ppy/osu#17124 (revised):
  * XP is a composite of profile stats (SS x200, S x100, A x50, ranked
  * score /125k, total score /250k, medals x20k, playtime hours x300) and
  * Total XP Required = 5L^3 + 80L^2 + 225L - 310. Inverted exactly by binary

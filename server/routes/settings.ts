@@ -1,4 +1,4 @@
-import express, { Router, type Request } from "express";
+import express, { Router } from "express";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -17,6 +17,7 @@ import {
   getGlobalRecheckHours,
 } from "../sync/daemon.js";
 import { getDisplayPrefs, setDisplayPrefs } from "../prefs.js";
+import { isLoopback } from "../guards.js";
 import {
   getDiscordSettings,
   DEFAULT_TEMPLATE,
@@ -28,15 +29,11 @@ import {
 
 export const settingsRouter = Router();
 
-// Local-only guard for sensitive settings (executable path, DB import): a LAN
-// client must never be able to point the app at an arbitrary program or DB.
-function isLoopback(req: Request): boolean {
-  const a = req.socket.remoteAddress;
-  return a === "127.0.0.1" || a === "::1" || a === "::ffff:127.0.0.1";
-}
-
-// Consistent copy of the DB (VACUUM INTO) downloaded in one click.
-settingsRouter.get("/export-db", (_req, res) => {
+// Consistent copy of the DB (VACUUM INTO) downloaded in one click. Loopback
+// only: the dump carries the OAuth secret, the refresh token and the webhooks.
+settingsRouter.get("/export-db", (req, res) => {
+  if (!isLoopback(req))
+    return res.status(403).json({ ok: false, error: "local access only" });
   const dest = path.join(os.tmpdir(), `tracker-export-${Date.now()}.db`);
   try {
     getDb().exec(`VACUUM INTO '${dest.replaceAll("'", "''")}'`);
@@ -71,7 +68,7 @@ settingsRouter.get("/settings", (_req, res) =>
     globalRecheckHours: getGlobalRecheckHours(),
     display: getDisplayPrefs(),
     discord: { ...getDiscordSettings(), templateDefault: DEFAULT_TEMPLATE },
-    // safe accessors: on a first launch without .env the getters throw —
+    // safe accessors: on a first launch without .env the getters throw,
     // the settings UI is precisely where the values get filled in
     oauth: {
       clientId: safe(() => config.osuClientId, ""),
@@ -158,7 +155,7 @@ settingsRouter.post("/settings", (req, res) => {
       return res
         .status(400)
         .json({ ok: false, error: "at least one ruleset must stay enabled" });
-    // std included: disabling it stops its polling/backfill/sweeps — the
+    // std included: disabling it stops its polling/backfill/sweeps, the
     // views stay readable. Non-std activation only unlocks the views: their
     // processes wait for the per-mode "Start initial sync" button.
     setState("active_rulesets", [...wanted].sort().join(","));
@@ -265,7 +262,7 @@ settingsRouter.post("/settings", (req, res) => {
     setState("poll_interval_seconds", String(Math.round(p)));
     applyPollInterval();
   }
-  // OAuth settings (osu! client + user id) — persisted and applied on the fly.
+  // OAuth settings (osu! client + user id), persisted and applied on the fly.
   let oauthChanged = false;
   if (body.clientId != null && String(body.clientId).trim() !== "") {
     setState("oauth_client_id", String(body.clientId).trim());

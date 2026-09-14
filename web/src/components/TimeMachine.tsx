@@ -5,7 +5,7 @@ import type { TimelinePoint } from "../api";
  * Time machine slider bar. The dashboard owns the timeline data and the
  * selected index: moving the slider rewrites the EXISTING dashboard counters
  * (hero, completion-by-stat panels) and dims the heatmap beyond the chosen
- * date — pure client-side lookups plus one lightweight snapshot request.
+ * date, pure client-side lookups plus one lightweight snapshot request.
  */
 export function TimeMachineBar({
   points,
@@ -18,7 +18,7 @@ export function TimeMachineBar({
 }) {
   const last = Math.max(points.length - 1, 0);
   // CLAMPED: the selected index survives a scope/pool/ruleset switch, and the
-  // new timeline can be much shorter — an out-of-range index used to blow up
+  // new timeline can be much shorter, an out-of-range index used to blow up
   // the whole dashboard (points[i].day on undefined)
   const i = Math.min(Math.max(idx ?? last, 0), last);
   // What is being TYPED in the date field. A controlled input rejected every
@@ -97,7 +97,7 @@ export function TimeMachineBar({
         // an abandoned half-typed date must not stay on screen
         onBlur={() => setDraft(null)}
       />
-      {/* always rendered, and only ever hidden — display:none would give its
+      {/* always rendered, and only ever hidden, display:none would give its
           width back to the slider and shift the thumb on the last tick */}
       <button
         className="tm-now"

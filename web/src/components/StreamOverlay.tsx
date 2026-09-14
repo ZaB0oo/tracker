@@ -71,7 +71,7 @@ export function StreamOverlay() {
     const alpha = raw.length === 8 ? parseInt(raw.slice(6, 8), 16) / 255 : 1;
     // Relative luminance (WCAG): dark text on a light panel, light text on a
     // dark one. Below half opacity the real backdrop is the game, which we
-    // cannot measure — light text stays the safer bet there.
+    // cannot measure, light text stays the safer bet there.
     const lin = rgb
       .map((v) => v / 255)
       .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));

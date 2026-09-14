@@ -193,7 +193,7 @@ statsRouter.get("/stats", (req, res) => {
     )
     .all();
 
-  // Extra completion gauges (PFC / SS / S+), taken from the BEST score only —
+  // Extra completion gauges (PFC / SS / S+), taken from the BEST score only,
   // osu! leaderboard semantics, same as the Grades card: an old SS beaten by a
   // higher non-SS play does not count. top100 comes from the live global rank.
   // mania 1M club: monotone "ever achieved" (a later higher modded best does
@@ -295,7 +295,7 @@ statsRouter.get("/stats", (req, res) => {
 
   // Playback-rate histogram (0.1 buckets, 0.5x-2.0x): the rate of each map's
   // BEST. Unlike the other dimensions a rate is a property of the SCORE, so
-  // "total" has no meaning here — only played/FC/grades do.
+  // "total" has no meaning here, only played/FC/grades do.
   const byRate = db
     .prepare(
       `SELECT MIN(MAX(CAST(s.rate * 10 AS INTEGER), 5), 20) AS bucket,
@@ -395,7 +395,7 @@ function curveDimSql(
 }
 
 /**
- * GET /api/skill-curve — score-curve detail per band of the requested
+ * GET /api/skill-curve, score-curve detail per band of the requested
  * dimension (?dim=sr|ar|od|cs|hp|length|combo|month): median of the bests,
  * number of bests backing it, maps in the band and its realistic missing.
  */
@@ -497,7 +497,7 @@ statsRouter.get("/skill-curve", (req, res) => {
 });
 
 /**
- * GET /api/daily?year=YYYY — clears per day (first qualifying score of each
+ * GET /api/daily?year=YYYY, clears per day (first qualifying score of each
  * map) for the heatmap, plus all-time streak stats. Cheap: one GROUP BY.
  */
 statsRouter.get("/daily", (req, res) => {
@@ -519,7 +519,7 @@ statsRouter.get("/daily", (req, res) => {
     .all() as { d: string; c: number }[];
 
   // The heatmap counts NEW clears, but the streak is about ACTIVITY: any
-  // passed score keeps it alive, replaying an already-cleared map included —
+  // passed score keeps it alive, replaying an already-cleared map included,
   // breaking a streak on a farming day reads as a bug to any player.
   const playedDays = (
     db
@@ -570,9 +570,9 @@ statsRouter.get("/daily", (req, res) => {
 });
 
 /**
- * GET /api/timeline — cumulative daily snapshot of the account: clears / FCs /
+ * GET /api/timeline, cumulative daily snapshot of the account: clears / FCs /
  * country #1s (split all/ranked/loved), ranked classic, and the grade spread
- * (highest grade achieved per map — close to, but not exactly, the live
+ * (highest grade achieved per map, close to, but not exactly, the live
  * "grade of the best score"). One point per active day, whole series shipped
  * at once so the time-machine slider is instant client-side. Cached by scores
  * version.
@@ -619,7 +619,7 @@ statsRouter.get("/timeline", (req, res) => {
   const clearsRanked = firstDates("s.passed = 1 AND b.status IN (1, 2)");
   const clearsLoved = firstDates("s.passed = 1 AND b.status = 4");
   // ranked classic + grade spread + FC: one replay of successive bests. What
-  // is counted is the state OF THE CURRENT BEST (classic) score — the same
+  // is counted is the state OF THE CURRENT BEST (classic) score, the same
   // definition as the dashboard, so an SS later beaten by a higher-scoring S
   // stops counting as SS from that moment on, and an FC beaten by a
   // higher-scoring non-FC stops counting as an FC. Both series can therefore
@@ -703,7 +703,7 @@ statsRouter.get("/timeline", (req, res) => {
 
   // Global-top tiers over time: rank transitions from the events, initial
   // takes (recorded by the sweep without an event) dated at the best score
-  // that earned them — the same approximation the snapshot uses.
+  // that earned them, the same approximation the snapshot uses.
   const gEvents = db
     .prepare(
       `SELECT e.beatmap_id AS bid, e.at, e.new_rank AS rank,
@@ -884,7 +884,7 @@ statsRouter.get("/timeline", (req, res) => {
 });
 
 /**
- * GET /api/snapshot?day=YYYY-MM-DD — per-dimension completion (star rating,
+ * GET /api/snapshot?day=YYYY-MM-DD, per-dimension completion (star rating,
  * rank year, length, combo, AR/OD/CS/HP) at a past date, for the time-machine
  * slider. A per-map index (first clear / first FC / country transitions +
  * bucket attributes) is cached by scores version; each request is then a pure
@@ -921,7 +921,7 @@ function buildSnapshotIndex(
   STATUSES: string
 ): SnapIndex {
   // converts: per-mode SR / max combo when they have been fetched, like the
-  // other views — a convert's osu! star rating means nothing in mania
+  // other views, a convert's osu! star rating means nothing in mania
   const SR = R === 0 ? "b.star_rating" : "COALESCE(ca.star_rating, b.star_rating)";
   const COMBO = R === 0 ? "b.max_combo" : "COALESCE(ca.max_combo, b.max_combo)";
   // same as /stats: mania's "CS" column is its key count
@@ -1021,7 +1021,7 @@ function buildSnapshotIndex(
        FROM country_events WHERE ruleset = ${R} ORDER BY COALESCE(score_at, at)`
     )
     .all() as { bid: number; event: string; at: string }[];
-  // index of a beatmap id in maps[] — the per-date loops then use plain
+  // index of a beatmap id in maps[], the per-date loops then use plain
   // array slots instead of hashing 150k ids three times per request
   const slot = new Map<number, number>();
   for (let i = 0; i < mapIds.length; i++) slot.set(mapIds[i], i);
@@ -1095,7 +1095,7 @@ function buildSnapshotIndex(
 
   // Global leaderboard position over time. The initial sweep records NO event
   // (it would flood the history), so a position with no event is dated at the
-  // best score that earned it — the same approximation the country #1s use.
+  // best score that earned it, the same approximation the country #1s use.
   const gEvents = db
     .prepare(
       `SELECT beatmap_id AS bid, at, new_rank AS rank, old_rank AS old
@@ -1188,7 +1188,7 @@ statsRouter.get("/snapshot", (req, res) => {
 
 // All-time records and averages of the pool, cached by scores version like
 // /stats. While modded-SR lookups are still filling, only the two star
-// records are recomputed per request — the heavy aggregates stay cached.
+// records are recomputed per request, the heavy aggregates stay cached.
 const recordsCache = new Map<
   string,
   { version: string; payload: Record<string, unknown>; srPending: boolean; at: number }
@@ -1199,7 +1199,7 @@ statsRouter.get("/records", (req, res) => {
   const POOL = withKeys(R, req, poolWhere(R, String(req.query.pool ?? "")));
   const STATUSES = statusIn(String(req.query.scope ?? ""));
   // time machine: &day=YYYY-MM-DD computes everything from the scores up to
-  // that day — records over the plays so far, aggregates over the best per
+  // that day, records over the plays so far, aggregates over the best per
   // map AS OF that day (window replay, like the scatter)
   const dayRaw = String(req.query.day ?? "");
   const day = /^\d{4}-\d{2}-\d{2}$/.test(dayRaw) ? dayRaw : null;
@@ -1267,7 +1267,7 @@ statsRouter.get("/records", (req, res) => {
   // competes (an FC later outscored by a non-FC play is still my hardest FC),
   // and the rating is the one OF THE MODS PLAYED (a HR FC is harder than the
   // nomod rating says). The cache only fills lazily: rank the candidates by
-  // an optimistic ceiling (nomod rating times generous mod factors — over-
+  // an optimistic ceiling (nomod rating times generous mod factors, over-
   // estimating only widens the pool), then walk down until even the ceiling
   // cannot beat the best real value seen. Misses are queued in the
   // background; while any is pending the payload is NOT cached, so the 60s
@@ -1346,7 +1346,7 @@ statsRouter.get("/records", (req, res) => {
     )
     .all() as { pp: number }[];
   const weightedPp = weighAll(ppRows);
-  // the same figure from OFFICIAL pp only — what the profile would say if
+  // the same figure from OFFICIAL pp only, what the profile would say if
   // the locally estimated scores (unranked mod combos) did not exist
   const weightedPpOfficial = weighAll(
     db
@@ -1356,7 +1356,7 @@ statsRouter.get("/records", (req, res) => {
       )
       .all() as { pp: number }[]
   );
-  // the total sums the pp of each map's LEADERBOARD BEST — the same rule as
+  // the total sums the pp of each map's LEADERBOARD BEST, the same rule as
   // the total-pp metric, so the tile and the metric can never disagree (a
   // beaten play with more pp counts in neither)
   const ppTotals = db
@@ -1366,7 +1366,7 @@ statsRouter.get("/records", (req, res) => {
          SUM(b.total_length) AS clearLen ${BESTS}`
     )
     .get() as { t: number; n: number; std: number | null; clearLen: number | null };
-  // the whole catalog's runtime in the same pool/scope — the denominator of
+  // the whole catalog's runtime in the same pool/scope, the denominator of
   // the time-based completion (how much content exists vs how much is cleared)
   const catalogTime = (
     db
@@ -1412,7 +1412,7 @@ statsRouter.get("/records", (req, res) => {
            ${ALL}`
         )
         .get() as Record<string, unknown>),
-      // the sum of the BESTS' standardised scores — the same state the hero
+      // the sum of the BESTS' standardised scores, the same state the hero
       // shows, every pass summed would double-count replayed maps
       totalStd: ppTotals.std,
       // clear time: the nomod length of every cleared map, counted once
@@ -1511,7 +1511,7 @@ statsRouter.get("/scatter", (req, res) => {
 });
 
 // Names for a handful of maps at once (scatter hover tooltip: the payload
-// above ships ids only — 100k titles would triple it for nothing).
+// above ships ids only, 100k titles would triple it for nothing).
 statsRouter.get("/map-names", (req, res) => {
   const ids = String(req.query.ids ?? "")
     .split(",")
@@ -1531,7 +1531,7 @@ statsRouter.get("/map-names", (req, res) => {
   res.json({ names });
 });
 
-// Compact stats for the stream overlay (?overlay=1) — polled every 5s,
+// Compact stats for the stream overlay (?overlay=1), polled every 5s,
 // session deltas are computed client-side vs the first response.
 statsRouter.get("/overlay", (req, res) => {
   const R = parseRulesetParam(req.query.ruleset);
