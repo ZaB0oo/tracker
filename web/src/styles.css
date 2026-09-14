@@ -2022,7 +2022,7 @@ body.overlay-body { background: transparent; }
 .dc-msg { display: flex; gap: 16px; }
 .dc-avatar {
   width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0;
-  background: var(--accent) url("/favicon.svg") center/70% no-repeat;
+  background: var(--accent) url("/favicon.png") center/70% no-repeat;
 }
 .dc-msg-main { min-width: 0; flex: 1; }
 .dc-head { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
