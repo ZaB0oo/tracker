@@ -233,6 +233,7 @@ export function isBackfillModePaused(r: number): boolean {
 }
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let deltaTimer: ReturnType<typeof setInterval> | null = null;
+let fastLaneTimer: ReturnType<typeof setInterval> | null = null;
 let enrichCatchupRunning = false;
 let deltaRunning = false;
 let catalogRunning = false;
@@ -1322,7 +1323,7 @@ export function startCatalogRefresh(): void {
                  AND e.event = 'lost' AND e.by_user_id IS NULL
                  AND e.at > datetime('now', '-7 days'))`
         );
-        await runCountryFastLane();
+        await runCountryFastLane().catch((e) => logError(e, "country fast lane"));
         void runCountrySweep();
       }
       if (isGlobalTrackingEnabled()) {
@@ -1349,7 +1350,7 @@ export function startCatalogRefresh(): void {
                AND datetime(s.ended_at) >= datetime('now', '-2 days')
                AND datetime(beatmap_user.global_checked_at) <= datetime(s.ended_at, '+15 minutes'))`
         );
-        await runGlobalFastLane();
+        await runGlobalFastLane().catch((e) => logError(e, "global fast lane"));
         void runGlobalSweep();
       }
       if (!status.backfill.running && !catalogRunning)
@@ -1385,6 +1386,16 @@ export function startCatalogRefresh(): void {
   };
   setTimeout(() => void tick(), 60_000); // 1 min after startup
   deltaTimer = setInterval(() => void tick(), 6 * 3600 * 1000); // re-check every 6h
+  // The fast lanes also run on their OWN half-hour cadence: a fresh play
+  // whose position the API has not computed yet fails its immediate check,
+  // its deferred confirm AND the startup lane, and waiting for the next 6 h
+  // tick to retry read as "my new top never shows up". Cheap when empty.
+  fastLaneTimer = setInterval(() => {
+    if (isUserConnected())
+      void runCountryFastLane().catch((e) => logError(e, "country fast lane"));
+    if (isGlobalTrackingEnabled())
+      void runGlobalFastLane(false).catch((e) => logError(e, "global fast lane"));
+  }, 30 * 60_000);
 }
 
 // ---------- Country leaderboard sweep: my country #1s ----------
@@ -1434,8 +1445,11 @@ function scheduleCountryConfirm(beatmapId: number, ruleset = 0): void {
 /** Country holes: pending checks on maps with a score under 2 days (the
  * deferred confirm dies with a restart, the 15-min requeue feeds this), or
  * requeued after a recent "lost" with no sniper (degraded-fetch signature). */
+let countryLaneBusy = false;
 export async function runCountryFastLane(): Promise<void> {
-  if (!isUserConnected()) return;
+  if (countryLaneBusy || !isUserConnected()) return;
+  countryLaneBusy = true;
+  try {
   const modes = sqlIn(getStartedRulesets()); // sqlIn: "IN ()" is a syntax error
   const rows = getDb()
     .prepare(
@@ -1476,6 +1490,9 @@ export async function runCountryFastLane(): Promise<void> {
       if (isCountryAuthError(e)) break;
     }
   }
+  } finally {
+    countryLaneBusy = false;
+  }
 }
 
 /** Global holes: any played best whose rank is UNKNOWN (null, stamped or
@@ -1483,9 +1500,26 @@ export async function runCountryFastLane(): Promise<void> {
  * failed, a "no position" answer on a map where none was held), plus
  * pending checks on maps with a score under 2 days. A map that durably
  * answers "no position" is retried at worst once per tick, capped. */
-export async function runGlobalFastLane(): Promise<void> {
-  if (!config.hasCredentials) return;
+let globalLaneBusy = false;
+export async function runGlobalFastLane(fullHoles = true): Promise<void> {
+  if (globalLaneBusy || !config.hasCredentials) return;
+  globalLaneBusy = true;
+  try {
   const modes = sqlIn(getStartedRulesets());
+  // `fullHoles` false (the half-hour timer): only the pending checks with a
+  // recent score, i.e. the play the user is waiting for. The stale unknown
+  // ranks stay on the 6 h tick: a map durably answering "no position"
+  // retried every 30 min was three wasted calls a pass, 48 passes a day.
+  const HOLES = fullHoles
+    ? `u.global_rank IS NULL
+           OR (u.global_checked_at IS NULL AND EXISTS (
+             SELECT 1 FROM scores s
+             WHERE s.beatmap_id = u.beatmap_id AND s.ruleset = u.ruleset
+               AND datetime(s.ended_at) >= datetime('now', '-2 days')))`
+    : `u.global_checked_at IS NULL AND EXISTS (
+             SELECT 1 FROM scores s
+             WHERE s.beatmap_id = u.beatmap_id AND s.ruleset = u.ruleset
+               AND datetime(s.ended_at) >= datetime('now', '-2 days'))`;
   const rows = getDb()
     .prepare(
       `SELECT u.beatmap_id AS id, u.ruleset AS r FROM beatmap_user u
@@ -1494,13 +1528,7 @@ export async function runGlobalFastLane(): Promise<void> {
          AND u.ruleset IN (${modes})
          AND (b.ruleset = u.ruleset OR b.ruleset = 0)
          AND b.status IN (1, 2, 4)
-         AND (
-           u.global_rank IS NULL
-           OR (u.global_checked_at IS NULL AND EXISTS (
-             SELECT 1 FROM scores s
-             WHERE s.beatmap_id = u.beatmap_id AND s.ruleset = u.ruleset
-               AND datetime(s.ended_at) >= datetime('now', '-2 days')))
-         )
+         AND (${HOLES})
        LIMIT 100`
     )
     .all() as { id: number; r: number }[];
@@ -1522,6 +1550,9 @@ export async function runGlobalFastLane(): Promise<void> {
     } catch (e) {
       logError(e, `fast-lane global check map ${id}`);
     }
+  }
+  } finally {
+    globalLaneBusy = false;
   }
 }
 

@@ -1191,7 +1191,7 @@ statsRouter.get("/snapshot", (req, res) => {
 // records are recomputed per request — the heavy aggregates stay cached.
 const recordsCache = new Map<
   string,
-  { version: string; payload: Record<string, unknown>; srPending: boolean }
+  { version: string; payload: Record<string, unknown>; srPending: boolean; at: number }
 >();
 
 statsRouter.get("/records", (req, res) => {
@@ -1208,7 +1208,12 @@ statsRouter.get("/records", (req, res) => {
   const version = `${scoresVersion()}|pp${ppLocalVersion()}`;
   const cacheKey = `${R}|${POOL}|${STATUSES}|${day ?? "live"}`;
   const hit = recordsCache.get(cacheKey);
-  if (hit && hit.version === version && !hit.srPending) {
+  // TTL on top of the version: the global sweep moves ranks (the avg
+  // position tile) without bumping the scores version
+  if (
+    hit && hit.version === version && !hit.srPending &&
+    Date.now() - hit.at < 60_000
+  ) {
     recordsCache.delete(cacheKey); // LRU touch
     recordsCache.set(cacheKey, hit);
     return res.json(hit.payload);
@@ -1417,9 +1422,22 @@ statsRouter.get("/records", (req, res) => {
       weightedPp,
       weightedPpOfficial,
       avgPp: ppTotals.n > 0 ? totalPp / ppTotals.n : null,
+      // mean global position over the checked maps of the scope. Live state
+      // only: snapshots replay tier counts, not exact positions, so the
+      // strip hides the tile in the time machine.
+      avgGlobalRank: (
+        db
+          .prepare(
+            `SELECT ROUND(AVG(u.global_rank), 1) v FROM beatmap_user u
+             JOIN beatmaps b ON b.id = u.beatmap_id AND u.ruleset = ${R}
+             WHERE ${POOL} AND b.status IN ${STATUSES}
+               AND u.global_rank IS NOT NULL`
+          )
+          .get() as { v: number | null }
+      ).v,
     },
   };
-  recordsCache.set(cacheKey, { version, payload, srPending });
+  recordsCache.set(cacheKey, { version, payload, srPending, at: Date.now() });
   while (recordsCache.size > 16)
     recordsCache.delete(recordsCache.keys().next().value!);
   res.json(payload);

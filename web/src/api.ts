@@ -121,6 +121,8 @@ export interface Records {
     /** same weighting from official pp only (no local estimates) */
     weightedPpOfficial: number;
     avgPp: number | null;
+    /** mean global position over the scope's checked maps (live only) */
+    avgGlobalRank: number | null;
   };
 }
 

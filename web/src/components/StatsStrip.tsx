@@ -281,6 +281,13 @@ export const StatsStrip = memo(function StatsStrip({
       a.fc,
     ],
     [
+      "Avg global top",
+      !tm && st.avgGlobalRank != null ? (
+        <CountNum v={st.avgGlobalRank} fmt={(x) => `#${fmtNum(Math.round(x))}`} />
+      ) : null,
+      !tm && st.avgGlobalRank != null ? Math.round(st.avgGlobalRank) : undefined,
+    ],
+    [
       "Score per clear",
       a.classic != null && a.clears > 0 ? <CountNum v={a.classic / a.clears} /> : null,
       a.clears > 0 && a.classic != null ? Math.round(a.classic / a.clears) : undefined,

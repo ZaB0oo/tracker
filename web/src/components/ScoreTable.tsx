@@ -240,10 +240,17 @@ export function ScoreTable({
     },
   });
 
-  const rows = useMemo(
-    () => query.data?.pages.flatMap((p) => p.rows) ?? [],
-    [query.data]
-  );
+  const rows = useMemo(() => {
+    const all = query.data?.pages.flatMap((p) => p.rows) ?? [];
+    // Pages are fetched at different moments, and a new best reorders the
+    // table in between: the same map can then land in two pages. The rows
+    // are keyed by beatmap_id, so a duplicate stacked two absolutely
+    // positioned rows into one garbled slot. First occurrence wins.
+    const seen = new Set<number>();
+    return all.filter((r) =>
+      seen.has(r.beatmap_id) ? false : (seen.add(r.beatmap_id), true)
+    );
+  }, [query.data]);
   const total = query.data?.pages[0]?.total ?? 0;
 
   const parentRef = useRef<HTMLDivElement>(null);
