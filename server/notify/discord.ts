@@ -380,7 +380,6 @@ interface Embed {
   url?: string;
   author?: { name: string; icon_url?: string; url?: string };
   image?: { url: string };
-  thumbnail?: { url: string };
   footer?: { text: string };
 }
 
@@ -1327,7 +1326,7 @@ export function notifyCountryFirstLost(
             modeSuffix(ruleset),
           color: SNIPE_RED,
           url: mapUrl(beatmapId),
-          ...(t.cover ? { thumbnail: { url: coverUrl(m.beatmapset_id) } } : {}),
+          ...(t.cover ? { image: { url: coverUrl(m.beatmapset_id) } } : {}),
         },
       ],
     });
@@ -1368,7 +1367,7 @@ export function notifyGlobalTopLost(
           description: `${tierTxt(oldTier, oldRank)} → ${tierTxt(newTier, newRank)}${modeSuffix(ruleset)}`,
           color: TOPLOSS_ORANGE,
           url: mapUrl(beatmapId),
-          ...(t.cover ? { thumbnail: { url: coverUrl(m.beatmapset_id) } } : {}),
+          ...(t.cover ? { image: { url: coverUrl(m.beatmapset_id) } } : {}),
         },
       ],
     });
