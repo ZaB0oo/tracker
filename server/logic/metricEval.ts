@@ -21,7 +21,9 @@ function sanitized(p: MetricParams): MetricParams {
 
 export interface MetricResult {
   count: number;
-  total: number; // maps matching the map conditions (denominator for "total" mode)
+  /** denominator for "total" mode: maps matching the map conditions, or, on
+   * a countdown metric, the highest count the replay ever reached */
+  total: number;
   step: number;
   milestones: { threshold: number; at: string }[];
   evolution: { period: string; value: number }[] | null;
@@ -203,6 +205,7 @@ function evalCount(p: MetricParams, gran: "month" | "day"): MetricResult {
   const best = new Map<number, number>();
   const inSet = new Set<number>();
   let total = 0;
+  let peak = 0;
   const points: { at: string; total: number }[] = [];
   for (const r of rows) {
     const prev = best.get(r.bid) ?? -1;
@@ -214,9 +217,17 @@ function evalCount(p: MetricParams, gran: "month" | "day"): MetricResult {
     if (matches) inSet.add(r.bid);
     else inSet.delete(r.bid);
     total += matches ? 1 : -1;
+    if (total > peak) peak = total;
     points.push({ at: r.at, total });
   }
-  const tot = mapTotal(p);
+  // Countdown ("to fix") metrics: the map pool is NOT the denominator. A map
+  // never played was never to fix, so counting it as done made the bar read
+  // 99% on a list barely started. The honest denominator is the worst the
+  // list has ever been: the peak of the replay, on the current map selection.
+  // Read on `points`, not on `evolution` (bucketed per period, which keeps
+  // the last value of each period and would miss an intra-period peak).
+  const down = p.kind === "count" && p.descending === true;
+  const tot = down ? Math.max(peak, total) : mapTotal(p);
   // percentage steps resolve against the CURRENT map total (a growing
   // catalog shifts the thresholds slightly, which is the honest reading)
   const step =

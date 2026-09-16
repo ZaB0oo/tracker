@@ -227,7 +227,9 @@ export function StreamOverlay() {
                   {m.name} <b>{f(m.count)}</b>
                   {m.total > 0 && (
                     <span className="ov-dim">
-                      {" "}/ {f(m.total)} ({((m.count / m.total) * 100).toFixed(1)}%)
+                      {" "}/ {f(m.total)} (
+                      {(((m.descending === true ? m.total - m.count : m.count) / m.total) * 100).toFixed(1)}
+                      %)
                     </span>
                   )}
                   {m.goal > 0 && (

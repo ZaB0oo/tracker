@@ -206,8 +206,13 @@ function MetricCard({
   let label: string;
   if (totalMode) {
     if (isDesc) {
-      pct = m.total > 0 ? ((m.total - m.count) / m.total) * 100 : 0;
-      label = `${fmtV(m.count)} left / ${fmtV(m.total)} (${pct.toFixed(2)}% done)`;
+      // total = the worst this list has ever been (server side): nothing to
+      // fix and no history means the list was never started, not 0% done
+      pct = m.total > 0 ? ((m.total - m.count) / m.total) * 100 : 100;
+      label =
+        m.total > 0
+          ? `${fmtV(m.count)} left / ${fmtV(m.total)} (${pct.toFixed(2)}% done)`
+          : "0 left, done!";
     } else {
       pct = m.total > 0 ? (m.count / m.total) * 100 : 0;
       label = `${fmtV(m.count)} / ${fmtV(m.total)} (${pct.toFixed(2)}%)`;
