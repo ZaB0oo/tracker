@@ -812,6 +812,8 @@ export interface CountryEvent {
   sr_mods: number | null;
   artist: string;
   title: string;
+  /** "lost" rows: date of the score that took the #1 back (null: not yet) */
+  resniped_at: string | null;
 }
 
 export async function fetchCountryHistory(

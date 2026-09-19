@@ -202,6 +202,11 @@ function CountryList({
                   )
                 : e.by_username ?? "?"
               : ""}
+            {e.event === "lost" && e.resniped_at && (
+              <span className="fr-resniped" title={`#1 taken back on ${fmtDate(e.resniped_at)}`}>
+                {" "}· resniped
+              </span>
+            )}
           </span>
         </div>
       ))}

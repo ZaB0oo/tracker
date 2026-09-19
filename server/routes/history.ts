@@ -119,7 +119,16 @@ historyRouter.get("/country-history", (req, res) => {
   const rows = db
     .prepare(
       `SELECT e.id, e.event, e.at, e.score_at, e.by_user_id, e.by_username,
-        e.beatmap_id, b.version, b.star_rating, st.artist, st.title
+        e.beatmap_id, b.version, b.star_rating, st.artist, st.title,
+        -- a loss taken back later: the first "gained" recorded after it on
+        -- the same map (ids are insertion order), dated by the score that
+        -- retook the #1. Each loss pairs with its own regain, so a map lost
+        -- and retaken twice shows two resnipes.
+        CASE WHEN e.event = 'lost' THEN (
+          SELECT COALESCE(g.score_at, g.at) FROM country_events g
+          WHERE g.beatmap_id = e.beatmap_id AND g.ruleset = e.ruleset
+            AND g.event = 'gained' AND g.id > e.id
+          ORDER BY g.id LIMIT 1) END AS resniped_at
        FROM country_events e
        JOIN beatmaps b ON b.id = e.beatmap_id
        JOIN beatmapsets st ON st.id = b.beatmapset_id
